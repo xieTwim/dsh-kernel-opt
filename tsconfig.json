@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/cordis": ["../test-sha7doww/vendor/cordis/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-tools": ["../test-sha7doww/packages/core/tools/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-session": ["../test-sha7doww/packages/core/session/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-host-webserver": ["../test-sha7doww/packages/host/webserver/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-compaction": ["../test-sha7doww/packages/compaction/compaction/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src/index.ts", "src/projection.ts", "src/wire.ts", "tests"]
+}
