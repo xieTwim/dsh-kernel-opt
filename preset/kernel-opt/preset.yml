@@ -1,0 +1,3 @@
+name: 算子优化模式
+description: GPU kernel 优化 Agent——盘点材料、自组装评测入口（KERNEL_COCKPIT_EVAL 契约）、驾驶舱面板常显示。配合 dsh-kernel-cockpit 插件。
+order: 30

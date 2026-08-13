@@ -177,6 +177,13 @@ export function samePath(a: string, b: string): boolean {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
 }
 
+/**
+ * Id of the bundled「算子优化模式」agent preset the Node half seeds into the
+ * user preset root. Shared constant: sessions composed from this preset id
+ * always show the cockpit tab (before any evaluation lands).
+ */
+export const PRESET_ID = 'kernel-opt'
+
 /** Route the Node half serves and the panel polls (query: `?sessionId=`). */
 export const SERIES_PATH = '/plugins/kernel-cockpit/series'
 

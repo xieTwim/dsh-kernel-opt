@@ -1,7 +1,7 @@
 {
   "name": "@xietwim/dsh-kernel-cockpit",
   "description": "Kernel-optimization cockpit for DeepSeek Harness: live latency curve + run controls + kernel loop with wrap-up + optional second-model supervision (AKO-friendly, works with any bench tool)",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -18,6 +18,7 @@
     "lib",
     "cordis.patch.yml",
     "skills",
+    "preset",
     "README.md"
   ],
   "dsh": {
@@ -41,6 +42,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0 <5",
+    "@deepseek-ai/dsh-agent-presets": ">=0.1.0-rc.2 <0.2",
     "@deepseek-ai/dsh-commands": ">=0.1.0-rc.2 <0.2",
     "@deepseek-ai/dsh-compaction": ">=0.1.0-rc.2 <0.2",
     "@deepseek-ai/dsh-host-webserver": ">=0.1.0-rc.2 <0.2",
@@ -48,8 +50,14 @@
     "@deepseek-ai/dsh-session": ">=0.1.0-rc.2 <0.2",
     "@deepseek-ai/dsh-tools": ">=0.1.0-rc.2 <0.2"
   },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent-presets": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
