@@ -7,7 +7,8 @@
  */
 import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
 import {
-  CONTINUE_TRAILER, LOOP_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+  CONTINUE_TRAILER, EVAL_TRAILER_PREFIX, LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX,
+  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
 } from './wire.ts'
 
 /** Structural slice of a logged session event the projection reads. */
@@ -29,15 +30,23 @@ export interface ProjectionConfig {
   readonly planTool: string
   /** Match list for structured file-change tools (write/edit shapes). */
   readonly changeTools: readonly string[]
+  /**
+   * Match list for shell tools whose results are scanned for the
+   * {@link EVAL_TRAILER_PREFIX} contract line (the self-reported channel).
+   * Background-job readers (`job_output`) are deliberately not defaulted:
+   * polling re-reads would duplicate every trailer they contain.
+   */
+  readonly shellTools: readonly string[]
 }
 
-/** Defaults target the AKO runtime MCP tools plus the host's tool-fs pair. */
+/** Defaults cover any `kernel_evaluate`-named evaluator (MCP prefixes match as suffixes) plus the host's tool-fs pair and shell. */
 export const DEFAULT_PROJECTION: ProjectionConfig = {
   benchTools: ['kernel_evaluate'],
   profileTools: ['kernel_profile'],
-  finalizeTools: ['run_finalize'],
+  finalizeTools: ['run_finalize', 'cockpit_finalize'],
   planTool: 'cockpit_plan',
   changeTools: ['write', 'edit'],
+  shellTools: ['bash'],
 }
 
 /**
@@ -157,6 +166,62 @@ export function parseResultJson(text: string): Record<string, unknown> | null {
   return null
 }
 
+/**
+ * Extract the first balanced JSON object from a text fragment (string- and
+ * escape-aware), tolerating trailing garbage after the object. Returns null
+ * when nothing balanced parses.
+ */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const bounded = text.length > 20_000 ? text.slice(0, 20_000) : text
+  const start = bounded.indexOf('{')
+  if (start < 0) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < bounded.length; i += 1) {
+    const ch = bounded[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (inString) {
+      if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      if (depth === 0) {
+        try {
+          return asRecord(JSON.parse(bounded.slice(start, i + 1)))
+        } catch {
+          return null
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Contract trailer payloads in a shell result text: one per line whose
+ * trimmed form STARTS with {@link EVAL_TRAILER_PREFIX} (mid-line mentions —
+ * prose, docs quoted by `cat` — do not qualify). Trailing garbage after the
+ * JSON object is tolerated.
+ */
+export function trailerPayloads(text: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = []
+  for (const line of text.split('\n')) {
+    const trimmed = line.trimStart()
+    if (!trimmed.startsWith(EVAL_TRAILER_PREFIX)) continue
+    const payload = extractJsonObject(trimmed.slice(EVAL_TRAILER_PREFIX.length))
+    if (payload !== null) out.push(payload)
+  }
+  return out
+}
+
 /** Numeric subset of `native_metrics`, capped so the wire stays small. */
 function numericMetrics(value: unknown, cap = 12): Record<string, number> | undefined {
   const record = asRecord(value)
@@ -201,9 +266,13 @@ function stringList(value: unknown, entryCap = 300, listCap = 8): string[] | und
   return out.length > 0 ? out : undefined
 }
 
-/** Fill one iteration point from a parsed evaluator payload. */
-function fillFromPayload(point: WireIteration, payload: Record<string, unknown>): void {
-  if (typeof payload['evaluation_id'] === 'string') point.evaluationId = payload['evaluation_id']
+/**
+ * Fill one iteration point from a parsed evaluator payload.
+ * `includeEvaluatorId` is false for trailer payloads: on the self-reported
+ * channel identity is the log seq — an agent-relayed id must not become one.
+ */
+function fillFromPayload(point: WireIteration, payload: Record<string, unknown>, includeEvaluatorId = true): void {
+  if (includeEvaluatorId && typeof payload['evaluation_id'] === 'string') point.evaluationId = payload['evaluation_id']
   if (typeof payload['compiled'] === 'boolean') point.compiled = payload['compiled']
   if (typeof payload['correct'] === 'boolean') point.correct = payload['correct']
   const latency = payload['latency_ms']
@@ -238,6 +307,50 @@ function capText(change: WireChange, text: string, cap: number): string {
 /** Whether two logged paths plausibly address the same file. */
 function samePath(a: string, b: string): boolean {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
+}
+
+/** Command-line provenance cap on the wire. */
+const COMMAND_CAP = 300
+
+/** Cap a provenance command line. */
+function capCommand(command: string): string {
+  return command.length > COMMAND_CAP ? `${command.slice(0, COMMAND_CAP)}…` : command
+}
+
+/**
+ * Build an iteration point from one contract trailer payload, or null when
+ * the payload misses the contract's required fields (`artifact` + boolean
+ * `correct`) — near-misses drop rather than render as noise rows.
+ */
+function trailerPoint(
+  seq: number,
+  tool: string,
+  channel: 'shell' | 'replay',
+  payload: Record<string, unknown>,
+): WireIteration | null {
+  const artifact = payload['artifact'] ?? payload['artifact_path']
+  if (typeof artifact !== 'string' || artifact.length === 0) return null
+  if (typeof payload['correct'] !== 'boolean') return null
+  const point: WireIteration = { seq, tool, channel }
+  point.artifactPath = artifact
+  const subset = payload['workload_indices']
+  if (Array.isArray(subset) && subset.every((n): n is number => typeof n === 'number') && subset.length > 0) {
+    point.workloadSubset = subset
+  }
+  fillFromPayload(point, payload, false)
+  return point
+}
+
+/** Provenance command named by a `[cockpit-replay] ` line, when present. */
+function replayCommand(text: string): string | undefined {
+  for (const line of text.split('\n')) {
+    const trimmed = line.trimStart()
+    if (trimmed.startsWith(REPLAY_LINE_PREFIX)) {
+      const command = trimmed.slice(REPLAY_LINE_PREFIX.length).trim()
+      if (command.length > 0) return capCommand(command)
+    }
+  }
+  return undefined
 }
 
 /**
@@ -328,8 +441,14 @@ export function project(
   const profileSeqs: number[] = []
   const rounds: WireRound[] = []
   const finalizedIds = new Set<string>()
+  /** Artifacts named by finalize calls (`artifact_path`), best point gets ⚑. */
+  const finalizedArtifacts: string[] = []
   /** callId → pending bench iteration awaiting its result. */
   const pendingBench = new Map<string, WireIteration>()
+  /** callId → shell-call provenance awaiting its result (trailer scan). */
+  const pendingShell = new Map<string, { name: string; command?: string }>()
+  /** callId → finalize call awaiting its result (a replay trailer may ride it). */
+  const pendingFinalize = new Map<string, { name: string }>()
   /** Structured file changes since the previous bench call, any path. */
   let pendingChanges: { path: string; change: WireChange }[] = []
 
@@ -359,6 +478,9 @@ export function project(
         const args = parseResultJson(call.argumentsJson)
         const id = args?.['evaluation_id']
         if (typeof id === 'string') finalizedIds.add(id)
+        const artifactRaw = args?.['artifact_path'] ?? args?.['artifact']
+        if (typeof artifactRaw === 'string' && artifactRaw.length > 0) finalizedArtifacts.push(artifactRaw)
+        pendingFinalize.set(call.callId, { name: call.name })
         continue
       }
       if (matchesTool(call.name, config.changeTools)) {
@@ -386,23 +508,89 @@ export function project(
         pendingChanges = []
         iterations.push(point)
         pendingBench.set(call.callId, point)
+      } else if (matchesTool(call.name, config.shellTools)) {
+        const args = parseResultJson(call.argumentsJson)
+        const command = args?.['command']
+        pendingShell.set(call.callId, {
+          name: call.name,
+          ...(typeof command === 'string' && command.length > 0 ? { command: capCommand(command) } : {}),
+        })
       }
       continue
     }
 
     const result = resultSlice(event)
     if (result !== null) {
-      const point = pendingBench.get(result.callId)
-      if (point === undefined) continue
-      pendingBench.delete(result.callId)
-      delete point.pending
-      const payload = parseResultJson(collectResultText(result.message))
-      if (payload !== null) fillFromPayload(point, payload)
+      const benchPoint = pendingBench.get(result.callId)
+      if (benchPoint !== undefined) {
+        pendingBench.delete(result.callId)
+        delete benchPoint.pending
+        const payload = parseResultJson(collectResultText(result.message))
+        if (payload !== null) fillFromPayload(benchPoint, payload)
+        continue
+      }
+      const finalize = pendingFinalize.get(result.callId)
+      if (finalize !== undefined) {
+        // A finalize result may carry the plugin's replay output: the replayed
+        // command's trailer becomes the run's verified final measurement.
+        pendingFinalize.delete(result.callId)
+        const text = collectResultText(result.message)
+        if (text.includes(EVAL_TRAILER_PREFIX)) {
+          const command = replayCommand(text)
+          for (const payload of trailerPayloads(text)) {
+            const point = trailerPoint(event.seq, finalize.name, 'replay', payload)
+            if (point === null) continue
+            point.finalized = true
+            if (command !== undefined) point.command = command
+            iterations.push(point)
+          }
+        }
+        continue
+      }
+      const shell = pendingShell.get(result.callId)
+      if (shell !== undefined) {
+        pendingShell.delete(result.callId)
+        const text = collectResultText(result.message)
+        if (!text.includes(EVAL_TRAILER_PREFIX)) continue
+        let consumed = false
+        for (const payload of trailerPayloads(text)) {
+          const point = trailerPoint(event.seq, shell.name, 'shell', payload)
+          if (point === null) continue
+          if (shell.command !== undefined) point.command = shell.command
+          const artifact = point.artifactPath
+          if (artifact !== undefined) {
+            const matched = pendingChanges
+              .filter(entry => samePath(entry.path, artifact))
+              .map(entry => entry.change)
+              .slice(-CHANGES_PER_ITERATION_CAP)
+            if (matched.length > 0) point.changes = matched
+          }
+          iterations.push(point)
+          consumed = true
+        }
+        // Changes attribute to exactly one evaluation: the next one — but a
+        // shell call that carried no evaluation leaves them pending.
+        if (consumed) pendingChanges = []
+      }
     }
   }
 
   for (const point of iterations) {
     if (point.evaluationId !== undefined && finalizedIds.has(point.evaluationId)) point.finalized = true
+  }
+
+  // Artifact-named finalizes (the self-reported channel has no evaluator ids):
+  // the best honest measurement of that artifact carries the ⚑.
+  for (const artifact of finalizedArtifacts) {
+    let best: WireIteration | undefined
+    for (const point of iterations) {
+      if (point.channel === 'replay') continue
+      if (point.artifactPath === undefined || !samePath(point.artifactPath, artifact)) continue
+      if (point.correct !== true || point.rewardHack === true || point.error !== undefined) continue
+      if (point.latencyMs === undefined) continue
+      if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) best = point
+    }
+    if (best !== undefined) best.finalized = true
   }
 
   let bestIndex: number | null = null
