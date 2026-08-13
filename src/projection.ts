@@ -166,6 +166,23 @@ function numericMetrics(value: unknown, cap = 12): Record<string, number> | unde
   return count > 0 ? out : undefined
 }
 
+/**
+ * Speedup vs the reference kernel, from the evaluator's own numbers only: an
+ * explicit `speedup` metric wins; else a `ref_runtime_ms` metric divided by
+ * the measured latency. Returns undefined when the evaluator reported neither.
+ */
+function speedupFrom(metrics: Record<string, number> | undefined, latencyMs: number | undefined): number | undefined {
+  if (metrics === undefined) return undefined
+  for (const [key, value] of Object.entries(metrics)) {
+    if ((key === 'speedup' || key.endsWith('.speedup')) && value > 0) return value
+  }
+  if (latencyMs === undefined || latencyMs <= 0) return undefined
+  for (const [key, value] of Object.entries(metrics)) {
+    if ((key === 'ref_runtime_ms' || key.endsWith('.ref_runtime_ms')) && value > 0) return value / latencyMs
+  }
+  return undefined
+}
+
 /** Fill one iteration point from a parsed evaluator payload. */
 function fillFromPayload(point: WireIteration, payload: Record<string, unknown>): void {
   if (typeof payload['evaluation_id'] === 'string') point.evaluationId = payload['evaluation_id']
@@ -175,6 +192,8 @@ function fillFromPayload(point: WireIteration, payload: Record<string, unknown>)
   if (typeof latency === 'number' && Number.isFinite(latency)) point.latencyMs = latency
   const metrics = numericMetrics(payload['native_metrics'])
   if (metrics !== undefined) point.metrics = metrics
+  const speedup = speedupFrom(metrics, point.latencyMs)
+  if (speedup !== undefined) point.speedup = speedup
   if (payload['reward_hack_detected'] === true) point.rewardHack = true
   if (typeof payload['error'] === 'string' && payload['error'].length > 0) point.error = payload['error']
 }

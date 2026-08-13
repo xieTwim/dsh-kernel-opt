@@ -55,6 +55,7 @@ const zh = {
   'sup.on': '监督 on',
   'sup.off': '监督 off',
   'advice.title': '监督建议',
+  'table.final': '提交',
 } satisfies Record<string, string>
 /** Cockpit locale key union. */
 type CockpitKey = keyof typeof zh
@@ -83,22 +84,27 @@ const en = {
   'sup.on': 'supervisor on',
   'sup.off': 'supervisor off',
   'advice.title': 'Supervisor advice',
+  'table.final': 'final',
 } satisfies Record<string, string>
 
 /** Poll cadence — the panel is a dashboard, not a ticker. */
 const POLL_MS = 1500
 
-/** Palette: official alias tokens with safe fallbacks. */
+/**
+ * Palette: official alias tokens with safe fallbacks. Secondary text rides
+ * primary-dimmed/tertiary (not caption) — caption-tier gray proved too light
+ * against the panel cards in the field.
+ */
 const COLOR = {
   text: 'var(--dsw-alias-label-primary, #1f2329)',
-  dim: 'var(--dsw-alias-label-primary-dimmed, #51565d)',
-  caption: 'var(--dsw-alias-label-caption, #8a9099)',
+  dim: 'var(--dsw-alias-label-primary-dimmed, #3d444d)',
+  caption: 'var(--dsw-alias-label-tertiary, #5a6270)',
   border: 'var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
   tip: 'var(--dsw-specific-tip, rgba(77,107,254,.06))',
   curve: 'var(--dsw-specific-primary, #4d6bfe)',
-  ok: '#2ea56f',
-  bad: '#e5484d',
-  warn: '#e8a13c',
+  ok: '#1f8f5f',
+  bad: '#d93a3f',
+  warn: '#d18a1f',
 }
 
 /** Session-scoped polling hook for the cockpit series. */
@@ -220,10 +226,10 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
       {/* frame + y extremes */}
       <line x1={CHART.l} y1={CHART.t} x2={CHART.l} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       <line x1={CHART.l} y1={CHART.h - CHART.b} x2={CHART.w - CHART.r} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
-      <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={10} fill={COLOR.caption}>{formatLatency(model.max)}</text>
-      <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={10} fill={COLOR.caption}>{formatLatency(model.min)}</text>
+      <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={11} fill={COLOR.dim}>{formatLatency(model.max)}</text>
+      <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={11} fill={COLOR.dim}>{formatLatency(model.min)}</text>
       {model.log
-        ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2} textAnchor="end" fontSize={9} fill={COLOR.caption}>log</text>
+        ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2} textAnchor="end" fontSize={10} fill={COLOR.caption}>log</text>
         : null}
 
       {/* best dashed line */}
@@ -244,7 +250,7 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
 
       {/* curve through measured points */}
       {linePoints.length > 0
-        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.5} opacity={0.75} />
+        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.6} opacity={0.9} />
         : null}
 
       {/* points */}
@@ -269,12 +275,15 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
         const isBest = bestIndex === i
         return (
           <g key={p.seq}>
-            {isBest ? <circle cx={cx} cy={cy} r={7} fill="none" stroke={COLOR.ok} strokeWidth={1.5} opacity={0.9} /> : null}
             {status === 'ok'
               ? <circle cx={cx} cy={cy} r={3.5} fill={color} />
               : <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.8} />}
+            {/* ★ where the best result was FIRST reached; ⚑ on the finalized pick. */}
+            {isBest
+              ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={12} fill={COLOR.ok}>★</text>
+              : null}
             {p.finalized === true
-              ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={11} fill={COLOR.warn}>★</text>
+              ? <text x={cx} y={cy - (isBest ? 20 : 8)} textAnchor="middle" fontSize={11} fill={COLOR.warn}>⚑</text>
               : null}
           </g>
         )
@@ -357,7 +366,12 @@ export function CockpitTab(
           : null}
         <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
         {best?.latencyMs !== undefined
-          ? <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok }}>{t('chips.best', { latency: formatLatency(best.latencyMs) })}</span>
+          ? (
+              <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok, fontWeight: 500 }}>
+                {t('chips.best', { latency: formatLatency(best.latencyMs) })}
+                {best.speedup !== undefined ? ` · ×${best.speedup.toPrecision(3)}` : ''}
+              </span>
+            )
           : null}
         {series !== null && series.profileSeqs.length > 0
           ? <span style={chipStyle}>{t('chips.profiles', { count: series.profileSeqs.length })}</span>
@@ -407,7 +421,7 @@ export function CockpitTab(
                   ? <div style={{ fontSize: 12, color: COLOR.dim }}>{latestPlan.hypothesis}</div>
                   : null}
                 {latestPlan.next !== undefined
-                  ? <div style={{ fontSize: 12, color: COLOR.caption }}>{t('plan.next')} → {latestPlan.next}</div>
+                  ? <div style={{ fontSize: 12, color: COLOR.dim }}>{t('plan.next')} → {latestPlan.next}</div>
                   : null}
               </div>
             )}
@@ -435,26 +449,29 @@ export function CockpitTab(
               <div style={{ maxHeight: 260, overflowY: 'auto' }}>
                 {[...iterations].reverse().map((p) => {
                   const status = statusOf(p)
-                  const index = iterations.indexOf(p) + 1
-                  const ratio = best?.latencyMs !== undefined && p.latencyMs !== undefined && p.latencyMs > 0
-                    ? p.latencyMs / best.latencyMs
-                    : undefined
+                  const idx = iterations.indexOf(p)
+                  const isBest = series !== null && series.bestIndex === idx
                   return (
                     <div key={p.seq} style={{
                       display: 'flex', alignItems: 'center', gap: 10,
                       padding: '4px 14px', fontSize: 12, lineHeight: '20px',
                       borderBottom: `1px solid ${COLOR.border}`,
                     }}>
-                      <span style={{ flex: 'none', width: 28, color: COLOR.caption }}>#{index}</span>
-                      <span style={{ flex: 'none', width: 52, color: COLOR.caption }}>{p.evaluationId ?? '—'}</span>
+                      <span style={{ flex: 'none', width: 28, color: COLOR.caption }}>#{idx + 1}</span>
+                      <span style={{ flex: 'none', width: 52, color: COLOR.dim }}>{p.evaluationId ?? '—'}</span>
                       <span style={{ flex: 'none', width: 86, color: COLOR.text, fontVariantNumeric: 'tabular-nums' }}>
                         {p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}
                       </span>
-                      <span style={{ flex: 'none', width: 64, color: COLOR.dim, fontVariantNumeric: 'tabular-nums' }}>
-                        {ratio !== undefined ? `×${ratio.toPrecision(3)}` : ''}
+                      {/* speedup vs the reference kernel (evaluator-reported) — rises and falls. */}
+                      <span style={{
+                        flex: 'none', width: 64, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
+                        color: isBest ? COLOR.ok : COLOR.dim,
+                      }}>
+                        {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
                       </span>
                       <span style={{ flex: 1 }} />
-                      {p.finalized === true ? <span style={{ flex: 'none', color: COLOR.warn }}>★</span> : null}
+                      {isBest ? <span style={{ flex: 'none', color: COLOR.ok }}>★</span> : null}
+                      {p.finalized === true ? <span style={{ flex: 'none', color: COLOR.warn }}>⚑ {t('table.final')}</span> : null}
                       <span style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}>
                         {t(`status.${status}`)}
                       </span>
@@ -480,7 +497,7 @@ export function apply(ctx: Context): void {
       name: 'conversation.view',
       id: 'kernel-cockpit',
       order: 30,
-      label: '优化驾驶舱',
+      label: '优化看板',
       locale: NS,
     }, CockpitTab))
 }

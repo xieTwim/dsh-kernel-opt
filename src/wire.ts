@@ -18,6 +18,12 @@ export interface WireIteration {
   correct?: boolean
   /** Wall latency in milliseconds; absent when not measured. */
   latencyMs?: number
+  /**
+   * Speedup vs the benchmark's reference kernel, taken from the evaluator's
+   * own numbers (an explicit `speedup` metric, else `ref_runtime_ms` ÷
+   * latency); absent when the evaluator reported neither.
+   */
+  speedup?: number
   /** Numeric extras forwarded from the evaluator (`native_metrics`). */
   metrics?: Record<string, number>
   /** The evaluator flagged a replay / reward-hack detector. */
