@@ -19,8 +19,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // SlotMap merge: conversation.view is declared by the conversation contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from '../wire.ts'
-import { CONTROL_PATH, PRESET_ID, SERIES_PATH, samePath } from '../wire.ts'
+import type { WireChange, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
+import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -55,7 +55,10 @@ const zh = {
   'loop.hint': '/kloop [预算] 启动循环 · /supervise on 开启第二模型监督',
   'sup.on': '监督 on',
   'sup.off': '监督 off',
-  'sup.needCfg': '未配置监督模型:在插件 config 加 supervisor: { provider, model }',
+  'sup.needCfg': '未配置监督模型:下拉选一个,或在插件 config 加 supervisor: { provider, model }',
+  'sup.model': '监督模型',
+  'sup.default': '跟随配置',
+  'sup.pick': '选择监督模型…',
   'ctl.start': '启动循环',
   'ctl.stop': '停止循环',
   'ctl.budget': '评测预算',
@@ -112,7 +115,10 @@ const en = {
   'loop.hint': '/kloop [budget] arms the loop · /supervise on enables the second model',
   'sup.on': 'supervisor on',
   'sup.off': 'supervisor off',
-  'sup.needCfg': 'No supervisor model configured: add supervisor: { provider, model } to the plugin config',
+  'sup.needCfg': 'No supervisor model configured: pick one below, or add supervisor: { provider, model } to the plugin config',
+  'sup.model': 'Supervisor model',
+  'sup.default': 'follow config',
+  'sup.pick': 'pick a supervisor model…',
   'ctl.start': 'Start loop',
   'ctl.stop': 'Stop loop',
   'ctl.budget': 'evaluation budget',
@@ -164,6 +170,26 @@ const COLOR = {
 }
 
 /** Session-scoped polling hook for the cockpit series (+ manual refetch). */
+/** One-shot fetch of the supervisor model catalog (picker options). */
+function useModels(): WireModels | null {
+  const [models, setModels] = useState<WireModels | null>(null)
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const res = await fetch(MODELS_PATH, { headers: { accept: 'application/json' } })
+        if (!res.ok) return
+        const data = (await res.json()) as WireModels
+        if (alive && Array.isArray(data.providers)) setModels(data)
+      } catch {
+        // No catalog: the picker simply stays hidden; /supervise use still works.
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+  return models
+}
+
 function useSeries(sessionId: string): { series: WireSeries | null; refetch: () => void } {
   const [series, setSeries] = useState<WireSeries | null>(null)
   const [tick, setTick] = useState(0)
@@ -447,6 +473,16 @@ const cardStyle: CSSProperties = {
   padding: '10px 14px',
 }
 
+/** Chip-shaped select for the supervisor model picker. */
+const selectStyle: CSSProperties = {
+  ...chipStyle,
+  cursor: 'pointer',
+  background: 'transparent',
+  fontFamily: 'inherit',
+  color: COLOR.dim,
+  maxWidth: 240,
+}
+
 /** Chip-shaped button; accent colors border + text. */
 function buttonStyle(accent?: string): CSSProperties {
   return {
@@ -655,6 +691,7 @@ export function CockpitTab(
 ): ReactNode {
   const { t, sessionId } = props
   const { series, refetch } = useSeries(sessionId)
+  const models = useModels()
   const [budgetDraft, setBudgetDraft] = useState('20')
   const [expandedSeq, setExpandedSeq] = useState<number | null>(null)
 
@@ -749,21 +786,65 @@ export function CockpitTab(
             )
           : null}
         {control !== undefined
-          ? control.supervisor.configured
-            ? (
-                <button
-                  type="button"
-                  style={buttonStyle(control.supervisor.enabled ? COLOR.warn : undefined)}
-                  onClick={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
-                >
-                  {t(control.supervisor.enabled ? 'sup.on' : 'sup.off')}
-                </button>
-              )
-            : (
-                <span style={{ ...chipStyle, color: COLOR.caption }} title={t('sup.needCfg')}>
-                  {t('sup.off')}
-                </span>
-              )
+          ? (
+              <>
+                {control.supervisor.configured
+                  ? (
+                      <button
+                        type="button"
+                        style={buttonStyle(control.supervisor.enabled ? COLOR.warn : undefined)}
+                        title={control.supervisor.effective !== undefined
+                          ? `${control.supervisor.effective.provider}/${control.supervisor.effective.model} (${control.supervisor.effective.source})`
+                          : undefined}
+                        onClick={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
+                      >
+                        {t(control.supervisor.enabled ? 'sup.on' : 'sup.off')}
+                      </button>
+                    )
+                  : (
+                      <span style={{ ...chipStyle, color: COLOR.caption }} title={t('sup.needCfg')}>
+                        {t('sup.off')}
+                      </span>
+                    )}
+                {models !== null && models.providers.length > 0
+                  ? (() => {
+                      const effective = control.supervisor.effective
+                      const overrideValue = effective !== undefined && effective.source === 'session'
+                        ? `${effective.provider}/${effective.model}`
+                        : ''
+                      const known = models.providers.flatMap(p => p.models.map(m => `${p.id}/${m.id}`))
+                      return (
+                        <select
+                          value={overrideValue}
+                          title={t('sup.model')}
+                          style={selectStyle}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            if (value === '') {
+                              void post('supervise-use', { provider: '', model: '' })
+                              return
+                            }
+                            // First slash splits: provider routes carry no
+                            // slash, model ids may (org/model).
+                            const slash = value.indexOf('/')
+                            void post('supervise-use', { provider: value.slice(0, slash), model: value.slice(slash + 1) })
+                          }}
+                        >
+                          <option value="">{t('sup.default')}</option>
+                          {overrideValue !== '' && !known.includes(overrideValue)
+                            ? <option value={overrideValue}>{overrideValue}</option>
+                            : null}
+                          {models.providers.map(provider => provider.models.map(model => (
+                            <option key={`${provider.id}/${model.id}`} value={`${provider.id}/${model.id}`}>
+                              {`${provider.id}/${model.id}`}
+                            </option>
+                          )))}
+                        </select>
+                      )
+                    })()
+                  : null}
+              </>
+            )
           : null}
         <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
         {best?.latencyMs !== undefined
