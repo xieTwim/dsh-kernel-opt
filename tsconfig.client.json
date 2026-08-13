@@ -10,15 +10,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "baseUrl": ".",
-    "paths": {
-      "@deepseek-ai/cordis": ["../test-sha7doww/vendor/cordis/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-slots": ["../test-sha7doww/packages/client/ui-slots/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-runtime/client": ["../test-sha7doww/packages/client/runtime/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-locale/client": ["../test-sha7doww/packages/client/locale/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-conversation/client": ["../test-sha7doww/packages/client/ui-conversation/lib/types/client/index.d.ts"]
-    }
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": ["src/client", "src/wire.ts"]
 }

@@ -47,8 +47,8 @@
 
 ```sh
 dsh plugin --profile web add /path/to/dsh-kernel-cockpit   # 本地目录
-# 或 git 源(pin commit):
-dsh plugin --profile web add "github:<owner>/dsh-kernel-cockpit#<sha>"
+# 或 git 源(pin commit;私有仓库需本机 git 具备 xieTwim 访问权):
+dsh plugin --profile web add "github:xieTwim/dsh-kernel-cockpit#<sha>"
 ```
 
 重启 `dsh web` 生效。验证:
@@ -80,11 +80,11 @@ pnpm install
 pnpm run check        # typecheck(host+client)+ 投影单测 + 双 half 构建
 ```
 
-类型解析走同目录 DSH 快照的 `lib/types`(见 tsconfig `paths`;先在快照仓库 `pnpm install && pnpm run build`)。客户端 external 只允许 loader 平台模块表条目(`PLATFORM_MODULES` + runtime exemption),与官方 `tsdown.client.ts` 合同一致。
+类型直接来自 npm 的 `@deepseek-ai/*` 包(devDependencies,`pnpm install` 后即可 typecheck,无需本地 DSH 源码;需要读实现时看公开仓库 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness))。客户端 external 只允许 loader 平台模块表条目(`PLATFORM_MODULES` + runtime exemption),与官方 `tsdown.client.ts` 合同一致。
 
 ## 兼容基线
 
-rc.2(snapshot `20260812T172954Z`):使用 `ctx.webServer` / `ctx.compaction` / `sessionId` 标准 prop。不兼容 0811 改名前的快照。
+`@deepseek-ai/dsh` **0.1.0-rc.6**(2026-08-13 公开发布构建,npm dist-tag `latest`)。使用 `ctx.webServer` / `ctx.compaction` / `sessionId` 标准 prop,不兼容 2026-08-11 改名(`httpServer→webServer`、`compact→compaction`)之前的版本;peer 范围声明为 `>=0.1.0-rc.2 <0.2`。
 
 ## 已知边界
 

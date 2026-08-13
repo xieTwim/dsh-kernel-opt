@@ -8,4 +8,4 @@
 #   finalizeTools: ['run_finalize']
 - insert:
     - id: kernel-cockpit
-      name: '@xsyshuishui/dsh-kernel-cockpit'
+      name: '@xietwim/dsh-kernel-cockpit'
