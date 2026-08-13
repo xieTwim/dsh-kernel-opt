@@ -36,7 +36,7 @@
   "scripts": {
     "build": "tsdown --config ./tsdown.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "test": "node --experimental-strip-types --test tests/projection.test.ts",
+    "test": "node --experimental-strip-types --test tests/projection.test.ts tests/loop.test.ts",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "devDependencies": {
