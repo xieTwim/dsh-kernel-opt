@@ -92,5 +92,5 @@ rc.2(snapshot `20260812T172954Z`):使用 `ctx.webServer` / `ctx.compaction` / `s
 - 评测结果必须是 tool result 文本里可解析出的 JSON 对象;纯文本结果会显示为"未测得"行。
 - `self_compact` 的压缩范围由官方 compaction backend 决定(保留尾部策略等均为 backend 配置)。
 - Tab 的按需出现由 client watcher 轮询判定(会话切换/首个信号后 ≤3s 出现);正在显示的 Tab 因切到无关会话消失时,视图自动回退到第一个 Tab。
-- "该轮改动"只捕捉**结构化** `write`/`edit` 调用;模型经 bash(heredoc 等)写文件不会被提取,展开行会如实标注,不做猜测。
+- "本轮改动"区块只在捕捉到**结构化** `write`/`edit` 调用时出现;模型经 bash(heredoc 等)写文件的轮次不显示该区块(不提取、不猜测、不放占位行)。
 - kernel 源码本体不进面板(评测调用只带 `artifact_path`):完整源码在 AKO RunBundle(每次评测已存 artifact 字节),归观察站/后续平台上传功能。
