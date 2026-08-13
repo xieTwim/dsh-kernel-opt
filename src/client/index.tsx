@@ -76,7 +76,6 @@ const zh = {
   'row.subset': '工作负载子集',
   'row.evaluatorFailed': '评测器故障(不构成对 kernel 的判定)',
   'row.changes': '本轮改动',
-  'row.noChanges': '未捕捉到对 artifact 的结构化写入(可能经 bash 写入)。',
   'row.write': '整文件写入',
   'row.edit': '替换',
   'row.truncated': '(已截断)',
@@ -130,7 +129,6 @@ const en = {
   'row.subset': 'Workload subset',
   'row.evaluatorFailed': 'Evaluator failed (not a verdict on the kernel)',
   'row.changes': 'Changes this round',
-  'row.noChanges': 'No structured artifact writes captured (possibly written via bash).',
   'row.write': 'full write',
   'row.edit': 'edit',
   'row.truncated': '(truncated)',
@@ -616,12 +614,16 @@ function IterationDetail(props: {
             </div>
           )
         : null}
-      <div>
-        <div style={sectionLabel}>{t('row.changes')}</div>
-        {point.changes === undefined
-          ? <div style={{ fontSize: 12, color: COLOR.caption }}>{t('row.noChanges')}</div>
-          : point.changes.map(change => <ChangeBlock key={change.seq} change={change} t={t} />)}
-      </div>
+      {/* Only when structured write/edit calls were captured — a bash-written
+          round shows no section rather than a permanent placeholder. */}
+      {point.changes !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.changes')}</div>
+              {point.changes.map(change => <ChangeBlock key={change.seq} change={change} t={t} />)}
+            </div>
+          )
+        : null}
     </div>
   )
 }
