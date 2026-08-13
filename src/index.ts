@@ -37,7 +37,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-commands'
-import { DEFAULT_PROJECTION, project } from './projection.ts'
+import { DEFAULT_PROJECTION, hasUserTask, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
@@ -266,14 +266,24 @@ export function apply(ctx: Context, config: Config = {}): void {
    */
   const bridge: { arm?: (sessionId: string, budget: number) => void } = {}
 
-  /** Disarm a session's loop by human decision (no wrap-up round). */
+  /**
+   * Disarm a session's loop by human decision (no wrap-up round), and abort
+   * the in-flight turn: a human pressing stop means stop NOW, not "after the
+   * model finishes what it is doing". Queued human messages survive the
+   * cancel; an idle agent makes it a no-op.
+   */
   const stopLoop = (sessionId: string): boolean => {
     const state = loops.get(sessionId)
     if (state === undefined || !state.armed) return false
     state.armed = false
     state.stopReason = 'stopped'
+    ctx.agents.get(SessionId(sessionId))?.cancel({ kind: 'user' }, { keepInbox: true })
     return true
   }
+
+  /** Arming-gate refusal text, shared by /kloop and the control route. */
+  const NEEDS_TASK = 'The kernel loop needs a task first: tell the agent which kernel to optimize '
+    + 'and how to evaluate it, then arm the loop.'
 
   /**
    * The supervisor route reviews would use for a session: the session
@@ -496,9 +506,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       state.lastEvalCount = decision.evalsDone
       const { advice, reviewed } = await review(sessionId, state)
       state.lastAdvice = advice ?? state.lastAdvice
-      // Re-check idleness after the (possibly slow) review; a human message
-      // that arrived meanwhile owns the session.
-      if (lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
+      // Re-check idleness and armed state after the (possibly slow) review; a
+      // human message or stop that arrived meanwhile owns the session.
+      if (!state.armed || lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
       agent.followup(createUserMessage({
         content: [{
           type: 'text',
@@ -541,6 +551,13 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (event.type !== 'turn/end') return
       const state = loops.get(session.id)
       if (state === undefined || !state.armed) return
+      // A cancelled turn is a stop order (human stop button, host teardown):
+      // the loop disarms instead of re-driving over it. Re-arm to resume.
+      if (event.data.reason.kind === 'aborted') {
+        state.armed = false
+        state.stopReason = 'stopped'
+        return
+      }
       scheduleCheckpoint(session.id, SETTLE_DELAY_MS)
     })
 
@@ -568,6 +585,13 @@ export function apply(ctx: Context, config: Config = {}): void {
             text: state.armed
               ? `armed: round ${String(state.round)}, budget ${String(state.budget)}, supervisor ${supervise}.`
               : `not armed${state.stopReason !== undefined ? ` (last stop: ${state.stopReason})` : ''}; supervisor ${supervise}. Usage: /kloop [budget]`,
+          }
+        }
+        {
+          // Arming gate: no human task in the log means nothing to continue.
+          const session = lctx.sessions.get(SessionId(sessionId))
+          if (session === undefined || !hasUserTask(session.events)) {
+            return { kind: 'error', text: NEEDS_TASK }
           }
         }
         armLoop(sessionId, raw === '' ? defaultBudget : Number(raw))
@@ -662,7 +686,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // loop state as the slash commands. register() returns the route disposer,
   // so each registration rides an effect.
   ctx.inject(['webServer'], (wctx) => {
-    const buildControl = (sessionId: string, series: WireSeries): WireControl => {
+    const buildControl = (sessionId: string, series: WireSeries, taskReady: boolean): WireControl => {
       const state = loops.get(sessionId)
       return {
         loop: {
@@ -671,6 +695,8 @@ export function apply(ctx: Context, config: Config = {}): void {
           round: state?.round ?? 0,
           evalsDone: completedEvals(series),
           available: bridge.arm !== undefined,
+          taskReady,
+          defaultBudget,
           ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
         },
         supervisor: {
@@ -706,7 +732,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             return
           }
           const series = project(rawId, session.events, projection)
-          respond(200, { ...series, control: buildControl(rawId, series) })
+          respond(200, { ...series, control: buildControl(rawId, series, hasUserTask(session.events)) })
         } catch (error) {
           respond(500, { error: error instanceof Error ? error.message : String(error) })
         }
@@ -721,8 +747,26 @@ export function apply(ctx: Context, config: Config = {}): void {
           res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify(payload))
         }
+        // GET: fresh control state without acting — the lightweight poll for
+        // the chat-side loop button and armed strip.
+        if (req.method === 'GET') {
+          try {
+            const url = new URL(req.url ?? '/', 'http://dsh.internal')
+            const rawId = url.searchParams.get('sessionId') ?? ''
+            const session = rawId === '' ? undefined : wctx.sessions.get(SessionId(rawId))
+            if (session === undefined) {
+              respond(rawId === '' ? 400 : 404, { error: rawId === '' ? 'sessionId query parameter required' : 'unknown session' })
+              return
+            }
+            const series = project(rawId, session.events, projection)
+            respond(200, { control: buildControl(rawId, series, hasUserTask(session.events)) })
+          } catch (error) {
+            respond(500, { error: error instanceof Error ? error.message : String(error) })
+          }
+          return
+        }
         if (req.method !== 'POST') {
-          respond(405, { error: 'POST only' })
+          respond(405, { error: 'GET or POST only' })
           return
         }
         void (async () => {
@@ -746,11 +790,15 @@ export function apply(ctx: Context, config: Config = {}): void {
                 respond(503, { error: 'loop machinery not composed (commands/llm absent)' })
                 return
               }
-              const raw = body['budget']
-              const budget = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 9999
-                ? raw
-                : defaultBudget
-              arm(sessionId, budget)
+              if (!hasUserTask(session.events)) {
+                error = NEEDS_TASK
+              } else {
+                const raw = body['budget']
+                const budget = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 9999
+                  ? raw
+                  : defaultBudget
+                arm(sessionId, budget)
+              }
             } else if (action === 'loop-stop') {
               stopLoop(sessionId)
             } else if (action === 'supervise-on') {
@@ -775,11 +823,12 @@ export function apply(ctx: Context, config: Config = {}): void {
               return
             }
             const series = project(sessionId, session.events, projection)
+            const control = buildControl(sessionId, series, hasUserTask(session.events))
             if (error !== null) {
-              respond(409, { error, control: buildControl(sessionId, series) })
+              respond(409, { error, control })
               return
             }
-            respond(200, { control: buildControl(sessionId, series) })
+            respond(200, { control })
           } catch (err) {
             respond(500, { error: err instanceof Error ? err.message : String(err) })
           }

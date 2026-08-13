@@ -379,6 +379,24 @@ function changeSlice(call: CallSlice, seq: number): { path: string; change: Wire
 const LOOP_PLUGIN_ID = 'kernel-opt'
 
 /**
+ * Whether the log carries a direct human prompt: a `user/message` whose
+ * source kind is `'user'` (plugin injections — including the loop's own
+ * continuations — never count). The loop's arming gate: a loop started over
+ * a session with no human task has nothing to continue, and telling the
+ * model to "continue the original task" anyway primes it to invent one from
+ * ambient filesystem state instead of asking.
+ */
+export function hasUserTask(events: readonly ProjectionEvent[]): boolean {
+  return events.some((event) => {
+    if (event.type !== 'user/message') return false
+    const data = asRecord(event.data)
+    if (data === null) return false
+    const message = asRecord(data['message']) ?? data
+    return asRecord(message['source'])?.['kind'] === 'user'
+  })
+}
+
+/**
  * Parse a kernel-loop continuation/wrap-up message back out of a
  * `user/message` event. The message data is the logged UserMessage (a
  * `message` wrapper is accepted against shape drift); only plugin-sourced
