@@ -53,21 +53,19 @@ const zh = {
   'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
   'loop.stopped': '循环已停:{reason}',
   'ctl.needTask': '先把任务告诉 Agent(要优化的 kernel 和评测方式),再启动循环',
-  'sec.loop': '循环',
-  'sec.sup': '监督',
-  'pop.budget': '评测预算',
-  'pop.supervise': '第二模型监督',
+  'pop.budget': '循环次数',
+  'pop.supervise': '外部监督',
   'pop.model': '监督模型',
   'pop.footer': '优化曲线与完整记录在「评测」页',
-  'sup.on': '监督 on',
-  'sup.off': '监督 off',
+  'sup.on': 'on',
+  'sup.off': 'off',
   'sup.needCfg': '未配置监督模型:下拉选一个,或在插件 config 加 supervisor: { provider, model }',
   'sup.model': '监督模型',
   'sup.default': '默认:{route}',
   'sup.pick': '选择监督模型…',
   'ctl.start': '启动循环',
   'ctl.stop': '停止循环',
-  'ctl.budget': '评测预算',
+  'ctl.budget': '循环次数',
   'advice.title': '监督记录',
   'advice.waiting': '监督已开启,将在下一个续跑点复审。',
   'advice.round': '第 {n} 轮',
@@ -119,21 +117,19 @@ const en = {
   'loop.armed': 'looping · round {round} · {done}/{budget} evals',
   'loop.stopped': 'loop stopped: {reason}',
   'ctl.needTask': 'Tell the agent the task first (which kernel, how to evaluate), then arm the loop',
-  'sec.loop': 'Loop',
-  'sec.sup': 'Supervision',
-  'pop.budget': 'Evaluation budget',
-  'pop.supervise': 'Second-model supervision',
+  'pop.budget': 'Loop count',
+  'pop.supervise': 'External supervision',
   'pop.model': 'Supervisor model',
   'pop.footer': 'Curve and full records live on the Evaluations tab',
-  'sup.on': 'supervisor on',
-  'sup.off': 'supervisor off',
+  'sup.on': 'on',
+  'sup.off': 'off',
   'sup.needCfg': 'No supervisor model configured: pick one below, or add supervisor: { provider, model } to the plugin config',
   'sup.model': 'Supervisor model',
   'sup.default': 'default: {route}',
   'sup.pick': 'pick a supervisor model…',
   'ctl.start': 'Start loop',
   'ctl.stop': 'Stop loop',
-  'ctl.budget': 'evaluation budget',
+  'ctl.budget': 'Loop count',
   'advice.title': 'Supervision log',
   'advice.waiting': 'Supervision on; it reviews at the next continuation point.',
   'advice.round': 'round {n}',
@@ -548,11 +544,15 @@ function buttonStyle(accent?: string): CSSProperties {
   }
 }
 
-/** Filled primary capsule (host button-primary fill). */
+/**
+ * Filled primary capsule. Deliberately the accent blue (send-button family)
+ * rather than the host's `button-primary-fill` token — that one resolves to
+ * a near-black fill which reads far too heavy inside the panel and popover.
+ */
 const primaryBtnStyle: CSSProperties = {
   ...capsuleStyle,
-  background: COLOR.primaryFill,
-  color: COLOR.primaryText,
+  background: COLOR.curve,
+  color: '#fff',
 }
 
 /** Disabled dressing for either button variant. */
@@ -576,9 +576,9 @@ const inputStyle: CSSProperties = {
   width: 64,
 }
 
-/** Control-row label ("循环" / "监督"). */
+/** Inline control label (循环次数 / 外部监督 / 监督模型). */
 const rowLabelStyle: CSSProperties = {
-  flex: 'none', minWidth: 32, fontSize: 12, color: COLOR.caption,
+  flex: 'none', fontSize: 12, color: COLOR.dim,
 }
 
 /** Popover card, after the host MenuDropdown surface (r12, lv3 shadow). */
@@ -825,10 +825,26 @@ function SupervisorSelect(props: {
     : ''
   const providers = models?.providers ?? []
   const known = providers.flatMap(p => p.models.map(m => `${p.id}/${m.id}`))
+  // Options show model DISPLAY names (the official picker's convention);
+  // the provider/model id pair stays in the option value only.
+  const displayName = (provider: string, model: string): string => {
+    for (const p of providers) {
+      if (p.id !== provider) continue
+      const match = p.models.find(m => m.id === model)
+      if (match !== undefined) return match.name
+    }
+    return `${provider}/${model}`
+  }
   const configRoute = control.supervisor.configRoute
   const defaultLabel = configRoute !== undefined
-    ? t('sup.default', { route: `${configRoute.provider}/${configRoute.model}` })
+    ? t('sup.default', { route: displayName(configRoute.provider, configRoute.model) })
     : t('sup.pick')
+  const optionsFor = (provider: WireModels['providers'][number]): ReactNode =>
+    provider.models.map(model => (
+      <option key={`${provider.id}/${model.id}`} value={`${provider.id}/${model.id}`}>
+        {model.name}
+      </option>
+    ))
   return (
     <select
       value={overrideValue}
@@ -850,11 +866,13 @@ function SupervisorSelect(props: {
       {overrideValue !== '' && !known.includes(overrideValue)
         ? <option value={overrideValue}>{overrideValue}</option>
         : null}
-      {providers.map(provider => provider.models.map(model => (
-        <option key={`${provider.id}/${model.id}`} value={`${provider.id}/${model.id}`}>
-          {`${provider.id}/${model.id}`}
-        </option>
-      )))}
+      {providers.length === 1 && providers[0] !== undefined
+        ? optionsFor(providers[0])
+        : providers.map(provider => (
+            <optgroup key={provider.id} label={provider.name}>
+              {optionsFor(provider)}
+            </optgroup>
+          ))}
     </select>
   )
 }
@@ -908,7 +926,6 @@ export function KernelOptTab(
       {/* controls: one row for the loop, one for supervision, then data chips */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <span style={rowLabelStyle}>{t('sec.loop')}</span>
           {control?.loop.armed === true
             ? (
                 <>
@@ -928,6 +945,7 @@ export function KernelOptTab(
           {control !== undefined && control.loop.armed === false && control.loop.available
             ? (
                 <>
+                  <span style={rowLabelStyle}>{t('pop.budget')}</span>
                   <input
                     type="number"
                     min={1}
@@ -963,12 +981,13 @@ export function KernelOptTab(
         {control !== undefined
           ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                <span style={rowLabelStyle}>{t('sec.sup')}</span>
+                <span style={rowLabelStyle}>{t('pop.supervise')}</span>
                 <SuperviseToggle
                   control={control}
                   t={t}
                   onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
                 />
+                <span style={{ ...rowLabelStyle, marginLeft: 6 }}>{t('pop.model')}</span>
                 <SupervisorSelect
                   control={control}
                   models={models}
