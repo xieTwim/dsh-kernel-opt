@@ -8,7 +8,7 @@
 import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
 import {
   CONTINUE_TRAILER, EVAL_TRAILER_PREFIX, LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX,
-  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX, samePath,
 } from './wire.ts'
 
 /** Structural slice of a logged session event the projection reads. */
@@ -302,11 +302,6 @@ function capText(change: WireChange, text: string, cap: number): string {
   if (text.length <= cap) return text
   change.truncated = true
   return `${text.slice(0, cap)}…`
-}
-
-/** Whether two logged paths plausibly address the same file. */
-export function samePath(a: string, b: string): boolean {
-  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
 }
 
 /** Command-line provenance cap on the wire. */

@@ -30,14 +30,14 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-commands'
-import { DEFAULT_PROJECTION, project, samePath } from './projection.ts'
+import { DEFAULT_PROJECTION, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
   decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
-import { CONTROL_PATH, REPLAY_LINE_PREFIX, SERIES_PATH } from './wire.ts'
+import { CONTROL_PATH, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
 import type { WireControl, WireIteration, WireSeries } from './wire.ts'
 
 export const name = 'kernel-cockpit'

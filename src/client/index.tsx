@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from '../wire.ts'
-import { CONTROL_PATH, SERIES_PATH } from '../wire.ts'
+import { CONTROL_PATH, SERIES_PATH, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -79,6 +79,10 @@ const zh = {
   'row.write': '整文件写入',
   'row.edit': '替换',
   'row.truncated': '(已截断)',
+  'row.channelShell': '自报',
+  'row.channelReplay': '复测',
+  'row.command': '来源命令',
+  'row.unverifiedFinal': '最终数字未复测(自报值)',
   'table.final': '提交',
 } satisfies Record<string, string>
 /** Cockpit locale key union. */
@@ -132,6 +136,10 @@ const en = {
   'row.write': 'full write',
   'row.edit': 'edit',
   'row.truncated': '(truncated)',
+  'row.channelShell': 'self-reported',
+  'row.channelReplay': 'replayed',
+  'row.command': 'Command',
+  'row.unverifiedFinal': 'final number not replayed (self-reported)',
   'table.final': 'final',
 } satisfies Record<string, string>
 
@@ -534,8 +542,9 @@ function IterationDetail(props: {
   plans: readonly WirePlan[]
   rounds: readonly WireRound[]
   t: PropsLocale<'kernel-cockpit'>['t']
+  unverifiedFinal?: boolean
 }): ReactNode {
-  const { point, plans, rounds, t } = props
+  const { point, plans, rounds, t, unverifiedFinal } = props
   const plan = planBefore(plans, point.seq)
   const review = reviewBefore(rounds, point.seq)
   return (
@@ -545,9 +554,21 @@ function IterationDetail(props: {
     }}>
       <div style={{ color: COLOR.caption, fontSize: 12 }}>
         {point.tool} · seq {point.seq}
+        {point.channel !== undefined ? ` · ${t(point.channel === 'replay' ? 'row.channelReplay' : 'row.channelShell')}` : ''}
         {point.artifactPath !== undefined ? ` · ${point.artifactPath}` : ''}
         {point.workloadSubset !== undefined ? ` · ${t('row.subset')} [${point.workloadSubset.join(', ')}]` : ''}
       </div>
+      {unverifiedFinal === true
+        ? <div style={{ color: COLOR.warn, fontSize: 12 }}>⚠ {t('row.unverifiedFinal')}</div>
+        : null}
+      {point.command !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.command')}</div>
+              <pre style={preStyle(COLOR.border)}>{point.command}</pre>
+            </div>
+          )
+        : null}
       {point.evaluatorFailed === true
         ? <div style={{ color: COLOR.warn }}>{t('row.evaluatorFailed')}</div>
         : null}
@@ -850,6 +871,11 @@ export function CockpitTab(
                   const idx = iterations.indexOf(p)
                   const isBest = series !== null && series.bestIndex === idx
                   const expanded = expandedSeq === p.seq
+                  // A finalized self-reported point without a replay point on
+                  // the same artifact: the final number was never re-measured.
+                  const unverifiedFinal = p.finalized === true && p.channel === 'shell'
+                    && !iterations.some(q => q.channel === 'replay' && q.artifactPath !== undefined
+                      && p.artifactPath !== undefined && samePath(q.artifactPath, p.artifactPath))
                   return (
                     <div key={p.seq}>
                       <div
@@ -875,6 +901,17 @@ export function CockpitTab(
                           {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
                         </span>
                         <span style={{ flex: 1 }} />
+                        {p.channel !== undefined
+                          ? (
+                              <span style={{
+                                flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
+                                borderRadius: 4, border: `1px solid ${COLOR.border}`,
+                                color: p.channel === 'replay' ? COLOR.ok : COLOR.caption,
+                              }}>
+                                {t(p.channel === 'replay' ? 'row.channelReplay' : 'row.channelShell')}
+                              </span>
+                            )
+                          : null}
                         {isBest ? <span style={{ flex: 'none', color: COLOR.ok }}>★</span> : null}
                         {p.finalized === true ? <span style={{ flex: 'none', color: COLOR.warn }}>⚑ {t('table.final')}</span> : null}
                         <span style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}>
@@ -882,7 +919,7 @@ export function CockpitTab(
                         </span>
                       </div>
                       {expanded
-                        ? <IterationDetail point={p} plans={plans} rounds={rounds} t={t} />
+                        ? <IterationDetail point={p} plans={plans} rounds={rounds} t={t} unverifiedFinal={unverifiedFinal} />
                         : null}
                     </div>
                   )
