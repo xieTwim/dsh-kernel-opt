@@ -22,6 +22,7 @@
  * @module @xietwim/dsh-kernel-cockpit
  */
 import type { IncomingMessage } from 'node:http'
+import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -29,15 +30,15 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-commands'
-import { DEFAULT_PROJECTION, project } from './projection.ts'
+import { DEFAULT_PROJECTION, project, samePath } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
-  decideContinuation, initialLoopState, supervisorDigest, wrapUpText,
+  decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
-import { CONTROL_PATH, SERIES_PATH } from './wire.ts'
-import type { WireControl, WireSeries } from './wire.ts'
+import { CONTROL_PATH, REPLAY_LINE_PREFIX, SERIES_PATH } from './wire.ts'
+import type { WireControl, WireIteration, WireSeries } from './wire.ts'
 
 export const name = 'kernel-cockpit'
 export const inject = ['tools', 'agents', 'sessions']
@@ -77,6 +78,20 @@ export interface Config {
     maxNoProgressRounds?: number
   }
   /**
+   * Finalize replay: when `cockpit_finalize` names an artifact whose best
+   * measurement is self-reported (shell channel), the plugin re-executes the
+   * recorded command once — outside any agent turn — and appends the output
+   * to the tool result; the trailer inside becomes the verified final
+   * measurement. On by default; every failure degrades to "stays
+   * self-reported", never a blocked finalize.
+   */
+  replay?: {
+    /** Master switch (default true). */
+    enabled?: boolean
+    /** Kill the replayed command after this many seconds (default 900). */
+    timeoutSec?: number
+  }
+  /**
    * Second-model supervisor route. `/supervise on` is a hard gate on this
    * being present — without it the toggle reports how to configure instead of
    * silently reviewing with the primary model.
@@ -102,6 +117,55 @@ function resolveProjection(config: Config): ProjectionConfig {
     shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
     planTool: DEFAULT_PROJECTION.planTool,
   }
+}
+
+/** Outcome of one replay execution. */
+interface ReplayOutcome {
+  output: string
+  exit: number | null
+  failure?: string
+}
+
+/** Run one recorded benchmark command (`bash -c`); resolves, never throws. */
+function runReplay(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<ReplayOutcome> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn('bash', ['-c', command], {
+        cwd,
+        timeout: timeoutMs,
+        ...(signal !== undefined ? { signal } : {}),
+      })
+    } catch (error) {
+      resolve({ output: '', exit: null, failure: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    const chunks: string[] = []
+    let size = 0
+    const take = (chunk: Buffer): void => {
+      if (size > 200_000) return
+      size += chunk.length
+      chunks.push(chunk.toString('utf8'))
+    }
+    child.stdout?.on('data', take)
+    child.stderr?.on('data', take)
+    child.on('error', (error) => {
+      resolve({ output: chunks.join(''), exit: null, failure: error.message })
+    })
+    child.on('close', (code, killSignal) => {
+      resolve({
+        output: chunks.join(''),
+        exit: code,
+        ...(killSignal !== null ? { failure: `terminated by ${killSignal}` } : {}),
+      })
+    })
+  })
+}
+
+/** Cap replay output for the tool result, keeping the tail (trailer lives there). */
+function capReplayOutput(output: string, headCap = 2_000, tailCap = 10_000): string {
+  if (output.length <= headCap + tailCap) return output
+  return `${output.slice(0, headCap)}\n…[replay output trimmed]…\n${output.slice(output.length - tailCap)}`
 }
 
 /** Read and parse a small JSON request body; null on any shape/size problem. */
@@ -151,6 +215,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const projection = resolveProjection(config)
   const maxNoProgress = config.loop?.maxNoProgressRounds ?? 2
   const defaultBudget = config.loop?.defaultBudget ?? 20
+  const finalizeHint = projection.finalizeTools.join(' / ')
 
   /** Per-session loop state; sessions without an entry never looped. */
   const loops = new Map<string, LoopState>()
@@ -211,6 +276,64 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
     execute: async (args) => {
       return `Plan recorded (${args.phase}): ${args.approach}`
+    },
+  }))
+
+  // cockpit_finalize — the finalize record for evaluation pipelines with no
+  // evaluator-issued ids (the self-reported channel). The call itself is the
+  // record; when the artifact's best measurement is self-reported and replay
+  // is enabled, the plugin re-executes that recorded command once and appends
+  // its output — the trailer inside becomes the verified [replay] final
+  // measurement, read back by the projection like everything else.
+  ctx.tools.register(defineTool({
+    name: 'cockpit_finalize',
+    description: 'Record your FINAL kernel choice by artifact path (for evaluation pipelines without '
+      + 'evaluator-issued ids; with an id-issuing evaluator call its own finalize instead). Call once, at the '
+      + 'end, with the artifact you stand behind — restore it verbatim first if a later edit regressed it. '
+      + 'When the best measurement for that artifact is self-reported, the cockpit replays the recorded '
+      + 'benchmark command once and appends the output as the verified final measurement.',
+    parameters: {
+      artifact_path: { type: 'string', required: true, description: 'Path of the final artifact, as printed in its KERNEL_COCKPIT_EVAL trailer.' },
+      note: { type: 'string', description: 'One-line closing note (optional).' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    execute: async (args, exec) => {
+      const ack = `Finalize recorded for ${args.artifact_path}.${args.note !== undefined ? ` Note: ${args.note}` : ''}`
+      const agent = ctx.agents.currentInitiator()
+      if (agent === undefined) return `${ack} (no active agent turn; not replayed)`
+      const session = ctx.sessions.get(SessionId(agent.id))
+      if (session === undefined) return `${ack} (session not found; not replayed)`
+      if (config.replay?.enabled === false) return `${ack} Replay disabled by config; the final number stays self-reported.`
+      const series = project(agent.id, session.events, projection)
+      let best: WireIteration | undefined
+      for (const point of series.iterations) {
+        if (point.channel !== 'shell') continue
+        if (point.artifactPath === undefined || !samePath(point.artifactPath, args.artifact_path)) continue
+        if (point.correct !== true || point.rewardHack === true || point.error !== undefined) continue
+        if (point.latencyMs === undefined) continue
+        if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) best = point
+      }
+      if (best === undefined) {
+        return `${ack} No self-reported measurement found for this artifact — nothing to replay `
+          + '(tool-channel measurements are already verified).'
+      }
+      const command = best.command
+      if (command === undefined || command.endsWith('…')) {
+        return `${ack} Recorded command ${command === undefined ? 'unavailable' : 'truncated in the projection'}; not replayed.`
+      }
+      const cwd: unknown = session.header.cwd
+      if (typeof cwd !== 'string' || cwd.length === 0) return `${ack} Session working directory unknown; not replayed.`
+      const outcome = await runReplay(command, cwd, (config.replay?.timeoutSec ?? 900) * 1000, exec.signal)
+      const lines = [ack, `${REPLAY_LINE_PREFIX}${command}`]
+      if (outcome.failure !== undefined) {
+        lines.push(`Replay failed: ${outcome.failure}. The final number stays self-reported.`)
+      }
+      lines.push('--- replay output ---', capReplayOutput(outcome.output))
+      if (outcome.exit !== null) lines.push(`[replay exit ${String(outcome.exit)}]`)
+      return lines.join('\n')
     },
   }))
 
@@ -312,7 +435,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         state.armed = false
         state.stopReason = decision.reason
         agent.followup(createUserMessage({
-          content: [{ type: 'text', text: wrapUpText(decision.evalsDone, state.budget, decision.reason) }],
+          content: [{ type: 'text', text: wrapUpText(decision.evalsDone, state.budget, decision.reason, finalizeHint) }],
           source: { kind: 'plugin', plugin: PLUGIN_ID },
         }))
         return
@@ -330,7 +453,10 @@ export function apply(ctx: Context, config: Config = {}): void {
       agent.followup(createUserMessage({
         content: [{
           type: 'text',
-          text: continuationText(state.round, decision.evalsDone, state.budget, advice, reviewed && advice === null),
+          text: continuationText(
+            state.round, decision.evalsDone, state.budget, advice,
+            reviewed && advice === null, stagnationCount(series), finalizeHint,
+          ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },
       }))

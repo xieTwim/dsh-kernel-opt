@@ -2,7 +2,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  adviceFromReply, continuationText, decideContinuation, initialLoopState, supervisorDigest, wrapUpText,
+  adviceFromReply, continuationText, decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
 } from '../src/loop.ts'
 import { REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
 import type { WireIteration, WireSeries } from '../src/wire.ts'
@@ -78,4 +78,40 @@ test('wrapUpText asks for finalize, never for new work', () => {
   assert.ok(text.includes('20/20'))
   assert.ok(text.includes('run_finalize'))
   assert.ok(text.includes('do not start new optimization work'))
+})
+
+test('stagnationCount counts completed evals after best; continuation nudges from 3', () => {
+  const mk = (latencyMs: number | undefined, correct = true) => ({ seq: 1, tool: 'bash', ...(latencyMs !== undefined ? { latencyMs } : {}), correct })
+  const series = {
+    sessionId: 's', updatedAt: 0, plans: [], profileSeqs: [], rounds: [],
+    iterations: [mk(2.0), mk(1.0), mk(1.5), mk(1.4), mk(undefined, false)],
+    bestIndex: 1,
+  }
+  assert.equal(stagnationCount(series), 3)
+  const text = continuationText(2, 5, 20, null, false, 3)
+  assert.ok(text.includes('3 evaluations since the last improvement'))
+  assert.ok(!continuationText(2, 5, 20, null, false, 2).includes('since the last improvement'))
+  // The counters anchor the projection parses must survive the added line.
+  assert.ok(/5\/20 evaluations used/.test(text))
+})
+
+test('finalize hint is threaded into continuation and wrap-up texts', () => {
+  assert.ok(continuationText(1, 0, 20, null, false, 0, 'my_finalize').includes('my_finalize'))
+  assert.ok(wrapUpText(20, 20, 'budget', 'my_finalize').includes('my_finalize'))
+  // Defaults name both finalize tools.
+  assert.ok(wrapUpText(20, 20, 'budget').includes('cockpit_finalize'))
+})
+
+test('supervisor digest carries provenance for self-reported rows', () => {
+  const series = {
+    sessionId: 's', updatedAt: 0, plans: [], profileSeqs: [], rounds: [], bestIndex: 0,
+    iterations: [
+      { seq: 1, tool: 'bash', channel: 'shell' as const, command: 'bash scripts/bench.sh', latencyMs: 1.2, correct: true },
+      { seq: 2, tool: 'kernel_evaluate', evaluationId: '0002', latencyMs: 1.5, correct: true },
+    ],
+  }
+  const digest = supervisorDigest(series, { armed: true, budget: 20, round: 1, lastEvalCount: 0, noProgressRounds: 0, supervise: true })
+  assert.ok(digest.includes('[shell]'))
+  assert.ok(digest.includes('cmd:"bash scripts/bench.sh"'))
+  assert.ok(digest.includes('self-reported'))
 })
