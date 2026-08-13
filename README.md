@@ -6,11 +6,35 @@
 
 | 组成 | 说明 |
 |---|---|
-| 「优化驾驶舱」会话 Tab | `conversation.view` 槽;SVG 曲线(跨度大时自动 log 轴)+ 状态芯片 + 当前方案卡 + 迭代表 |
+| 「优化驾驶舱」会话 Tab | `conversation.view` 槽;SVG 曲线(跨度大时自动 log 轴)+ 状态芯片 + 当前方案卡 + 监督建议卡 + 迭代表 |
 | `cockpit_plan` 工具 | 模型汇报 phase/approach/hypothesis/next;调用本身即记录 |
 | `self_compact` 工具 | 包装官方 `compaction` seam(`compactNow`);仅当组合里有 compaction provider 时注册 |
-| series 路由 | `GET /plugins/kernel-cockpit/series?sessionId=` — 每次查询即时投影 `session.events` |
+| `/kloop [预算]` 命令 | **kernel 优化循环**:按 run 状态驱动的续跑(不是定时器)——turn 落定且预算未尽、未 finalize、上轮有进展才续投;`stop`/`status` 子命令 |
+| `/supervise on\|off` 命令 | **第二模型监督**(按需开启):每个续跑点用配置的 provider/model 复审 run digest,建议随续投消息注入主模型 |
+| series 路由 | `GET /plugins/kernel-cockpit/series?sessionId=` — 每次查询即时投影 `session.events`(含 loop/监督状态) |
 | `skills/kernel-cockpit` | 循环纪律(何时 plan / 何时 compact / 诚实红线),可选装 |
+
+## 循环与监督
+
+```sh
+/kloop            # 启动循环,默认预算 20 次评测(/kloop 30 自定义)
+/kloop stop       # 停;/kloop status 查看
+/supervise on     # 开启第二模型监督(需先配置,见下)
+```
+
+循环在每次 turn 落定后检查投影出的 run 状态:**finalize 已记录 → 停;评测数达预算 → 停;连续 2 轮零新评测 → 停(防空转烧 token)**;否则投递续跑消息(带预算进度 + 监督建议)。人类插话永远优先:agent 非 idle 时本轮跳过,监督复审后还会二次确认 idle 才续投。
+
+监督模型是硬门槛配置(`~/.dsh/cordis.patch.yml` 的插件行,或 profile patch):
+
+```yaml
+- id: kernel-cockpit
+  config:
+    supervisor:
+      provider: deepseek-official   # Models 设置里的 provider 路由
+      model: deepseek-v4-flash      # 建议与主模型不同档,便宜的就够
+```
+
+监督者只看 run 的**形状**(预算纪律/正确性优先/方法族多样性/plan 卫生/该收尾时收尾),不看 kernel 源码;回复 OK 则不注入;任何失败/超时降级为无建议,永不卡住主循环。
 
 ## 安装
 
