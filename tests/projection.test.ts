@@ -8,6 +8,8 @@ import { test } from 'node:test'
 import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { continuationText, wrapUpText } from '../src/loop.ts'
+import { latestRunStart } from '../src/wire.ts'
+import type { WireRound } from '../src/wire.ts'
 
 let seq = 0
 function call(name: string, callId: string, args: object): ProjectionEvent {
@@ -340,4 +342,17 @@ test('finalize by artifact: kernel_finalize flags the best honest point and pars
   assert.equal(replay.finalized, true)
   assert.equal(replay.command, 'bash scripts/bench.sh')
   assert.equal(replay.latencyMs, 1.12)
+})
+
+test('latestRunStart: re-armed runs segment at the round-counter reset', () => {
+  const r = (round: number | undefined, at: number, wrapUp = false): WireRound =>
+    ({ seq: at, ...(round !== undefined ? { round } : {}), ...(wrapUp ? { wrapUp: true } : {}) })
+  assert.equal(latestRunStart([]), 0)
+  // One uninterrupted run keeps everything.
+  assert.equal(latestRunStart([r(1, 10), r(2, 20), r(3, 30)]), 0)
+  // A wrap-up (no round number) stays with the run it closes; the next
+  // round-1 opens the new run.
+  assert.equal(latestRunStart([r(1, 10), r(undefined, 20, true), r(1, 30), r(2, 40)]), 2)
+  // Repeated single-round arms: only the last one is current.
+  assert.equal(latestRunStart([r(1, 10), r(1, 20), r(1, 30)]), 2)
 })

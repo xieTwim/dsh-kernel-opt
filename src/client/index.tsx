@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WireChange, WireControl, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
-import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, samePath } from '../wire.ts'
+import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, latestRunStart, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -69,6 +69,7 @@ const zh = {
   'advice.title': '监督记录',
   'advice.waiting': '监督已开启:每当一轮结束、循环驱动下一轮时,监督模型先复审整个 run,建议自动转给 Agent 并记录在这里。',
   'advice.round': '第 {n} 轮',
+  'advice.earlier': '(更早循环的 {n} 条监督记录未显示,完整历史在会话日志中)',
   'reason.finalized': '已 finalize',
   'reason.budget': '预算用尽,已请求收尾',
   'reason.no-progress': '连续无进展,已请求收尾',
@@ -133,6 +134,7 @@ const en = {
   'advice.title': 'Supervision log',
   'advice.waiting': 'Supervision on: whenever a round ends and the loop drives the next one, the supervisor reviews the run first; its advice is passed to the agent and recorded here.',
   'advice.round': 'round {n}',
+  'advice.earlier': '({n} supervision records from earlier loop runs are hidden; the full history stays in the session log)',
   'reason.finalized': 'finalized',
   'reason.budget': 'budget exhausted, wrap-up requested',
   'reason.no-progress': 'stalled, wrap-up requested',
@@ -910,7 +912,12 @@ export function KernelOptTab(
   const best = series !== null && series.bestIndex !== null ? iterations[series.bestIndex] : undefined
   const hackCount = iterations.filter(p => p.rewardHack === true).length
   const pendingCount = iterations.filter(p => p.pending === true).length
-  const reviewedRounds = rounds.filter(r => r.review !== undefined)
+  // The supervision card scopes to the CURRENT loop run: each re-arm resets
+  // the round counter, so without segmentation every historical run's
+  // "round 1" would pile up in the card. Earlier runs collapse to a count.
+  const runStart = latestRunStart(rounds)
+  const reviewedRounds = rounds.slice(runStart).filter(r => r.review !== undefined)
+  const earlierReviews = rounds.slice(0, runStart).filter(r => r.review !== undefined).length
   const reasonLabel = (reason: string): string =>
     reason === 'finalized' || reason === 'budget' || reason === 'no-progress' || reason === 'stopped'
       ? t(`reason.${reason}`)
@@ -1086,7 +1093,7 @@ export function KernelOptTab(
 
       {/* supervision log — parsed back from the continuation messages, so it
           survives restarts and replays with the rest of the projection. */}
-      {reviewedRounds.length > 0 || control?.supervisor.enabled === true
+      {reviewedRounds.length > 0 || earlierReviews > 0 || control?.supervisor.enabled === true
         ? (
             <div style={{ ...cardStyle, borderColor: COLOR.warn }}>
               <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: COLOR.warn }}>{t('advice.title')}</div>
@@ -1106,6 +1113,13 @@ export function KernelOptTab(
                       ))}
                     </div>
                   )}
+              {earlierReviews > 0
+                ? (
+                    <div style={{ fontSize: 12, color: COLOR.caption, marginTop: 6 }}>
+                      {t('advice.earlier', { n: earlierReviews })}
+                    </div>
+                  )
+                : null}
             </div>
           )
         : null}

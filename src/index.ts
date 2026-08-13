@@ -41,7 +41,7 @@ import { DEFAULT_PROJECTION, hasUserTask, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
-  decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
+  decideContinuation, initialLoopState, reviewable, stagnationCount, supervisorDigest, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
@@ -429,15 +429,13 @@ export function apply(ctx: Context, config: Config = {}): void {
 
     /** One supervisor review; any failure degrades to unreviewed/no advice. */
     const review = async (
-      sessionId: string,
       state: LoopState,
+      series: WireSeries,
     ): Promise<{ advice: string | null; reviewed: boolean }> => {
       const supervisor = effectiveSupervisor(state)
       if (supervisor === undefined || !state.supervise) return { advice: null, reviewed: false }
-      const session = lctx.sessions.get(SessionId(sessionId))
-      if (session === undefined) return { advice: null, reviewed: false }
       try {
-        const digest = supervisorDigest(project(sessionId, session.events, projection), state)
+        const digest = supervisorDigest(series, state)
         let reply = ''
         const stream = lctx.llm.stream({
           provider: supervisor.provider,
@@ -501,7 +499,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         : 0
       state.round += 1
       state.lastEvalCount = decision.evalsDone
-      const { advice, reviewed } = await review(sessionId, state)
+      // Review only when the digest carries signal: a fresh arm over an empty
+      // session has nothing to audit, so no supervisor call and no OK record.
+      const { advice, reviewed } = reviewable(series)
+        ? await review(state, series)
+        : { advice: null, reviewed: false }
       state.lastAdvice = advice ?? state.lastAdvice
       // Re-check idleness and armed state after the (possibly slow) review; a
       // human message or stop that arrived meanwhile owns the session.

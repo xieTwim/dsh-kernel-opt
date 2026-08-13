@@ -48,6 +48,16 @@ export function completedEvals(series: WireSeries): number {
 }
 
 /**
+ * Whether a supervisor review of this run would carry any signal. Without a
+ * single evaluation or stated plan the digest is an empty table — a review
+ * would spend a supervisor call solemnly approving nothing and mint a phantom
+ * "round 1 OK" record every time a fresh session is armed.
+ */
+export function reviewable(series: WireSeries): boolean {
+  return series.iterations.length > 0 || series.plans.length > 0
+}
+
+/**
  * Completed evaluations since the best honest measurement — the run's
  * stagnation streak. All completed evaluations count when no best exists yet.
  */
