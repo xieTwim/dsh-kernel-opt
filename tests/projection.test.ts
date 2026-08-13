@@ -13,10 +13,33 @@ function call(name: string, callId: string, args: object): ProjectionEvent {
   seq += 1
   return { type: 'tool/call', seq, data: { turn: 1, step: 1, callId, name, arguments: JSON.stringify(args) } }
 }
+/** Real rc.2 shape: callId on message.source, text nested in a tool-result block. */
 function result(callId: string, payload: object | string): ProjectionEvent {
   seq += 1
   const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
-  return { type: 'tool/result', seq, data: { callId, message: { role: 'tool', content: [{ type: 'text', text }] } } }
+  return {
+    type: 'tool/result',
+    seq,
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        source: { kind: 'tool', callId },
+        role: 'user',
+        content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }], isError: false }],
+      },
+    },
+  }
+}
+
+/** Legacy/fallback shape: callId at the data top level, flat text block. */
+function legacyResult(callId: string, payload: object): ProjectionEvent {
+  seq += 1
+  return {
+    type: 'tool/result',
+    seq,
+    data: { callId, message: { role: 'tool', content: [{ type: 'text', text: JSON.stringify(payload) }] } },
+  }
 }
 
 test('matchesTool: exact and separator-suffixed names', () => {
@@ -77,6 +100,17 @@ test('project: reward-hack and error rows are excluded from best', () => {
   assert.equal(series.iterations[0]?.rewardHack, true)
   assert.equal(series.iterations[1]?.error, 'compile failed')
   assert.equal(series.bestIndex, 2)
+})
+
+test('project: legacy top-level callId still correlates', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    call('kernel_evaluate', 'c1', {}),
+    legacyResult('c1', { evaluation_id: '0001', compiled: true, correct: true, latency_ms: 2.5 }),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations[0]?.latencyMs, 2.5)
+  assert.equal(series.bestIndex, 0)
 })
 
 test('project: unparsable result leaves a measured-nothing row, not a crash', () => {
