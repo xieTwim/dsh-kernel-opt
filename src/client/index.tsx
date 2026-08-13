@@ -1,7 +1,7 @@
 /**
  * dsh-kernel-cockpit — browser half.
  *
- * 「算子优化」 session tab (`conversation.view` slot): polls the Node half's
+ * 「评测」 session tab (`conversation.view` slot): polls the Node half's
  * series route and renders the live optimization picture — latency curve over
  * evaluations (log scale when the journey is wide), correctness/reward-hack
  * status per point, profiler ▲ and finalize ★ marks, the model's latest
@@ -31,9 +31,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const NS = 'kernel-cockpit'
 const zh = {
-  'tab.label': '算子优化',
+  'tab.label': '评测',
   'empty.title': '还没有评测数据',
-  'empty.body': '当 agent 调用 kernel 评测工具(如 kernel_evaluate)后,这里会实时出现优化曲线;模型调用 cockpit_plan 后会展示当前方案。',
+  'empty.body': 'Agent 每完成一次评测,这里就会实时出现一个数据点并连成优化曲线,方案汇报与监督记录也在此展示;把 kernel 和评测方式告诉 Agent 即可开始。',
   'chips.iterations': '{count} 次评测',
   'chips.best': '最佳 {latency}',
   'chips.profiles': '{count} 次 profile',
@@ -52,7 +52,7 @@ const zh = {
   'axis.best': '最佳',
   'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
   'loop.stopped': '循环已停:{reason}',
-  'loop.hint': '/kloop [预算] 启动循环 · /supervise on 开启第二模型监督',
+  'loop.hint': '也可用命令:/kloop [预算] · /supervise on|off · /supervise use <provider>/<model>',
   'sup.on': '监督 on',
   'sup.off': '监督 off',
   'sup.needCfg': '未配置监督模型:下拉选一个,或在插件 config 加 supervisor: { provider, model }',
@@ -91,9 +91,9 @@ const zh = {
 /** Cockpit locale key union. */
 type CockpitKey = keyof typeof zh
 const en = {
-  'tab.label': 'Kernel Opt',
+  'tab.label': 'Evaluations',
   'empty.title': 'No evaluations yet',
-  'empty.body': 'Once the agent calls a kernel bench tool (e.g. kernel_evaluate) the optimization curve appears here live; cockpit_plan calls show the current plan.',
+  'empty.body': 'Each completed evaluation adds a live point to the optimization curve here, along with plan reports and supervision notes; hand the agent a kernel and a way to evaluate it to begin.',
   'chips.iterations': '{count} evaluations',
   'chips.best': 'best {latency}',
   'chips.profiles': '{count} profiles',
@@ -112,7 +112,7 @@ const en = {
   'axis.best': 'best',
   'loop.armed': 'looping · round {round} · {done}/{budget} evals',
   'loop.stopped': 'loop stopped: {reason}',
-  'loop.hint': '/kloop [budget] arms the loop · /supervise on enables the second model',
+  'loop.hint': 'Commands: /kloop [budget] · /supervise on|off · /supervise use <provider>/<model>',
   'sup.on': 'supervisor on',
   'sup.off': 'supervisor off',
   'sup.needCfg': 'No supervisor model configured: pick one below, or add supervisor: { provider, model } to the plugin config',
@@ -723,15 +723,7 @@ export function CockpitTab(
       ? t(`reason.${reason}`)
       : reason
 
-  if (iterations.length === 0 && plans.length === 0) {
-    return (
-      <div style={{ padding: 24, maxWidth: 720, margin: '0 auto', fontFamily: 'system-ui', color: COLOR.dim }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
-        <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
-        <div style={{ fontSize: 13, lineHeight: '22px', marginTop: 10, color: COLOR.caption }}>{t('loop.hint')}</div>
-      </div>
-    )
-  }
+  const empty = iterations.length === 0 && plans.length === 0
 
   return (
     <div style={{
@@ -846,7 +838,9 @@ export function CockpitTab(
               </>
             )
           : null}
-        <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
+        {iterations.length > 0
+          ? <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
+          : null}
         {best?.latencyMs !== undefined
           ? (
               <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok, fontWeight: 500 }}>
@@ -866,6 +860,18 @@ export function CockpitTab(
           : null}
       </div>
 
+      {/* empty-state guidance: the controls above stay usable before the
+          first evaluation; only the data area explains itself. */}
+      {empty
+        ? (
+            <div style={{ padding: '18px 4px', color: COLOR.dim }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
+              <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
+              <div style={{ fontSize: 13, lineHeight: '22px', marginTop: 10, color: COLOR.caption }}>{t('loop.hint')}</div>
+            </div>
+          )
+        : null}
+
       {/* curve */}
       {iterations.length > 0
         ? (
@@ -879,7 +885,10 @@ export function CockpitTab(
           )
         : null}
 
-      {/* latest plan */}
+      {/* latest plan (hidden while empty — the guidance block covers it) */}
+      {empty
+        ? null
+        : (
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>{t('plan.title')}</span>
@@ -912,6 +921,7 @@ export function CockpitTab(
               </div>
             )}
       </div>
+          )}
 
       {/* supervision log — parsed back from the continuation messages, so it
           survives restarts and replays with the rest of the projection. */}

@@ -1,6 +1,6 @@
 # dsh-kernel-cockpit
 
-**算子优化驾驶舱** — DeepSeek Harness 插件：模型在长优化循环里跑，人类在会话页的「算子优化」Tab 实时看到 **latency 曲线、每个点的正确性/reward-hack 状态与来源、profile ▲、首达最佳 ★ 与 finalize ⚑ 标记、模型当前方案、监督记录**，并可随时插话引导（原生 steering）；模型自己可以在换方案族时压缩上下文继续干（`self_compact`）。
+**算子优化驾驶舱** — DeepSeek Harness 插件：模型在长优化循环里跑，人类在会话页的「评测」Tab 实时看到 **latency 曲线、每个点的正确性/reward-hack 状态与来源、profile ▲、首达最佳 ★ 与 finalize ⚑ 标记、模型当前方案、监督记录**，并可随时插话引导（原生 steering）；模型自己可以在换方案族时压缩上下文继续干（`self_compact`）。
 
 数据全部从**会话日志**投影派生（零插件侧状态），回放的会话渲染结果与实时完全一致。
 
@@ -30,7 +30,7 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 
 | 组成 | 说明 |
 |---|---|
-| 「算子优化」会话 Tab | `conversation.view` 槽，**按需出现**：算子优化模式的会话常显示；其余会话检测到评测/plan/循环 armed 才持有注册。内容：SVG 曲线（y 域聚焦收敛带，离群点顶边截断，hover 精确值）+ 状态芯片与**循环/监督控件** + 当前方案卡 + 监督记录卡 + **可展开迭代表**（评测完整判定、来源命令行、生效方案、该轮监督、该轮 write/edit 改动） |
+| 「评测」会话 Tab | `conversation.view` 槽，**按需出现**：算子优化模式的会话常显示；其余会话检测到评测/plan/循环 armed 才持有注册。内容：SVG 曲线（y 域聚焦收敛带，离群点顶边截断，hover 精确值）+ 状态芯片与**循环/监督控件** + 当前方案卡 + 监督记录卡 + **可展开迭代表**（评测完整判定、来源命令行、生效方案、该轮监督、该轮 write/edit 改动） |
 | `cockpit_plan` 工具 | 模型汇报 phase/approach/hypothesis/next；调用本身即记录 |
 | `cockpit_finalize` 工具 | 无 id 评测管线的收尾记录（按 `artifact_path`）+ 上述复测 |
 | `self_compact` 工具 | 包装官方 `compaction` seam；仅当组合里有 compaction provider 时注册 |
@@ -44,7 +44,7 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 1. 安装插件（见下），重启 `dsh web`；
 2. 把要优化的 kernel 丢进工作目录——reference / 输入数据 / 你自己的评测脚本都可选，**任意形式**，模型自己盘点组装；没有评测手段就装公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)，其内置评测器（正确性 + median 计时 + mutation sentinel 反作弊）开箱即用；
 3. 对模型说"优化这个 kernel"（建议配合 skill），或直接 `/kloop 30` 交给循环；
-4. 会话页顶部出现「算子优化」Tab——曲线、状态、方案、监督，全在里面；想引导随时打字。
+4. 会话页顶部出现「评测」Tab——曲线、状态、方案、监督，全在里面；想引导随时打字。
 
 GPU 在评测命令跑的地方——本机、容器、远程提交都行，插件不关心。
 
@@ -53,7 +53,7 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 装上插件后（部署组合了 `agentPresets` 时），Node 半会把一个「算子优化模式」preset 写进用户 preset 根（`~/.dsh/.agent-presets/kernel-opt/`，**仅当不存在时**；想重置就删掉该目录再重启）。新建会话选这个模式：
 
 - persona 就是任务书的通用半：盘点材料 → `cockpit_plan` 报 resolved plan → 组装评测入口（契约行）→ 自由迭代 → 诚实收尾。你只需要在第一条消息里给三样：**kernel 在哪、怎么评测（或让它用 AKO4ALL 内置评测器）、预算/卡信息**；
-- 该模式的会话「算子优化」Tab **常显示**（不等第一次评测）；
+- 该模式的会话「评测」Tab **常显示**（不等第一次评测）；
 - preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），落盘后想改就直接改——插件永不覆盖已存在的副本；
 - 关闭自动落盘：config `preset.install: false`；换 id：`preset.id`（Tab 常显示判定只认默认 id，改 id 后回退到信号检测）。
 
@@ -99,7 +99,7 @@ dsh plugin --profile web add "github:xieTwim/dsh-kernel-cockpit#<sha>"
 
 ```sh
 dsh --profile web --dump-config | grep kernel-cockpit   # 应出现 bundle 层
-# 在有评测/plan/循环信号的会话里,顶部视图切换出现「算子优化」(无关会话不显示 Tab)
+# 在有评测/plan/循环信号的会话里,顶部视图切换出现「评测」(无关会话不显示 Tab)
 ```
 
 ## 配置（cordis.patch.yml 或设置页）
