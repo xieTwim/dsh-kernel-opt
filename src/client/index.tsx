@@ -49,6 +49,12 @@ const zh = {
   'status.hack': 'reward-hack',
   'status.error': '失败',
   'axis.best': '最佳',
+  'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
+  'loop.stopped': '循环已停({reason})',
+  'loop.hint': '/kloop [预算] 启动循环 · /supervise on 开启第二模型监督',
+  'sup.on': '监督 on',
+  'sup.off': '监督 off',
+  'advice.title': '监督建议',
 } satisfies Record<string, string>
 /** Cockpit locale key union. */
 type CockpitKey = keyof typeof zh
@@ -71,6 +77,12 @@ const en = {
   'status.hack': 'reward-hack',
   'status.error': 'failed',
   'axis.best': 'best',
+  'loop.armed': 'looping · round {round} · {done}/{budget} evals',
+  'loop.stopped': 'loop stopped ({reason})',
+  'loop.hint': '/kloop [budget] arms the loop · /supervise on enables the second model',
+  'sup.on': 'supervisor on',
+  'sup.off': 'supervisor off',
+  'advice.title': 'Supervisor advice',
 } satisfies Record<string, string>
 
 /** Poll cadence — the panel is a dashboard, not a ticker. */
@@ -310,6 +322,7 @@ export function CockpitTab(
       <div style={{ padding: 24, maxWidth: 720, margin: '0 auto', fontFamily: 'system-ui', color: COLOR.dim }}>
         <div style={{ fontSize: 15, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
         <div style={{ fontSize: 13, lineHeight: '22px' }}>{t('empty.body')}</div>
+        <div style={{ fontSize: 12, lineHeight: '20px', marginTop: 10, color: COLOR.caption }}>{t('loop.hint')}</div>
       </div>
     )
   }
@@ -322,6 +335,26 @@ export function CockpitTab(
     }}>
       {/* header chips */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {series?.control?.loop.armed === true
+          ? (
+              <span style={{ ...chipStyle, color: COLOR.curve, borderColor: COLOR.curve }}>
+                ⟳ {t('loop.armed', {
+                  round: series.control.loop.round,
+                  done: series.control.loop.evalsDone,
+                  budget: series.control.loop.budget,
+                })}
+              </span>
+            )
+          : series?.control?.loop.stopReason !== undefined
+            ? <span style={chipStyle}>{t('loop.stopped', { reason: series.control.loop.stopReason })}</span>
+            : null}
+        {series?.control !== undefined && (series.control.supervisor.enabled || series.control.supervisor.configured)
+          ? (
+              <span style={{ ...chipStyle, ...(series.control.supervisor.enabled ? { color: COLOR.warn, borderColor: COLOR.warn } : {}) }}>
+                {t(series.control.supervisor.enabled ? 'sup.on' : 'sup.off')}
+              </span>
+            )
+          : null}
         <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
         {best?.latencyMs !== undefined
           ? <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok }}>{t('chips.best', { latency: formatLatency(best.latencyMs) })}</span>
@@ -379,6 +412,18 @@ export function CockpitTab(
               </div>
             )}
       </div>
+
+      {/* supervisor advice */}
+      {series?.control?.supervisor.lastAdvice !== undefined
+        ? (
+            <div style={{ ...cardStyle, borderColor: COLOR.warn }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: COLOR.warn }}>{t('advice.title')}</div>
+              <div style={{ fontSize: 12, lineHeight: '20px', color: COLOR.dim, whiteSpace: 'pre-wrap' }}>
+                {series.control.supervisor.lastAdvice}
+              </div>
+            </div>
+          )
+        : null}
 
       {/* iteration table */}
       {iterations.length > 0

@@ -44,6 +44,30 @@ export interface WirePlan {
   next?: string
 }
 
+/** Loop + supervisor control state for the panel. */
+export interface WireControl {
+  loop: {
+    /** Whether the kernel loop re-drives this session at turn settle. */
+    armed: boolean
+    /** Armed evaluation budget. */
+    budget: number
+    /** Continuations delivered so far. */
+    round: number
+    /** Completed evaluations at last projection. */
+    evalsDone: number
+    /** Why the loop disarmed, when it did. */
+    stopReason?: string
+  }
+  supervisor: {
+    /** Whether reviews run at continuation points (per-session toggle). */
+    enabled: boolean
+    /** Whether a supervisor model is configured at all (plugin config). */
+    configured: boolean
+    /** Last delivered advice, for display. */
+    lastAdvice?: string
+  }
+}
+
 /** Series payload served at the cockpit route for one session. */
 export interface WireSeries {
   /** Session the series was projected from. */
@@ -58,6 +82,8 @@ export interface WireSeries {
   profileSeqs: number[]
   /** Index into `iterations` of the best honest measurement, if any. */
   bestIndex: number | null
+  /** Loop/supervisor state when the cockpit loop is present for this session. */
+  control?: WireControl
 }
 
 /** Route the Node half serves and the panel polls (query: `?sessionId=`). */
