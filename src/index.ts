@@ -281,9 +281,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     return true
   }
 
-  /** Arming-gate refusal text, shared by /kloop and the control route. */
-  const NEEDS_TASK = 'The kernel loop needs a task first: tell the agent which kernel to optimize '
-    + 'and how to evaluate it, then arm the loop.'
 
   /**
    * The supervisor route reviews would use for a session: the session
@@ -509,12 +506,18 @@ export function apply(ctx: Context, config: Config = {}): void {
       // Re-check idleness and armed state after the (possibly slow) review; a
       // human message or stop that arrived meanwhile owns the session.
       if (!state.armed || lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
+      // A session with a human prompt, an evaluation, or a plan report has a
+      // task in flight; otherwise the continuation redirects the model to a
+      // workspace inventory (the user may have staged the task as files)
+      // instead of "continue" over nothing.
+      const taskKnown = series.iterations.length > 0 || series.plans.length > 0
+        || hasUserTask(session.events)
       agent.followup(createUserMessage({
         content: [{
           type: 'text',
           text: continuationText(
             state.round, decision.evalsDone, state.budget, advice,
-            reviewed && advice === null, stagnationCount(series), finalizeHint,
+            reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
           ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },
@@ -585,13 +588,6 @@ export function apply(ctx: Context, config: Config = {}): void {
             text: state.armed
               ? `armed: round ${String(state.round)}, budget ${String(state.budget)}, supervisor ${supervise}.`
               : `not armed${state.stopReason !== undefined ? ` (last stop: ${state.stopReason})` : ''}; supervisor ${supervise}. Usage: /kloop [budget]`,
-          }
-        }
-        {
-          // Arming gate: no human task in the log means nothing to continue.
-          const session = lctx.sessions.get(SessionId(sessionId))
-          if (session === undefined || !hasUserTask(session.events)) {
-            return { kind: 'error', text: NEEDS_TASK }
           }
         }
         armLoop(sessionId, raw === '' ? defaultBudget : Number(raw))
@@ -686,7 +682,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // loop state as the slash commands. register() returns the route disposer,
   // so each registration rides an effect.
   ctx.inject(['webServer'], (wctx) => {
-    const buildControl = (sessionId: string, series: WireSeries, taskReady: boolean): WireControl => {
+    const buildControl = (sessionId: string, series: WireSeries): WireControl => {
       const state = loops.get(sessionId)
       return {
         loop: {
@@ -695,7 +691,6 @@ export function apply(ctx: Context, config: Config = {}): void {
           round: state?.round ?? 0,
           evalsDone: completedEvals(series),
           available: bridge.arm !== undefined,
-          taskReady,
           defaultBudget,
           ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
         },
@@ -735,7 +730,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             return
           }
           const series = project(rawId, session.events, projection)
-          respond(200, { ...series, control: buildControl(rawId, series, hasUserTask(session.events)) })
+          respond(200, { ...series, control: buildControl(rawId, series) })
         } catch (error) {
           respond(500, { error: error instanceof Error ? error.message : String(error) })
         }
@@ -762,7 +757,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               return
             }
             const series = project(rawId, session.events, projection)
-            respond(200, { control: buildControl(rawId, series, hasUserTask(session.events)) })
+            respond(200, { control: buildControl(rawId, series) })
           } catch (error) {
             respond(500, { error: error instanceof Error ? error.message : String(error) })
           }
@@ -793,15 +788,11 @@ export function apply(ctx: Context, config: Config = {}): void {
                 respond(503, { error: 'loop machinery not composed (commands/llm absent)' })
                 return
               }
-              if (!hasUserTask(session.events)) {
-                error = NEEDS_TASK
-              } else {
-                const raw = body['budget']
-                const budget = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 9999
-                  ? raw
-                  : defaultBudget
-                arm(sessionId, budget)
-              }
+              const raw = body['budget']
+              const budget = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 9999
+                ? raw
+                : defaultBudget
+              arm(sessionId, budget)
             } else if (action === 'loop-stop') {
               stopLoop(sessionId)
             } else if (action === 'supervise-on') {
@@ -826,7 +817,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               return
             }
             const series = project(sessionId, session.events, projection)
-            const control = buildControl(sessionId, series, hasUserTask(session.events))
+            const control = buildControl(sessionId, series)
             if (error !== null) {
               respond(409, { error, control })
               return

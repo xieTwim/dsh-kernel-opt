@@ -137,12 +137,6 @@ export interface WireControl {
     stopReason?: string
     /** Whether the loop machinery is composed (commands/llm present). */
     available: boolean
-    /**
-     * Whether the session carries a direct human prompt yet. Arming is gated
-     * on it: a loop started over an empty session has no task to continue and
-     * primes the model to invent one from ambient filesystem state.
-     */
-    taskReady: boolean
     /** Budget an argument-less arm would use (config `loop.defaultBudget`). */
     defaultBudget: number
   }
@@ -264,5 +258,9 @@ export const WRAPUP_LINE_PREFIX = '[kernel-loop wrap-up]'
 export const REVIEW_HEADER = 'Supervisor review (advisory, from the second model):'
 /** Whole line recording that the supervisor reviewed and approved. */
 export const REVIEW_OK_LINE = 'Supervisor review: OK.'
-/** Start of the fixed trailer paragraph (terminates the advice block). */
-export const CONTINUE_TRAILER = 'Continue optimizing per the original task'
+/**
+ * Start of the fixed trailer paragraph (terminates the advice block). The
+ * anchor is task-neutral: the sentence completing it adapts to whether the
+ * session already carries a task (see `continuationText`).
+ */
+export const CONTINUE_TRAILER = 'Continue the kernel-optimization run'

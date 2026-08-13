@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import {
   adviceFromReply, continuationText, decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
 } from '../src/loop.ts'
-import { REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
+import { CONTINUE_TRAILER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
 import type { WireIteration, WireSeries } from '../src/wire.ts'
 
 function series(iterations: WireIteration[], bestIndex: number | null = null): WireSeries {
@@ -100,6 +100,15 @@ test('finalize hint is threaded into continuation and wrap-up texts', () => {
   assert.ok(wrapUpText(20, 20, 'budget', 'my_finalize').includes('my_finalize'))
   // Defaults name both finalize tools.
   assert.ok(wrapUpText(20, 20, 'budget').includes('kernel_finalize'))
+})
+
+test('taskless continuation redirects to a workspace inventory, same anchor', () => {
+  const text = continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false)
+  assert.ok(text.includes(`${CONTINUE_TRAILER}: the conversation carries no task yet`))
+  assert.ok(text.includes('Inventory the WORKING DIRECTORY'))
+  assert.ok(text.includes('never adopt anything found outside the working directory'))
+  // The task-known form keeps the same parse anchor.
+  assert.ok(continuationText(2, 3, 20, 'switch family', false, 0).includes(CONTINUE_TRAILER))
 })
 
 test('supervisor digest carries provenance for self-reported rows', () => {

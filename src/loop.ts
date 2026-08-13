@@ -194,6 +194,11 @@ export function adviceFromReply(reply: string): string | null {
  *   re-assessment nudge rides along from 3 — data plus a suggestion, never an
  *   order; the agent owns its policy).
  * @param finalizeHint - finalize tool name(s) to name in the closing line.
+ * @param taskKnown - whether the session already carries a task (a human
+ *   prompt, or a run in progress). When false the trailer redirects to a
+ *   workspace inventory instead of "continue" — the user may have staged the
+ *   task as files in the working directory; anything OUTSIDE the workspace
+ *   stays off-limits, and no task anywhere means ask and stop.
  * @returns the followup text.
  */
 export function continuationText(
@@ -204,6 +209,7 @@ export function continuationText(
   reviewedOk = false,
   stagnant = 0,
   finalizeHint = 'run_finalize / kernel_finalize',
+  taskKnown = true,
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
@@ -217,11 +223,21 @@ export function continuationText(
   } else if (reviewedOk) {
     lines.push('', REVIEW_OK_LINE)
   }
-  lines.push(
-    '',
-    `${CONTINUE_TRAILER}: analyse the latest result, state the plan with kernel_plan if it changed, improve the kernel, and evaluate again.`,
-    `If you are done or the remaining budget cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
-  )
+  if (taskKnown) {
+    lines.push(
+      '',
+      `${CONTINUE_TRAILER}: analyse the latest result, state the plan with kernel_plan if it changed, improve the kernel, and evaluate again.`,
+      `If you are done or the remaining budget cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
+    )
+  } else {
+    lines.push(
+      '',
+      `${CONTINUE_TRAILER}: the conversation carries no task yet. Inventory the WORKING DIRECTORY for the `
+      + 'task the user prepared (prompt/task files, kernels, bench scripts) and start from what you find. '
+      + 'If the workspace carries no task either, ask the user what to optimize and stop — never adopt '
+      + 'anything found outside the working directory.',
+    )
+  }
   return lines.join('\n')
 }
 

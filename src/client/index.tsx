@@ -52,11 +52,11 @@ const zh = {
   'axis.best': '最佳',
   'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
   'loop.stopped': '循环已停:{reason}',
-  'ctl.needTask': '先把任务告诉 Agent(要优化的 kernel 和评测方式),再启动循环',
   'pop.budget': '循环次数',
   'pop.supervise': '外部监督',
   'pop.model': '监督模型',
-  'pop.footer': '优化曲线与完整记录在「评测」页',
+  'pop.supNote': '已开启:每轮开始前由监督模型复审,建议自动转给 Agent',
+  'pop.footer': '启动后 Agent 立即开工,每轮结束自动续跑;输入框里的草稿不会被代发。优化曲线与完整记录在「评测」页。',
   'sup.on': 'on',
   'sup.off': 'off',
   'sup.needCfg': '未配置监督模型:下拉选一个,或在插件 config 加 supervisor: { provider, model }',
@@ -67,7 +67,7 @@ const zh = {
   'ctl.stop': '停止循环',
   'ctl.budget': '循环次数',
   'advice.title': '监督记录',
-  'advice.waiting': '监督已开启,将在下一个续跑点复审。',
+  'advice.waiting': '监督已开启:每当一轮结束、循环驱动下一轮时,监督模型先复审整个 run,建议自动转给 Agent 并记录在这里。',
   'advice.round': '第 {n} 轮',
   'reason.finalized': '已 finalize',
   'reason.budget': '预算用尽,已请求收尾',
@@ -116,11 +116,11 @@ const en = {
   'axis.best': 'best',
   'loop.armed': 'looping · round {round} · {done}/{budget} evals',
   'loop.stopped': 'loop stopped: {reason}',
-  'ctl.needTask': 'Tell the agent the task first (which kernel, how to evaluate), then arm the loop',
   'pop.budget': 'Loop count',
   'pop.supervise': 'External supervision',
   'pop.model': 'Supervisor model',
-  'pop.footer': 'Curve and full records live on the Evaluations tab',
+  'pop.supNote': 'On: the supervisor reviews before each round and its advice is passed to the agent',
+  'pop.footer': 'Starting puts the agent to work immediately and re-drives it after each round; composer drafts are not auto-sent. Curve and full records live on the Evaluations tab.',
   'sup.on': 'on',
   'sup.off': 'off',
   'sup.needCfg': 'No supervisor model configured: pick one below, or add supervisor: { provider, model } to the plugin config',
@@ -131,7 +131,7 @@ const en = {
   'ctl.stop': 'Stop loop',
   'ctl.budget': 'Loop count',
   'advice.title': 'Supervision log',
-  'advice.waiting': 'Supervision on; it reviews at the next continuation point.',
+  'advice.waiting': 'Supervision on: whenever a round ends and the loop drives the next one, the supervisor reviews the run first; its advice is passed to the agent and recorded here.',
   'advice.round': 'round {n}',
   'reason.finalized': 'finalized',
   'reason.budget': 'budget exhausted, wrap-up requested',
@@ -958,9 +958,7 @@ export function KernelOptTab(
                   />
                   <button
                     type="button"
-                    style={{ ...primaryBtnStyle, ...(control.loop.taskReady ? {} : disabledBtnStyle) }}
-                    disabled={!control.loop.taskReady}
-                    title={control.loop.taskReady ? undefined : t('ctl.needTask')}
+                    style={primaryBtnStyle}
                     onClick={() => {
                       const budget = Number(budgetDraft)
                       void post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
@@ -1216,7 +1214,6 @@ export function ChatLoopButton(
     }
     refetch()
   }
-  const ready = control.loop.taskReady
   const budgetValue = budgetDraft ?? String(control.loop.defaultBudget)
   const arm = async (): Promise<void> => {
     const budget = Number(budgetValue)
@@ -1258,6 +1255,9 @@ export function ChatLoopButton(
                     onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
                   />
                 </div>
+                {control.supervisor.enabled
+                  ? <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>{t('pop.supNote')}</div>
+                  : null}
                 <div style={popoverRowStyle}>
                   <span>{t('pop.model')}</span>
                   <SupervisorSelect
@@ -1270,14 +1270,13 @@ export function ChatLoopButton(
                 </div>
                 <button
                   type="button"
-                  style={{ ...primaryBtnStyle, ...(ready ? {} : disabledBtnStyle), marginTop: 2 }}
-                  disabled={!ready}
+                  style={{ ...primaryBtnStyle, marginTop: 2 }}
                   onClick={() => { void arm() }}
                 >
                   ⟳ {t('ctl.start')}
                 </button>
                 <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
-                  {ready ? t('pop.footer') : t('ctl.needTask')}
+                  {t('pop.footer')}
                 </div>
               </div>
             </>
