@@ -2,11 +2,12 @@
  * dsh-kernel-cockpit — Node half.
  *
  * Live kernel-optimization cockpit for DeepSeek Harness. The session log is
- * the only data source: kernel evaluations (e.g. the AKO runtime's MCP
- * `kernel_evaluate`), profiler calls, finalize picks, and the model's own
- * `cockpit_plan` reports are projected out of `session.events` per query and
- * served as JSON for the browser panel — no plugin-side derived state to
- * drift or leak, and replayed sessions render identically.
+ * the only data source: kernel evaluations (evaluator tool results, or
+ * `KERNEL_COCKPIT_EVAL=` contract trailers in shell output), profiler calls,
+ * finalize picks, and the model's own `cockpit_plan` reports are projected
+ * out of `session.events` per query and served as JSON for the browser panel
+ * — no plugin-side derived state to drift or leak, and replayed sessions
+ * render identically.
  *
  * On top of the projection sit the run controls:
  * - `cockpit_plan` / `self_compact` tools — the model's levers (plan
@@ -50,10 +51,10 @@ const PLUGIN_ID = 'kernel-cockpit'
 const SETTLE_DELAY_MS = 1200
 
 /**
- * Cockpit configuration. All fields optional; tool-name defaults target the
- * AKO runtime MCP tools (`kernel_evaluate` / `kernel_profile` /
- * `run_finalize`). Names match exactly or as a separator-delimited suffix, so
- * MCP server prefixes (e.g. `mcp__ako__kernel_evaluate`) are covered without
+ * Cockpit configuration. All fields optional; tool-name defaults cover any
+ * evaluator named `kernel_evaluate` / `kernel_profile` / `run_finalize`.
+ * Names match exactly or as a separator-delimited suffix, so MCP server
+ * prefixes (e.g. `mcp__myeval__kernel_evaluate`) are covered without
  * configuration.
  */
 export interface Config {
