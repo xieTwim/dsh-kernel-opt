@@ -1,12 +1,12 @@
 # dsh-kernel-cockpit
 
-**Kernel 优化看板** — DeepSeek Harness 插件:模型在长优化循环里跑,人类在会话页的「优化看板」Tab 实时看到 **latency 曲线、每个点的正确性/reward-hack 状态、profile ▲、首达最佳 ★ 与 finalize ⚑ 标记、模型当前方案**,并可随时插话引导(原生 steering);模型自己可以在换方案族时压缩上下文继续干(`self_compact`)。
+**算子优化驾驶舱** — DeepSeek Harness 插件:模型在长优化循环里跑,人类在会话页的「算子优化」Tab 实时看到 **latency 曲线、每个点的正确性/reward-hack 状态、profile ▲、首达最佳 ★ 与 finalize ⚑ 标记、模型当前方案**,并可随时插话引导(原生 steering);模型自己可以在换方案族时压缩上下文继续干(`self_compact`)。
 
 数据全部从**会话日志**投影派生(零插件侧状态):兼容任何把评测结果以 JSON 写进 tool result 的 bench 工具,默认对准 [AKO Runtime](../ako-runtime) 的 MCP 工具(`kernel_evaluate` / `kernel_profile` / `run_finalize`)。回放的会话渲染结果与实时完全一致。
 
 | 组成 | 说明 |
 |---|---|
-| 「优化看板」会话 Tab | `conversation.view` 槽;SVG 曲线(跨度大时自动 log 轴)+ 状态芯片 + 当前方案卡 + 监督建议卡 + 迭代表 |
+| 「算子优化」会话 Tab | `conversation.view` 槽;SVG 曲线(跨度大时自动 log 轴)+ 状态芯片 + 当前方案卡 + 监督建议卡 + 迭代表 |
 | `cockpit_plan` 工具 | 模型汇报 phase/approach/hypothesis/next;调用本身即记录 |
 | `self_compact` 工具 | 包装官方 `compaction` seam(`compactNow`);仅当组合里有 compaction provider 时注册 |
 | `/kloop [预算]` 命令 | **kernel 优化循环**:按 run 状态驱动的续跑(不是定时器)——turn 落定且预算未尽、未 finalize、上轮有进展才续投;`stop`/`status` 子命令 |
@@ -50,7 +50,7 @@ dsh plugin --profile web add "github:<owner>/dsh-kernel-cockpit#<sha>"
 
 ```sh
 dsh --profile web --dump-config | grep kernel-cockpit   # 应出现 bundle 层
-# 打开任意会话 → 顶部视图切换出现「优化看板」
+# 打开任意会话 → 顶部视图切换出现「算子优化」
 ```
 
 ## 配置(cordis.patch.yml 或设置页)

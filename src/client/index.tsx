@@ -1,7 +1,7 @@
 /**
  * dsh-kernel-cockpit — browser half.
  *
- * "优化驾驶舱" session tab (`conversation.view` slot): polls the Node half's
+ * 「算子优化」 session tab (`conversation.view` slot): polls the Node half's
  * series route and renders the live optimization picture — latency curve over
  * evaluations (log scale when the journey is wide), correctness/reward-hack
  * status per point, profiler ▲ and finalize ★ marks, the model's latest
@@ -31,6 +31,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const NS = 'kernel-cockpit'
 const zh = {
+  'tab.label': '算子优化',
   'empty.title': '还没有评测数据',
   'empty.body': '当 agent 调用 kernel 评测工具(如 kernel_evaluate)后,这里会实时出现优化曲线;模型调用 cockpit_plan 后会展示当前方案。',
   'chips.iterations': '{count} 次评测',
@@ -60,6 +61,7 @@ const zh = {
 /** Cockpit locale key union. */
 type CockpitKey = keyof typeof zh
 const en = {
+  'tab.label': 'Kernel Opt',
   'empty.title': 'No evaluations yet',
   'empty.body': 'Once the agent calls a kernel bench tool (e.g. kernel_evaluate) the optimization curve appears here live; cockpit_plan calls show the current plan.',
   'chips.iterations': '{count} evaluations',
@@ -491,13 +493,16 @@ export const inject = ['slots', 'locale']
 
 /** Mount the locale namespace and the session tab. */
 export function apply(ctx: Context): void {
+  const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'kernel-cockpit: dictionaries')
   ctx.slots.inject('conversation.view', () =>
     ctx.slots.register({
       name: 'conversation.view',
       id: 'kernel-cockpit',
       order: 30,
-      label: '优化看板',
+      // Locale-thunked like the host's own tabs (ui-trajectory), so the tab
+      // name follows the active language without re-registration.
+      label: () => t('tab.label'),
       locale: NS,
     }, CockpitTab))
 }
