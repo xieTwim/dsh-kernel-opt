@@ -84,6 +84,25 @@ test('project: iterations, plan, profile marks, finalize star, best index', () =
   assert.equal(series.iterations[1]?.correct, false)
   // the still-pending call shows as pending.
   assert.equal(series.iterations[3]?.pending, true)
+  // explicit speedup metric is forwarded verbatim.
+  assert.equal(series.iterations[0]?.speedup, 1.0)
+})
+
+test('project: speedup derives from ref_runtime_ms when no explicit metric', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    call('kernel_evaluate', 'c1', {}),
+    result('c1', {
+      evaluation_id: '0001', compiled: true, correct: true, latency_ms: 2.0,
+      native_metrics: { 'kernelbench.ref_runtime_ms': 8.0 },
+    }),
+    call('kernel_evaluate', 'c2', {}),
+    result('c2', { evaluation_id: '0002', compiled: true, correct: true, latency_ms: 4.0 }),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations[0]?.speedup, 4.0)
+  // no evaluator-reported reference at all → no speedup invented.
+  assert.equal(series.iterations[1]?.speedup, undefined)
 })
 
 test('project: reward-hack and error rows are excluded from best', () => {
