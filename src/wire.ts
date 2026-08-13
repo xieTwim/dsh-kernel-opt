@@ -151,6 +151,12 @@ export interface WireControl {
     enabled: boolean
     /** Whether any supervisor route is in effect (config or session override). */
     configured: boolean
+    /**
+     * The plugin-config default route, when one is configured — what the
+     * picker's "default" option resolves to, shown even while a session
+     * override is active.
+     */
+    configRoute?: { provider: string; model: string }
     /** The route reviews would use, and where it came from. */
     effective?: {
       provider: string
