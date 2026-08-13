@@ -18,7 +18,7 @@ export default [
     },
   },
   {
-    name: '@xsyshuishui/dsh-kernel-cockpit/client',
+    name: '@xietwim/dsh-kernel-cockpit/client',
     entry: { client: 'src/client/index.tsx' },
     outDir: 'lib',
     format: 'cjs',
@@ -45,7 +45,7 @@ export default [
     },
     outputOptions: {
       entryFileNames: 'client.js',
-      banner: 'window.__ModuleLoader__.load({ id: "@xsyshuishui/dsh-kernel-cockpit", factory: (require) => {',
+      banner: 'window.__ModuleLoader__.load({ id: "@xietwim/dsh-kernel-cockpit", factory: (require) => {',
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },

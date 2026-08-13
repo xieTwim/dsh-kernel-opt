@@ -19,7 +19,7 @@
  *   each continuation point and rides its advice on the continuation
  *   message; failures degrade to "no advice", never a stalled loop.
  *
- * @module @xsyshuishui/dsh-kernel-cockpit
+ * @module @xietwim/dsh-kernel-cockpit
  */
 import type { IncomingMessage } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
