@@ -5,7 +5,10 @@
  * all agree by construction.
  * @module
  */
-import type { WireIteration, WirePlan, WireSeries } from './wire.ts'
+import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
+import {
+  CONTINUE_TRAILER, LOOP_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+} from './wire.ts'
 
 /** Structural slice of a logged session event the projection reads. */
 export interface ProjectionEvent {
@@ -24,14 +27,17 @@ export interface ProjectionConfig {
   readonly finalizeTools: readonly string[]
   /** Exact name of the plan tool. */
   readonly planTool: string
+  /** Match list for structured file-change tools (write/edit shapes). */
+  readonly changeTools: readonly string[]
 }
 
-/** Defaults target the AKO runtime MCP tools plus this plugin's own tools. */
+/** Defaults target the AKO runtime MCP tools plus the host's tool-fs pair. */
 export const DEFAULT_PROJECTION: ProjectionConfig = {
   benchTools: ['kernel_evaluate'],
   profileTools: ['kernel_profile'],
   finalizeTools: ['run_finalize'],
   planTool: 'cockpit_plan',
+  changeTools: ['write', 'edit'],
 }
 
 /**
@@ -183,6 +189,18 @@ function speedupFrom(metrics: Record<string, number> | undefined, latencyMs: num
   return undefined
 }
 
+/** String entries of an unknown array, each capped, the list capped. */
+function stringList(value: unknown, entryCap = 300, listCap = 8): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const out: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    out.push(entry.length > entryCap ? `${entry.slice(0, entryCap)}…` : entry)
+    if (out.length >= listCap) break
+  }
+  return out.length > 0 ? out : undefined
+}
+
 /** Fill one iteration point from a parsed evaluator payload. */
 function fillFromPayload(point: WireIteration, payload: Record<string, unknown>): void {
   if (typeof payload['evaluation_id'] === 'string') point.evaluationId = payload['evaluation_id']
@@ -196,6 +214,101 @@ function fillFromPayload(point: WireIteration, payload: Record<string, unknown>)
   if (speedup !== undefined) point.speedup = speedup
   if (payload['reward_hack_detected'] === true) point.rewardHack = true
   if (typeof payload['error'] === 'string' && payload['error'].length > 0) point.error = payload['error']
+  const blocking = stringList(payload['blocking'])
+  if (blocking !== undefined) point.blocking = blocking
+  const advisory = stringList(payload['advisory'])
+  if (advisory !== undefined) point.advisory = advisory
+  const notMeasured = stringList(payload['not_measured'])
+  if (notMeasured !== undefined) point.notMeasured = notMeasured
+  if (payload['evaluator_failed'] === true) point.evaluatorFailed = true
+}
+
+/** Wire caps for change payloads (a kernel file is a few KB; keep polls sane). */
+const WRITE_CONTENT_CAP = 12_000
+const EDIT_TEXT_CAP = 3_000
+const CHANGES_PER_ITERATION_CAP = 8
+
+/** Cap one text field, marking the change truncated when it cut. */
+function capText(change: WireChange, text: string, cap: number): string {
+  if (text.length <= cap) return text
+  change.truncated = true
+  return `${text.slice(0, cap)}…`
+}
+
+/** Whether two logged paths plausibly address the same file. */
+function samePath(a: string, b: string): boolean {
+  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
+}
+
+/**
+ * Read a structured file-change call (`write` / `edit` arg shapes) into a
+ * pending change record. Returns the target path alongside so the caller can
+ * match it against the next evaluation's artifact.
+ */
+function changeSlice(call: CallSlice, seq: number): { path: string; change: WireChange } | null {
+  const args = parseResultJson(call.argumentsJson)
+  const path = args?.['file_path']
+  if (args === null || typeof path !== 'string' || path.length === 0) return null
+  const content = args['content']
+  if (typeof content === 'string') {
+    const change: WireChange = { seq, tool: call.name, kind: 'write' }
+    change.content = capText(change, content, WRITE_CONTENT_CAP)
+    return { path, change }
+  }
+  const oldText = args['old_string']
+  const newText = args['new_string']
+  if (typeof oldText === 'string' && typeof newText === 'string') {
+    const change: WireChange = { seq, tool: call.name, kind: 'edit' }
+    change.oldText = capText(change, oldText, EDIT_TEXT_CAP)
+    change.newText = capText(change, newText, EDIT_TEXT_CAP)
+    if (args['replace_all'] === true) change.replaceAll = true
+    return { path, change }
+  }
+  return null
+}
+
+/** Plugin id whose `user/message` events carry the loop protocol texts. */
+const LOOP_PLUGIN_ID = 'kernel-cockpit'
+
+/**
+ * Parse a kernel-loop continuation/wrap-up message back out of a
+ * `user/message` event. The message data is the logged UserMessage (a
+ * `message` wrapper is accepted against shape drift); only plugin-sourced
+ * messages carrying the loop's first-line prefixes qualify.
+ */
+function roundSlice(event: ProjectionEvent): WireRound | null {
+  if (event.type !== 'user/message') return null
+  const data = asRecord(event.data)
+  if (data === null) return null
+  const message = asRecord(data['message']) ?? data
+  const source = asRecord(message['source'])
+  if (source?.['kind'] !== 'plugin' || source['plugin'] !== LOOP_PLUGIN_ID) return null
+  const text = collectResultText(message['content'])
+  const wrapUp = text.startsWith(WRAPUP_LINE_PREFIX)
+  if (!wrapUp && !text.startsWith(LOOP_LINE_PREFIX)) return null
+  const round: WireRound = { seq: event.seq }
+  if (wrapUp) round.wrapUp = true
+  const counters = /(\d+)\/(\d+) evaluations used/.exec(text)
+  if (counters !== null) {
+    round.evalsUsed = Number(counters[1])
+    round.budget = Number(counters[2])
+  }
+  if (!wrapUp) {
+    const num = /^\[kernel-loop round (\d+)\]/.exec(text)
+    if (num !== null) round.round = Number(num[1])
+  }
+  if (text.includes(REVIEW_OK_LINE)) {
+    round.review = 'ok'
+  } else {
+    const headerAt = text.indexOf(REVIEW_HEADER)
+    if (headerAt >= 0) {
+      const rest = text.slice(headerAt + REVIEW_HEADER.length)
+      const trailerAt = rest.indexOf(CONTINUE_TRAILER)
+      const advice = (trailerAt >= 0 ? rest.slice(0, trailerAt) : rest).trim()
+      if (advice.length > 0) round.review = advice
+    }
+  }
+  return round
 }
 
 /**
@@ -213,11 +326,19 @@ export function project(
   const iterations: WireIteration[] = []
   const plans: WirePlan[] = []
   const profileSeqs: number[] = []
+  const rounds: WireRound[] = []
   const finalizedIds = new Set<string>()
   /** callId → pending bench iteration awaiting its result. */
   const pendingBench = new Map<string, WireIteration>()
+  /** Structured file changes since the previous bench call, any path. */
+  let pendingChanges: { path: string; change: WireChange }[] = []
 
   for (const event of events) {
+    const round = roundSlice(event)
+    if (round !== null) {
+      rounds.push(round)
+      continue
+    }
     const call = callSlice(event)
     if (call !== null) {
       if (call.name === config.planTool) {
@@ -240,8 +361,29 @@ export function project(
         if (typeof id === 'string') finalizedIds.add(id)
         continue
       }
+      if (matchesTool(call.name, config.changeTools)) {
+        const change = changeSlice(call, event.seq)
+        if (change !== null) pendingChanges.push(change)
+        continue
+      }
       if (matchesTool(call.name, config.benchTools)) {
         const point: WireIteration = { seq: event.seq, tool: call.name, pending: true }
+        const args = parseResultJson(call.argumentsJson)
+        const artifactPath = args?.['artifact_path']
+        if (typeof artifactPath === 'string' && artifactPath.length > 0) {
+          point.artifactPath = artifactPath
+          const matched = pendingChanges
+            .filter(entry => samePath(entry.path, artifactPath))
+            .map(entry => entry.change)
+            .slice(-CHANGES_PER_ITERATION_CAP)
+          if (matched.length > 0) point.changes = matched
+        }
+        const subset = args?.['workload_indices']
+        if (Array.isArray(subset) && subset.every((n): n is number => typeof n === 'number')) {
+          if (subset.length > 0) point.workloadSubset = subset
+        }
+        // Changes attribute to exactly one evaluation: the next one.
+        pendingChanges = []
         iterations.push(point)
         pendingBench.set(call.callId, point)
       }
@@ -273,5 +415,5 @@ export function project(
     if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) bestIndex = i
   }
 
-  return { sessionId, updatedAt: Date.now(), iterations, plans, profileSeqs, bestIndex }
+  return { sessionId, updatedAt: Date.now(), iterations, plans, profileSeqs, rounds, bestIndex }
 }

@@ -21,6 +21,7 @@
  *
  * @module @xsyshuishui/dsh-kernel-cockpit
  */
+import type { IncomingMessage } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -32,11 +33,11 @@ import { DEFAULT_PROJECTION, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
-  decideContinuation, initialLoopState, supervisorDigest,
+  decideContinuation, initialLoopState, supervisorDigest, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
-import { SERIES_PATH } from './wire.ts'
-import type { WireControl } from './wire.ts'
+import { CONTROL_PATH, SERIES_PATH } from './wire.ts'
+import type { WireControl, WireSeries } from './wire.ts'
 
 export const name = 'kernel-cockpit'
 export const inject = ['tools', 'agents', 'sessions']
@@ -61,6 +62,8 @@ export interface Config {
   profileTools?: string[]
   /** Tool names treated as finalize picks (★ marker via `evaluation_id`). */
   finalizeTools?: string[]
+  /** Tool names treated as structured artifact changes (default `write`/`edit`). */
+  changeTools?: string[]
   /** Kernel-loop tuning. */
   loop?: {
     /** Budget when `/kloop` is armed without a number (default 20). */
@@ -90,8 +93,46 @@ function resolveProjection(config: Config): ProjectionConfig {
     benchTools: config.benchTools ?? DEFAULT_PROJECTION.benchTools,
     profileTools: config.profileTools ?? DEFAULT_PROJECTION.profileTools,
     finalizeTools: config.finalizeTools ?? DEFAULT_PROJECTION.finalizeTools,
+    changeTools: config.changeTools ?? DEFAULT_PROJECTION.changeTools,
     planTool: DEFAULT_PROJECTION.planTool,
   }
+}
+
+/** Read and parse a small JSON request body; null on any shape/size problem. */
+function readJsonBody(req: IncomingMessage, maxBytes = 16_384): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    let settled = false
+    const done = (value: Record<string, unknown> | null): void => {
+      if (!settled) {
+        settled = true
+        resolve(value)
+      }
+    }
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > maxBytes) {
+        done(null)
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      try {
+        const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        done(typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+          ? parsed as Record<string, unknown>
+          : null)
+      } catch {
+        done(null)
+      }
+    })
+    req.on('error', () => {
+      done(null)
+    })
+  })
 }
 
 /**
@@ -114,6 +155,32 @@ export function apply(ctx: Context, config: Config = {}): void {
       loops.set(sessionId, state)
     }
     return state
+  }
+
+  /**
+   * Loop-machinery face shared with the control route. `arm` exists exactly
+   * while the commands/llm composition is live; the route degrades to an
+   * explicit 503 instead of arming a loop nothing would drive.
+   */
+  const bridge: { arm?: (sessionId: string, budget: number) => void } = {}
+
+  /** Disarm a session's loop by human decision (no wrap-up round). */
+  const stopLoop = (sessionId: string): boolean => {
+    const state = loops.get(sessionId)
+    if (state === undefined || !state.armed) return false
+    state.armed = false
+    state.stopReason = 'stopped'
+    return true
+  }
+
+  /** Toggle supervision; returns an error string when the gate fails. */
+  const setSupervise = (sessionId: string, enabled: boolean): string | null => {
+    if (enabled && config.supervisor === undefined) {
+      return 'No supervisor model configured. Add to the kernel-cockpit plugin config: '
+        + 'supervisor: { provider: <route>, model: <id> } — a distinct route/model from the primary.'
+    }
+    stateFor(sessionId).supervise = enabled
+    return null
   }
 
   // cockpit_plan — the call itself is the record: the projection reads the
@@ -177,12 +244,15 @@ export function apply(ctx: Context, config: Config = {}): void {
       timers.clear()
     }, 'kernel-cockpit: loop timers')
 
-    /** One supervisor review; any failure degrades to null advice. */
-    const review = async (sessionId: string, state: LoopState): Promise<string | null> => {
+    /** One supervisor review; any failure degrades to unreviewed/no advice. */
+    const review = async (
+      sessionId: string,
+      state: LoopState,
+    ): Promise<{ advice: string | null; reviewed: boolean }> => {
       const supervisor = config.supervisor
-      if (supervisor === undefined || !state.supervise) return null
+      if (supervisor === undefined || !state.supervise) return { advice: null, reviewed: false }
       const session = lctx.sessions.get(SessionId(sessionId))
-      if (session === undefined) return null
+      if (session === undefined) return { advice: null, reviewed: false }
       try {
         const digest = supervisorDigest(project(sessionId, session.events, projection), state)
         let reply = ''
@@ -201,10 +271,10 @@ export function apply(ctx: Context, config: Config = {}): void {
         for await (const chunk of stream) {
           if (chunk.type === 'text-delta') reply += chunk.text
         }
-        return adviceFromReply(reply)
+        return { advice: adviceFromReply(reply), reviewed: true }
       } catch {
         // A broken or slow reviewer must never stall the primary loop.
-        return null
+        return { advice: null, reviewed: false }
       }
     }
 
@@ -229,18 +299,33 @@ export function apply(ctx: Context, config: Config = {}): void {
         state.stopReason = decision.reason
         return
       }
+      if (decision.action === 'wrap-up') {
+        // Budget/stall endings finish clean: disarm, then one closing message
+        // asking the model to finalize its best honest result. No review —
+        // the budget is spent; the wrap-up instruction is fixed.
+        state.armed = false
+        state.stopReason = decision.reason
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: wrapUpText(decision.evalsDone, state.budget, decision.reason) }],
+          source: { kind: 'plugin', plugin: PLUGIN_ID },
+        }))
+        return
+      }
       state.noProgressRounds = state.round > 0 && decision.evalsDone <= state.lastEvalCount
         ? state.noProgressRounds + 1
         : 0
       state.round += 1
       state.lastEvalCount = decision.evalsDone
-      const advice = await review(sessionId, state)
+      const { advice, reviewed } = await review(sessionId, state)
       state.lastAdvice = advice ?? state.lastAdvice
       // Re-check idleness after the (possibly slow) review; a human message
       // that arrived meanwhile owns the session.
       if (lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
       agent.followup(createUserMessage({
-        content: [{ type: 'text', text: continuationText(state.round, decision.evalsDone, state.budget, advice) }],
+        content: [{
+          type: 'text',
+          text: continuationText(state.round, decision.evalsDone, state.budget, advice, reviewed && advice === null),
+        }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },
       }))
     }
@@ -252,6 +337,22 @@ export function apply(ctx: Context, config: Config = {}): void {
       }, delayMs)
       timers.add(timer)
     }
+
+    /** Arm (or re-arm) the loop for a session; shared by /kloop and the control route. */
+    const armLoop = (sessionId: string, budget: number): void => {
+      const state = stateFor(sessionId)
+      state.armed = true
+      state.budget = budget
+      state.round = 0
+      state.lastEvalCount = 0
+      state.noProgressRounds = 0
+      delete state.stopReason
+      scheduleCheckpoint(sessionId, 10)
+    }
+    bridge.arm = armLoop
+    lctx.effect(() => () => {
+      delete bridge.arm
+    }, 'kernel-cockpit: loop bridge')
 
     // The loop trigger is the logged turn boundary — the same surface the
     // projection reads, so a continuation can never race its own data.
@@ -276,9 +377,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const sessionId = invocation.agent.id
         const state = stateFor(sessionId)
         if (raw === 'stop') {
-          if (!state.armed) return { kind: 'error', text: 'kernel loop is not armed.' }
-          state.armed = false
-          state.stopReason = 'stopped'
+          if (!stopLoop(sessionId)) return { kind: 'error', text: 'kernel loop is not armed.' }
           return { kind: 'success', text: 'Kernel loop stopped.' }
         }
         if (raw === 'status' || (raw !== '' && !/^\d+$/.test(raw))) {
@@ -290,17 +389,12 @@ export function apply(ctx: Context, config: Config = {}): void {
               : `not armed${state.stopReason !== undefined ? ` (last stop: ${state.stopReason})` : ''}; supervisor ${supervise}. Usage: /kloop [budget]`,
           }
         }
-        state.armed = true
-        state.budget = raw === '' ? defaultBudget : Number(raw)
-        state.round = 0
-        state.lastEvalCount = 0
-        state.noProgressRounds = 0
-        delete state.stopReason
-        scheduleCheckpoint(sessionId, 10)
+        armLoop(sessionId, raw === '' ? defaultBudget : Number(raw))
         return {
           kind: 'success',
           text: `Kernel loop armed: budget ${String(state.budget)} evaluations, supervisor ${state.supervise ? 'on' : 'off'}. `
-            + 'It continues the run whenever a turn settles unfinished; /kloop stop disarms.',
+            + 'It continues the run whenever a turn settles unfinished, and asks for a finalize before stopping on '
+            + 'budget/stall; /kloop stop disarms.',
         }
       },
     })
@@ -314,18 +408,16 @@ export function apply(ctx: Context, config: Config = {}): void {
         const raw = invocation.rawInput.trim()
         const state = stateFor(invocation.agent.id)
         if (raw === 'on') {
-          if (config.supervisor === undefined) {
-            return {
-              kind: 'error',
-              text: 'No supervisor model configured. Add to the kernel-cockpit plugin config: '
-                + 'supervisor: { provider: <route>, model: <id> } — a distinct route/model from the primary.',
-            }
+          const error = setSupervise(invocation.agent.id, true)
+          if (error !== null) return { kind: 'error', text: error }
+          const supervisor = config.supervisor
+          return {
+            kind: 'success',
+            text: `Supervisor on${supervisor !== undefined ? ` (${supervisor.provider}/${supervisor.model})` : ''}; reviews run at kernel-loop continuation points.`,
           }
-          state.supervise = true
-          return { kind: 'success', text: `Supervisor on (${config.supervisor.provider}/${config.supervisor.model}); reviews run at kernel-loop continuation points.` }
         }
         if (raw === 'off') {
-          state.supervise = false
+          setSupervise(invocation.agent.id, false)
           return { kind: 'success', text: 'Supervisor off.' }
         }
         return {
@@ -336,10 +428,30 @@ export function apply(ctx: Context, config: Config = {}): void {
     })
   })
 
-  // Series route — pure projection of session.events per query, plus the
-  // loop/supervisor control state. register() returns the route disposer, so
-  // the registration rides an effect.
+  // Series + control routes — the series is a pure projection of
+  // session.events per query; the control route drives the same in-memory
+  // loop state as the slash commands. register() returns the route disposer,
+  // so each registration rides an effect.
   ctx.inject(['webServer'], (wctx) => {
+    const buildControl = (sessionId: string, series: WireSeries): WireControl => {
+      const state = loops.get(sessionId)
+      return {
+        loop: {
+          armed: state?.armed ?? false,
+          budget: state?.budget ?? 0,
+          round: state?.round ?? 0,
+          evalsDone: completedEvals(series),
+          available: bridge.arm !== undefined,
+          ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
+        },
+        supervisor: {
+          enabled: state?.supervise ?? false,
+          configured: config.supervisor !== undefined,
+          ...(state?.lastAdvice !== undefined ? { lastAdvice: state.lastAdvice } : {}),
+        },
+      }
+    }
+
     wctx.effect(() => wctx.webServer.register({
       kind: 'exact',
       path: SERIES_PATH,
@@ -361,26 +473,72 @@ export function apply(ctx: Context, config: Config = {}): void {
             return
           }
           const series = project(rawId, session.events, projection)
-          const state = loops.get(rawId)
-          const control: WireControl = {
-            loop: {
-              armed: state?.armed ?? false,
-              budget: state?.budget ?? 0,
-              round: state?.round ?? 0,
-              evalsDone: completedEvals(series),
-              ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
-            },
-            supervisor: {
-              enabled: state?.supervise ?? false,
-              configured: config.supervisor !== undefined,
-              ...(state?.lastAdvice !== undefined ? { lastAdvice: state.lastAdvice } : {}),
-            },
-          }
-          respond(200, { ...series, control })
+          respond(200, { ...series, control: buildControl(rawId, series) })
         } catch (error) {
           respond(500, { error: error instanceof Error ? error.message : String(error) })
         }
       },
     }), 'kernel-cockpit: series route')
+
+    wctx.effect(() => wctx.webServer.register({
+      kind: 'exact',
+      path: CONTROL_PATH,
+      handler: (req, res) => {
+        const respond = (status: number, payload: unknown): void => {
+          res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify(payload))
+        }
+        if (req.method !== 'POST') {
+          respond(405, { error: 'POST only' })
+          return
+        }
+        void (async () => {
+          try {
+            const body = await readJsonBody(req)
+            if (body === null) {
+              respond(400, { error: 'JSON body required' })
+              return
+            }
+            const sessionId = typeof body['sessionId'] === 'string' ? body['sessionId'] : ''
+            const action = typeof body['action'] === 'string' ? body['action'] : ''
+            const session = sessionId === '' ? undefined : wctx.sessions.get(SessionId(sessionId))
+            if (session === undefined) {
+              respond(404, { error: 'unknown session' })
+              return
+            }
+            let error: string | null = null
+            if (action === 'loop-arm') {
+              const arm = bridge.arm
+              if (arm === undefined) {
+                respond(503, { error: 'loop machinery not composed (commands/llm absent)' })
+                return
+              }
+              const raw = body['budget']
+              const budget = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 9999
+                ? raw
+                : defaultBudget
+              arm(sessionId, budget)
+            } else if (action === 'loop-stop') {
+              stopLoop(sessionId)
+            } else if (action === 'supervise-on') {
+              error = setSupervise(sessionId, true)
+            } else if (action === 'supervise-off') {
+              error = setSupervise(sessionId, false)
+            } else {
+              respond(400, { error: `unknown action: ${action}` })
+              return
+            }
+            const series = project(sessionId, session.events, projection)
+            if (error !== null) {
+              respond(409, { error, control: buildControl(sessionId, series) })
+              return
+            }
+            respond(200, { control: buildControl(sessionId, series) })
+          } catch (err) {
+            respond(500, { error: err instanceof Error ? err.message : String(err) })
+          }
+        })()
+      },
+    }), 'kernel-cockpit: control route')
   })
 }

@@ -11,6 +11,9 @@
  * @module
  */
 import type { WireIteration, WireSeries } from './wire.ts'
+import {
+  CONTINUE_TRAILER, LOOP_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+} from './wire.ts'
 
 /** Per-session loop control state (in-memory; the loop is a live-run aid). */
 export interface LoopState {
@@ -42,10 +45,16 @@ export function completedEvals(series: WireSeries): number {
   return series.iterations.filter(p => p.pending !== true).length
 }
 
-/** What the loop should do at one settled-turn checkpoint. */
+/**
+ * What the loop should do at one settled-turn checkpoint. A `wrap-up`
+ * disarms like a stop, but first delivers one closing message asking the
+ * model to finalize its best honest result — budget exhaustion and stalling
+ * end with a clean finish, never a silent power-cut.
+ */
 export type LoopDecision =
   | { action: 'continue'; evalsDone: number }
-  | { action: 'stop'; reason: 'finalized' | 'budget' | 'no-progress'; evalsDone: number }
+  | { action: 'wrap-up'; reason: 'budget' | 'no-progress'; evalsDone: number }
+  | { action: 'stop'; reason: 'finalized'; evalsDone: number }
 
 /**
  * Decide continuation from the projected run state. Pure — the caller owns
@@ -65,11 +74,11 @@ export function decideContinuation(
     return { action: 'stop', reason: 'finalized', evalsDone }
   }
   if (evalsDone >= state.budget) {
-    return { action: 'stop', reason: 'budget', evalsDone }
+    return { action: 'wrap-up', reason: 'budget', evalsDone }
   }
   if (state.round > 0 && evalsDone <= state.lastEvalCount
     && state.noProgressRounds + 1 >= maxNoProgressRounds) {
-    return { action: 'stop', reason: 'no-progress', evalsDone }
+    return { action: 'wrap-up', reason: 'no-progress', evalsDone }
   }
   return { action: 'continue', evalsDone }
 }
@@ -144,24 +153,55 @@ export function adviceFromReply(reply: string): string | null {
 
 /**
  * Continuation message body. The advice block, when present, is labeled as
- * supervisor output so the primary model can weigh it as advisory input.
+ * supervisor output so the primary model can weigh it as advisory input; a
+ * review that approved is recorded as one OK line. Both anchors are parsed
+ * back out of the log by the projection (supervision history), so the text
+ * layout here is protocol, not prose.
  * @param round - continuation round being delivered (1-based).
  * @param evalsDone - completed evaluations so far.
  * @param budget - armed budget.
  * @param advice - supervisor advice, if any.
+ * @param reviewedOk - a review ran and approved (ignored when advice given).
  * @returns the followup text.
  */
-export function continuationText(round: number, evalsDone: number, budget: number, advice: string | null): string {
+export function continuationText(
+  round: number,
+  evalsDone: number,
+  budget: number,
+  advice: string | null,
+  reviewedOk = false,
+): string {
   const lines = [
-    `[kernel-loop round ${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
+    `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
   ]
   if (advice !== null) {
-    lines.push('', 'Supervisor review (advisory, from the second model):', advice)
+    lines.push('', REVIEW_HEADER, advice)
+  } else if (reviewedOk) {
+    lines.push('', REVIEW_OK_LINE)
   }
   lines.push(
     '',
-    'Continue optimizing per the original task: analyse the latest result, state the plan with cockpit_plan if it changed, improve solution.py, and evaluate again.',
+    `${CONTINUE_TRAILER}: analyse the latest result, state the plan with cockpit_plan if it changed, improve solution.py, and evaluate again.`,
     'If you are done or the remaining budget cannot beat the current best, call run_finalize with the evaluation_id you stand behind, then summarize.',
   )
   return lines.join('\n')
+}
+
+/**
+ * Wrap-up message body: the loop's one closing delivery before it disarms on
+ * budget exhaustion or stalling. Asks for a finalize of the best honest
+ * result — never for new optimization work.
+ * @param evalsDone - completed evaluations at the stop decision.
+ * @param budget - armed budget.
+ * @param reason - why the loop is ending.
+ * @returns the followup text.
+ */
+export function wrapUpText(evalsDone: number, budget: number, reason: 'budget' | 'no-progress'): string {
+  return [
+    `${WRAPUP_LINE_PREFIX} ${String(evalsDone)}/${String(budget)} evaluations used; stopping (${reason}).`,
+    '',
+    'The kernel loop is ending — do not start new optimization work.',
+    'If an honest best result exists, call run_finalize with its evaluation_id now.',
+    'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
+  ].join('\n')
 }

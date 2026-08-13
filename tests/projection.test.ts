@@ -7,6 +7,7 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { collectResultText, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
+import { continuationText, wrapUpText } from '../src/loop.ts'
 
 let seq = 0
 function call(name: string, callId: string, args: object): ProjectionEvent {
@@ -130,6 +131,98 @@ test('project: legacy top-level callId still correlates', () => {
   const series = project('s', events)
   assert.equal(series.iterations[0]?.latencyMs, 2.5)
   assert.equal(series.bestIndex, 0)
+})
+
+/** Plugin-sourced `user/message` event (rc.2 logs the UserMessage as data). */
+function loopMessage(text: string): ProjectionEvent {
+  seq += 1
+  return {
+    type: 'user/message',
+    seq,
+    data: {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: { kind: 'plugin', plugin: 'kernel-cockpit' },
+    },
+  }
+}
+
+test('project: write/edit calls attribute to the NEXT matching evaluation', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    call('write', 'w1', { file_path: '/work/solution.py', content: 'import triton\n# v1' }),
+    call('write', 'w2', { file_path: '/work/notes.md', content: 'irrelevant' }),
+    call('ako__kernel_evaluate', 'c1', { task_id: 't', artifact_path: 'solution.py' }),
+    result('c1', { evaluation_id: '0001', compiled: true, correct: true, latency_ms: 5.0 }),
+    call('edit', 'e1', { file_path: '/work/solution.py', old_string: '# v1', new_string: '# v2', replace_all: false }),
+    call('ako__kernel_evaluate', 'c2', { task_id: 't', artifact_path: '/work/solution.py', workload_indices: [0, 3] }),
+    result('c2', { evaluation_id: '0002', compiled: true, correct: true, latency_ms: 4.0 }),
+  ]
+  const series = project('s', events)
+  const [first, second] = series.iterations
+  assert.equal(first?.artifactPath, 'solution.py')
+  assert.equal(first?.changes?.length, 1)
+  assert.equal(first?.changes?.[0]?.kind, 'write')
+  assert.ok(first?.changes?.[0]?.content?.includes('# v1'))
+  // The notes.md write matched nothing and was dropped at the eval boundary.
+  assert.equal(second?.changes?.length, 1)
+  assert.equal(second?.changes?.[0]?.kind, 'edit')
+  assert.equal(second?.changes?.[0]?.oldText, '# v1')
+  assert.equal(second?.changes?.[0]?.newText, '# v2')
+  assert.deepEqual(second?.workloadSubset, [0, 3])
+})
+
+test('project: evaluator detail fields forward (blocking/advisory/not_measured/evaluator_failed)', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    call('kernel_evaluate', 'c1', { artifact_path: 'solution.py' }),
+    result('c1', {
+      evaluator_failed: true, correct: null,
+      error: 'artifact would not be evaluated as written',
+      blocking: ['module-level tail after last class'], advisory: ['unused import'],
+      not_measured: ['latency_ms'],
+    }),
+  ]
+  const point = project('s', events).iterations[0]
+  assert.equal(point?.evaluatorFailed, true)
+  assert.deepEqual(point?.blocking, ['module-level tail after last class'])
+  assert.deepEqual(point?.advisory, ['unused import'])
+  assert.deepEqual(point?.notMeasured, ['latency_ms'])
+})
+
+test('project: kernel-loop messages parse back into rounds (advice / OK / wrap-up)', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    loopMessage(continuationText(1, 2, 20, null, false)),
+    loopMessage(continuationText(2, 3, 20, 'Switch families.\nState a hypothesis first.', false)),
+    loopMessage(continuationText(3, 5, 20, null, true)),
+    loopMessage(wrapUpText(20, 20, 'budget')),
+  ]
+  const { rounds } = project('s', events)
+  assert.equal(rounds.length, 4)
+  assert.deepEqual(
+    rounds.map(r => [r.round, r.review, r.wrapUp]),
+    [
+      [1, undefined, undefined],
+      [2, 'Switch families.\nState a hypothesis first.', undefined],
+      [3, 'ok', undefined],
+      [undefined, undefined, true],
+    ],
+  )
+  assert.equal(rounds[1]?.evalsUsed, 3)
+  assert.equal(rounds[3]?.budget, 20)
+})
+
+test('project: non-plugin user messages never become rounds', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    {
+      type: 'user/message',
+      seq: 1,
+      data: { role: 'user', content: [{ type: 'text', text: '[kernel-loop round 1] 0/20 evaluations used.' }], source: { kind: 'user' } },
+    },
+  ]
+  assert.equal(project('s', events).rounds.length, 0)
 })
 
 test('project: unparsable result leaves a measured-nothing row, not a crash', () => {

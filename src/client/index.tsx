@@ -19,8 +19,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // SlotMap merge: conversation.view is declared by the conversation contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WireIteration, WireSeries } from '../wire.ts'
-import { SERIES_PATH } from '../wire.ts'
+import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from '../wire.ts'
+import { CONTROL_PATH, SERIES_PATH } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -51,11 +51,35 @@ const zh = {
   'status.error': '失败',
   'axis.best': '最佳',
   'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
-  'loop.stopped': '循环已停({reason})',
+  'loop.stopped': '循环已停:{reason}',
   'loop.hint': '/kloop [预算] 启动循环 · /supervise on 开启第二模型监督',
   'sup.on': '监督 on',
   'sup.off': '监督 off',
-  'advice.title': '监督建议',
+  'sup.needCfg': '未配置监督模型:在插件 config 加 supervisor: { provider, model }',
+  'ctl.start': '启动循环',
+  'ctl.stop': '停止循环',
+  'ctl.budget': '评测预算',
+  'advice.title': '监督记录',
+  'advice.waiting': '监督已开启,将在下一个续跑点复审。',
+  'advice.round': '第 {n} 轮',
+  'reason.finalized': '已 finalize',
+  'reason.budget': '预算用尽,已请求收尾',
+  'reason.no-progress': '连续无进展,已请求收尾',
+  'reason.stopped': '手动停止',
+  'row.plan': '生效方案',
+  'row.review': '该轮监督',
+  'row.metrics': '指标',
+  'row.error': '错误',
+  'row.blocking': '阻断项',
+  'row.advisory': '提示项',
+  'row.notMeasured': '未测得',
+  'row.subset': '工作负载子集',
+  'row.evaluatorFailed': '评测器故障(不构成对 kernel 的判定)',
+  'row.changes': '本轮改动',
+  'row.noChanges': '未捕捉到对 artifact 的结构化写入(可能经 bash 写入)。',
+  'row.write': '整文件写入',
+  'row.edit': '替换',
+  'row.truncated': '(已截断)',
   'table.final': '提交',
 } satisfies Record<string, string>
 /** Cockpit locale key union. */
@@ -81,11 +105,35 @@ const en = {
   'status.error': 'failed',
   'axis.best': 'best',
   'loop.armed': 'looping · round {round} · {done}/{budget} evals',
-  'loop.stopped': 'loop stopped ({reason})',
+  'loop.stopped': 'loop stopped: {reason}',
   'loop.hint': '/kloop [budget] arms the loop · /supervise on enables the second model',
   'sup.on': 'supervisor on',
   'sup.off': 'supervisor off',
-  'advice.title': 'Supervisor advice',
+  'sup.needCfg': 'No supervisor model configured: add supervisor: { provider, model } to the plugin config',
+  'ctl.start': 'Start loop',
+  'ctl.stop': 'Stop loop',
+  'ctl.budget': 'evaluation budget',
+  'advice.title': 'Supervision log',
+  'advice.waiting': 'Supervision on; it reviews at the next continuation point.',
+  'advice.round': 'round {n}',
+  'reason.finalized': 'finalized',
+  'reason.budget': 'budget exhausted, wrap-up requested',
+  'reason.no-progress': 'stalled, wrap-up requested',
+  'reason.stopped': 'stopped manually',
+  'row.plan': 'Plan in effect',
+  'row.review': 'Supervision',
+  'row.metrics': 'Metrics',
+  'row.error': 'Error',
+  'row.blocking': 'Blocking',
+  'row.advisory': 'Advisory',
+  'row.notMeasured': 'Not measured',
+  'row.subset': 'Workload subset',
+  'row.evaluatorFailed': 'Evaluator failed (not a verdict on the kernel)',
+  'row.changes': 'Changes this round',
+  'row.noChanges': 'No structured artifact writes captured (possibly written via bash).',
+  'row.write': 'full write',
+  'row.edit': 'edit',
+  'row.truncated': '(truncated)',
   'table.final': 'final',
 } satisfies Record<string, string>
 
@@ -109,9 +157,10 @@ const COLOR = {
   warn: '#d18a1f',
 }
 
-/** Session-scoped polling hook for the cockpit series. */
-function useSeries(sessionId: string): WireSeries | null {
+/** Session-scoped polling hook for the cockpit series (+ manual refetch). */
+function useSeries(sessionId: string): { series: WireSeries | null; refetch: () => void } {
   const [series, setSeries] = useState<WireSeries | null>(null)
+  const [tick, setTick] = useState(0)
   useEffect(() => {
     let alive = true
     const poll = async (): Promise<void> => {
@@ -129,8 +178,8 @@ function useSeries(sessionId: string): WireSeries | null {
     void poll()
     const timer = setInterval(() => { void poll() }, POLL_MS)
     return () => { alive = false; clearInterval(timer) }
-  }, [sessionId])
-  return series
+  }, [sessionId, tick])
+  return { series, refetch: () => setTick(n => n + 1) }
 }
 
 /** Human latency: µs under 1 ms, ms under 1 s, s above. */
@@ -392,19 +441,227 @@ const cardStyle: CSSProperties = {
   padding: '10px 14px',
 }
 
+/** Chip-shaped button; accent colors border + text. */
+function buttonStyle(accent?: string): CSSProperties {
+  return {
+    ...chipStyle,
+    cursor: 'pointer',
+    background: 'transparent',
+    fontFamily: 'inherit',
+    ...(accent !== undefined ? { color: accent, borderColor: accent } : {}),
+  }
+}
+
+const inputStyle: CSSProperties = {
+  ...chipStyle,
+  width: 72,
+  background: 'transparent',
+  fontFamily: 'inherit',
+  outline: 'none',
+}
+
+/** Monospace block for kernel text/diff halves; accent = left-border meaning. */
+function preStyle(accent?: string): CSSProperties {
+  return {
+    margin: 0,
+    padding: '6px 8px',
+    fontSize: 12,
+    lineHeight: '18px',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    maxHeight: 220,
+    overflowY: 'auto',
+    background: 'rgba(127,127,127,.08)',
+    borderRadius: 6,
+    borderLeft: `3px solid ${accent ?? COLOR.border}`,
+    color: COLOR.text,
+  }
+}
+
+const sectionLabel: CSSProperties = { fontSize: 12, fontWeight: 600, color: COLOR.dim, marginBottom: 2 }
+
+/** Metric number formatting: integers verbatim, floats to 4 significant digits. */
+function formatMetric(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toPrecision(4)
+}
+
+/** Latest plan stated before a log position, if any. */
+function planBefore(plans: readonly WirePlan[], seq: number): WirePlan | undefined {
+  let found: WirePlan | undefined
+  for (const plan of plans) {
+    if (plan.seq < seq) found = plan
+  }
+  return found
+}
+
+/** Latest reviewed loop round delivered before a log position, if any. */
+function reviewBefore(rounds: readonly WireRound[], seq: number): WireRound | undefined {
+  let found: WireRound | undefined
+  for (const round of rounds) {
+    if (round.seq < seq && round.review !== undefined) found = round
+  }
+  return found
+}
+
+/** One structured artifact change, rendered as labeled monospace blocks. */
+function ChangeBlock(props: { change: WireChange; t: PropsLocale<'kernel-cockpit'>['t'] }): ReactNode {
+  const { change, t } = props
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 12, color: COLOR.caption, margin: '2px 0' }}>
+        {t(change.kind === 'write' ? 'row.write' : 'row.edit')} · {change.tool}
+        {change.replaceAll === true ? ' · replace_all' : ''}
+        {change.truncated === true ? ` ${t('row.truncated')}` : ''}
+      </div>
+      {change.kind === 'write'
+        ? <pre style={preStyle()}>{change.content}</pre>
+        : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <pre style={preStyle(COLOR.bad)}>{change.oldText}</pre>
+              <pre style={preStyle(COLOR.ok)}>{change.newText}</pre>
+            </div>
+          )}
+    </div>
+  )
+}
+
+/**
+ * Expanded detail of one iteration: the evaluator's full verdict, the plan
+ * and supervision in effect when it ran, and the artifact changes that led
+ * into it — all recovered from the session log.
+ */
+function IterationDetail(props: {
+  point: WireIteration
+  plans: readonly WirePlan[]
+  rounds: readonly WireRound[]
+  t: PropsLocale<'kernel-cockpit'>['t']
+}): ReactNode {
+  const { point, plans, rounds, t } = props
+  const plan = planBefore(plans, point.seq)
+  const review = reviewBefore(rounds, point.seq)
+  return (
+    <div style={{
+      padding: '8px 14px 12px 40px', borderBottom: `1px solid ${COLOR.border}`,
+      display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13,
+    }}>
+      <div style={{ color: COLOR.caption, fontSize: 12 }}>
+        {point.tool} · seq {point.seq}
+        {point.artifactPath !== undefined ? ` · ${point.artifactPath}` : ''}
+        {point.workloadSubset !== undefined ? ` · ${t('row.subset')} [${point.workloadSubset.join(', ')}]` : ''}
+      </div>
+      {point.evaluatorFailed === true
+        ? <div style={{ color: COLOR.warn }}>{t('row.evaluatorFailed')}</div>
+        : null}
+      {point.error !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.error')}</div>
+              <pre style={preStyle(COLOR.bad)}>{point.error}</pre>
+            </div>
+          )
+        : null}
+      {point.blocking !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.blocking')}</div>
+              {point.blocking.map((line, index) => (
+                <div key={index} style={{ fontSize: 12, color: COLOR.bad }}>· {line}</div>
+              ))}
+            </div>
+          )
+        : null}
+      {point.advisory !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.advisory')}</div>
+              {point.advisory.map((line, index) => (
+                <div key={index} style={{ fontSize: 12, color: COLOR.dim }}>· {line}</div>
+              ))}
+            </div>
+          )
+        : null}
+      {point.notMeasured !== undefined
+        ? <div style={{ fontSize: 12, color: COLOR.caption }}>{t('row.notMeasured')}: {point.notMeasured.join(', ')}</div>
+        : null}
+      {point.metrics !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.metrics')}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {Object.entries(point.metrics).map(([key, value]) => (
+                  <span key={key} style={{ ...chipStyle, fontSize: 12, lineHeight: '18px', padding: '1px 8px' }}>
+                    {key} = {formatMetric(value)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        : null}
+      {plan !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.plan')}</div>
+              <div style={{ color: COLOR.dim }}>[{plan.phase}] {plan.approach}</div>
+            </div>
+          )
+        : null}
+      {review !== undefined
+        ? (
+            <div>
+              <div style={sectionLabel}>{t('row.review')}</div>
+              {review.review === 'ok'
+                ? <div style={{ color: COLOR.ok }}>✓ OK</div>
+                : <div style={{ color: COLOR.dim, whiteSpace: 'pre-wrap' }}>{review.review}</div>}
+            </div>
+          )
+        : null}
+      <div>
+        <div style={sectionLabel}>{t('row.changes')}</div>
+        {point.changes === undefined
+          ? <div style={{ fontSize: 12, color: COLOR.caption }}>{t('row.noChanges')}</div>
+          : point.changes.map(change => <ChangeBlock key={change.seq} change={change} t={t} />)}
+      </div>
+    </div>
+  )
+}
+
 /** The cockpit tab. */
 export function CockpitTab(
   props: PropsRuntime<'conversation.view'> & PropsLocale<'kernel-cockpit'>,
 ): ReactNode {
   const { t, sessionId } = props
-  const series = useSeries(sessionId)
+  const { series, refetch } = useSeries(sessionId)
+  const [budgetDraft, setBudgetDraft] = useState('20')
+  const [expandedSeq, setExpandedSeq] = useState<number | null>(null)
+
+  /** Drive the control route, then re-pull so the panel reflects it now. */
+  const post = async (action: string, extra?: Record<string, unknown>): Promise<void> => {
+    try {
+      await fetch(CONTROL_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId, action, ...extra }),
+      })
+    } catch {
+      // Transient failure: the poll keeps showing the authoritative state.
+    }
+    refetch()
+  }
 
   const iterations = series?.iterations ?? []
   const plans = series?.plans ?? []
+  const rounds = series?.rounds ?? []
+  const control = series?.control
   const latestPlan = plans.length > 0 ? plans[plans.length - 1] : undefined
   const best = series !== null && series.bestIndex !== null ? iterations[series.bestIndex] : undefined
   const hackCount = iterations.filter(p => p.rewardHack === true).length
   const pendingCount = iterations.filter(p => p.pending === true).length
+  const reviewedRounds = rounds.filter(r => r.review !== undefined)
+  const reasonLabel = (reason: string): string =>
+    reason === 'finalized' || reason === 'budget' || reason === 'no-progress' || reason === 'stopped'
+      ? t(`reason.${reason}`)
+      : reason
 
   if (iterations.length === 0 && plans.length === 0) {
     return (
@@ -422,27 +679,68 @@ export function CockpitTab(
       display: 'flex', flexDirection: 'column', gap: 14,
       fontFamily: 'system-ui', color: COLOR.text,
     }}>
-      {/* header chips */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        {series?.control?.loop.armed === true
+      {/* header chips + run controls */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        {control?.loop.armed === true
           ? (
-              <span style={{ ...chipStyle, color: COLOR.curve, borderColor: COLOR.curve }}>
-                ⟳ {t('loop.armed', {
-                  round: series.control.loop.round,
-                  done: series.control.loop.evalsDone,
-                  budget: series.control.loop.budget,
-                })}
-              </span>
+              <>
+                <span style={{ ...chipStyle, color: COLOR.curve, borderColor: COLOR.curve }}>
+                  ⟳ {t('loop.armed', {
+                    round: control.loop.round,
+                    done: control.loop.evalsDone,
+                    budget: control.loop.budget,
+                  })}
+                </span>
+                <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void post('loop-stop') }}>
+                  ■ {t('ctl.stop')}
+                </button>
+              </>
             )
-          : series?.control?.loop.stopReason !== undefined
-            ? <span style={chipStyle}>{t('loop.stopped', { reason: series.control.loop.stopReason })}</span>
-            : null}
-        {series?.control !== undefined && (series.control.supervisor.enabled || series.control.supervisor.configured)
+          : null}
+        {control !== undefined && control.loop.armed === false && control.loop.available
           ? (
-              <span style={{ ...chipStyle, ...(series.control.supervisor.enabled ? { color: COLOR.warn, borderColor: COLOR.warn } : {}) }}>
-                {t(series.control.supervisor.enabled ? 'sup.on' : 'sup.off')}
-              </span>
+              <>
+                {control.loop.stopReason !== undefined
+                  ? <span style={chipStyle}>{t('loop.stopped', { reason: reasonLabel(control.loop.stopReason) })}</span>
+                  : null}
+                <input
+                  type="number"
+                  min={1}
+                  max={9999}
+                  value={budgetDraft}
+                  title={t('ctl.budget')}
+                  style={inputStyle}
+                  onChange={(event) => { setBudgetDraft(event.target.value) }}
+                />
+                <button
+                  type="button"
+                  style={buttonStyle(COLOR.curve)}
+                  onClick={() => {
+                    const budget = Number(budgetDraft)
+                    void post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
+                  }}
+                >
+                  ⟳ {t('ctl.start')}
+                </button>
+              </>
             )
+          : null}
+        {control !== undefined
+          ? control.supervisor.configured
+            ? (
+                <button
+                  type="button"
+                  style={buttonStyle(control.supervisor.enabled ? COLOR.warn : undefined)}
+                  onClick={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
+                >
+                  {t(control.supervisor.enabled ? 'sup.on' : 'sup.off')}
+                </button>
+              )
+            : (
+                <span style={{ ...chipStyle, color: COLOR.caption }} title={t('sup.needCfg')}>
+                  {t('sup.off')}
+                </span>
+              )
           : null}
         <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
         {best?.latencyMs !== undefined
@@ -511,14 +809,28 @@ export function CockpitTab(
             )}
       </div>
 
-      {/* supervisor advice */}
-      {series?.control?.supervisor.lastAdvice !== undefined
+      {/* supervision log — parsed back from the continuation messages, so it
+          survives restarts and replays with the rest of the projection. */}
+      {reviewedRounds.length > 0 || control?.supervisor.enabled === true
         ? (
             <div style={{ ...cardStyle, borderColor: COLOR.warn }}>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: COLOR.warn }}>{t('advice.title')}</div>
-              <div style={{ fontSize: 13, lineHeight: '22px', color: COLOR.dim, whiteSpace: 'pre-wrap' }}>
-                {series.control.supervisor.lastAdvice}
-              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: COLOR.warn }}>{t('advice.title')}</div>
+              {reviewedRounds.length === 0
+                ? <div style={{ fontSize: 13, color: COLOR.caption }}>{t('advice.waiting')}</div>
+                : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                      {[...reviewedRounds].reverse().map(round => (
+                        <div key={round.seq} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: '20px' }}>
+                          <span style={{ flex: 'none', minWidth: 56, color: COLOR.caption }}>
+                            {t('advice.round', { n: round.round ?? '—' })}
+                          </span>
+                          {round.review === 'ok'
+                            ? <span style={{ color: COLOR.ok }}>✓ OK</span>
+                            : <span style={{ color: COLOR.dim, whiteSpace: 'pre-wrap' }}>{round.review}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
             </div>
           )
         : null}
@@ -530,35 +842,46 @@ export function CockpitTab(
               <div style={{ padding: '8px 14px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
                 {t('table.title')}
               </div>
-              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                 {[...iterations].reverse().map((p) => {
                   const status = statusOf(p)
                   const idx = iterations.indexOf(p)
                   const isBest = series !== null && series.bestIndex === idx
+                  const expanded = expandedSeq === p.seq
                   return (
-                    <div key={p.seq} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '5px 14px', fontSize: 13, lineHeight: '22px',
-                      borderBottom: `1px solid ${COLOR.border}`,
-                    }}>
-                      <span style={{ flex: 'none', width: 32, color: COLOR.caption }}>#{idx + 1}</span>
-                      <span style={{ flex: 'none', width: 58, color: COLOR.dim }}>{p.evaluationId ?? '—'}</span>
-                      <span style={{ flex: 'none', width: 92, color: COLOR.text, fontVariantNumeric: 'tabular-nums' }}>
-                        {p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}
-                      </span>
-                      {/* speedup vs the reference kernel (evaluator-reported) — rises and falls. */}
-                      <span style={{
-                        flex: 'none', width: 70, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
-                        color: isBest ? COLOR.ok : COLOR.dim,
-                      }}>
-                        {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
-                      </span>
-                      <span style={{ flex: 1 }} />
-                      {isBest ? <span style={{ flex: 'none', color: COLOR.ok }}>★</span> : null}
-                      {p.finalized === true ? <span style={{ flex: 'none', color: COLOR.warn }}>⚑ {t('table.final')}</span> : null}
-                      <span style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}>
-                        {t(`status.${status}`)}
-                      </span>
+                    <div key={p.seq}>
+                      <div
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '5px 14px', fontSize: 13, lineHeight: '22px',
+                          borderBottom: `1px solid ${COLOR.border}`,
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => { setExpandedSeq(expanded ? null : p.seq) }}
+                      >
+                        <span style={{ flex: 'none', width: 14, color: COLOR.caption }}>{expanded ? '▾' : '▸'}</span>
+                        <span style={{ flex: 'none', width: 32, color: COLOR.caption }}>#{idx + 1}</span>
+                        <span style={{ flex: 'none', width: 58, color: COLOR.dim }}>{p.evaluationId ?? '—'}</span>
+                        <span style={{ flex: 'none', width: 92, color: COLOR.text, fontVariantNumeric: 'tabular-nums' }}>
+                          {p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}
+                        </span>
+                        {/* speedup vs the reference kernel (evaluator-reported) — rises and falls. */}
+                        <span style={{
+                          flex: 'none', width: 70, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
+                          color: isBest ? COLOR.ok : COLOR.dim,
+                        }}>
+                          {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        {isBest ? <span style={{ flex: 'none', color: COLOR.ok }}>★</span> : null}
+                        {p.finalized === true ? <span style={{ flex: 'none', color: COLOR.warn }}>⚑ {t('table.final')}</span> : null}
+                        <span style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}>
+                          {t(`status.${status}`)}
+                        </span>
+                      </div>
+                      {expanded
+                        ? <IterationDetail point={p} plans={plans} rounds={rounds} t={t} />
+                        : null}
                     </div>
                   )
                 })}
@@ -571,20 +894,83 @@ export function CockpitTab(
 }
 
 /** Client-half service requirements. */
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'sessions']
 
-/** Mount the locale namespace and the session tab. */
+/** How often the watcher re-checks the current session for cockpit signals. */
+const DETECT_MS = 3000
+
+/** Whether a session has anything the cockpit tab could show. */
+function cockpitRelevant(series: WireSeries): boolean {
+  return series.iterations.length > 0
+    || series.plans.length > 0
+    || series.control?.loop.armed === true
+}
+
+/**
+ * Mount the locale namespace and the session tab. The tab is NOT registered
+ * unconditionally: a watcher follows the current session (`ctx.sessions.list`)
+ * and holds the `conversation.view` registration only while that session
+ * shows kernel-opt signals — evaluations, plans, or an armed loop. Unrelated
+ * conversations never grow the tab; it appears by itself once the first
+ * evaluation (or `/kloop`) lands, and the view ring follows registration
+ * changes reactively (an active view that disappears falls back to the first
+ * tab).
+ */
 export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'kernel-cockpit: dictionaries')
-  ctx.slots.inject('conversation.view', () =>
-    ctx.slots.register({
-      name: 'conversation.view',
-      id: 'kernel-cockpit',
-      order: 30,
-      // Locale-thunked like the host's own tabs (ui-trajectory), so the tab
-      // name follows the active language without re-registration.
-      label: () => t('tab.label'),
-      locale: NS,
-    }, CockpitTab))
+  ctx.slots.inject('conversation.view', () => {
+    let hold: (() => void) | undefined
+    let disposed = false
+    let generation = 0
+    const show = (): void => {
+      if (disposed || hold !== undefined) return
+      hold = ctx.slots.register({
+        name: 'conversation.view',
+        id: 'kernel-cockpit',
+        order: 30,
+        // Locale-thunked like the host's own tabs (ui-trajectory), so the
+        // tab name follows the active language without re-registration.
+        label: () => t('tab.label'),
+        locale: NS,
+      }, CockpitTab)
+    }
+    const hide = (): void => {
+      hold?.()
+      hold = undefined
+    }
+    const sync = async (): Promise<void> => {
+      const gen = ++generation
+      const current = ctx.sessions.list.getSnapshot().current
+      if (current === undefined) {
+        hide()
+        return
+      }
+      try {
+        const res = await fetch(`${SERIES_PATH}?sessionId=${encodeURIComponent(current)}`, {
+          headers: { accept: 'application/json' },
+        })
+        if (gen !== generation || disposed) return
+        if (!res.ok) {
+          hide()
+          return
+        }
+        const data = (await res.json()) as WireSeries
+        if (gen !== generation || disposed) return
+        if (cockpitRelevant(data)) show()
+        else hide()
+      } catch {
+        // Transient network error: keep the current visibility.
+      }
+    }
+    const unsubscribe = ctx.sessions.list.subscribe(() => { void sync() })
+    const timer = setInterval(() => { void sync() }, DETECT_MS)
+    void sync()
+    return () => {
+      disposed = true
+      clearInterval(timer)
+      unsubscribe()
+      hide()
+    }
+  })
 }

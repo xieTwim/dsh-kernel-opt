@@ -1,6 +1,9 @@
 /**
- * Wire types shared by the Node half (series route) and the browser half
- * (cockpit panel). Pure types — no runtime code.
+ * Wire types and protocol constants shared by the Node half (series/control
+ * routes, loop texts) and the browser half (cockpit panel). The continuation
+ * message anchors live here because they are a two-sided protocol: `loop.ts`
+ * builds continuation/wrap-up texts around them, and `projection.ts` parses
+ * the same texts back out of the session log.
  * @module
  */
 
@@ -34,6 +37,42 @@ export interface WireIteration {
   pending?: boolean
   /** This evaluation was later selected by a finalize call. */
   finalized?: boolean
+  /** Blocking build-gate findings forwarded from the evaluator. */
+  blocking?: string[]
+  /** Advisory build-gate findings forwarded from the evaluator. */
+  advisory?: string[]
+  /** Fields the evaluator explicitly named as not measured. */
+  notMeasured?: string[]
+  /** The evaluator itself failed — no verdict on the kernel exists. */
+  evaluatorFailed?: boolean
+  /** Workload subset requested on the call, when not a full evaluation. */
+  workloadSubset?: number[]
+  /** Artifact path passed to the evaluation call. */
+  artifactPath?: string
+  /** Structured artifact edits logged since the previous evaluation call. */
+  changes?: WireChange[]
+}
+
+/**
+ * One logged `write`/`edit` tool call against the evaluated artifact,
+ * attributed to the evaluation that followed it.
+ */
+export interface WireChange {
+  /** Session-log seq of the change call. */
+  seq: number
+  /** Tool name as logged. */
+  tool: string
+  kind: 'write' | 'edit'
+  /** Full file content for writes (possibly truncated). */
+  content?: string
+  /** Replaced text for edits (possibly truncated). */
+  oldText?: string
+  /** Replacement text for edits (possibly truncated). */
+  newText?: string
+  /** The edit had `replace_all` set. */
+  replaceAll?: boolean
+  /** Some text field was cut at the wire cap. */
+  truncated?: boolean
 }
 
 /** One `cockpit_plan` call — the model's stated plan at that point. */
@@ -50,6 +89,29 @@ export interface WirePlan {
   next?: string
 }
 
+/**
+ * One kernel-loop message parsed back from the session log: a continuation
+ * round or the final wrap-up. Durable — survives restarts and replays, unlike
+ * the in-memory control state.
+ */
+export interface WireRound {
+  /** Session-log seq of the delivered message. */
+  seq: number
+  /** 1-based continuation round (absent on wrap-up messages). */
+  round?: number
+  /** Completed evaluations at delivery. */
+  evalsUsed?: number
+  /** Armed budget at delivery. */
+  budget?: number
+  /**
+   * Supervisor outcome for the round: `'ok'` when it reviewed and approved,
+   * the advice text when it objected, absent when no review ran.
+   */
+  review?: string
+  /** This message was the wrap-up delivery (budget / no-progress ending). */
+  wrapUp?: boolean
+}
+
 /** Loop + supervisor control state for the panel. */
 export interface WireControl {
   loop: {
@@ -63,6 +125,8 @@ export interface WireControl {
     evalsDone: number
     /** Why the loop disarmed, when it did. */
     stopReason?: string
+    /** Whether the loop machinery is composed (commands/llm present). */
+    available: boolean
   }
   supervisor: {
     /** Whether reviews run at continuation points (per-session toggle). */
@@ -86,6 +150,8 @@ export interface WireSeries {
   plans: WirePlan[]
   /** seqs of profile-tool calls (event markers between iterations). */
   profileSeqs: number[]
+  /** Kernel-loop continuation/wrap-up messages in log order. */
+  rounds: WireRound[]
   /** Index into `iterations` of the best honest measurement, if any. */
   bestIndex: number | null
   /** Loop/supervisor state when the cockpit loop is present for this session. */
@@ -94,3 +160,22 @@ export interface WireSeries {
 
 /** Route the Node half serves and the panel polls (query: `?sessionId=`). */
 export const SERIES_PATH = '/plugins/kernel-cockpit/series'
+
+/**
+ * Control route (POST): `{ sessionId, action, budget? }` with action one of
+ * `loop-arm` / `loop-stop` / `supervise-on` / `supervise-off`. Responds with
+ * the fresh {@link WireControl}. The slash commands remain the scriptable
+ * twin of the same state.
+ */
+export const CONTROL_PATH = '/plugins/kernel-cockpit/control'
+
+/** First-line prefix of a continuation message (`round N` follows). */
+export const LOOP_LINE_PREFIX = '[kernel-loop round '
+/** First-line prefix of the wrap-up message. */
+export const WRAPUP_LINE_PREFIX = '[kernel-loop wrap-up]'
+/** Header line introducing a supervisor advice block. */
+export const REVIEW_HEADER = 'Supervisor review (advisory, from the second model):'
+/** Whole line recording that the supervisor reviewed and approved. */
+export const REVIEW_OK_LINE = 'Supervisor review: OK.'
+/** Start of the fixed trailer paragraph (terminates the advice block). */
+export const CONTINUE_TRAILER = 'Continue optimizing per the original task'

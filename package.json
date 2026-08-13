@@ -1,7 +1,7 @@
 {
   "name": "@xsyshuishui/dsh-kernel-cockpit",
   "description": "Kernel-optimization cockpit for DeepSeek Harness: live latency curve + plan reports + model-driven self-compaction (AKO-friendly, works with any bench tool)",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "license": "MIT",
