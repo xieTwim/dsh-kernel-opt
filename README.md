@@ -30,7 +30,7 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 
 | 组成 | 说明 |
 |---|---|
-| 「算子优化」会话 Tab | `conversation.view` 槽，**按需出现**：当前会话检测到评测/plan/循环 armed 才持有注册。内容：SVG 曲线（y 域聚焦收敛带，离群点顶边截断，hover 精确值）+ 状态芯片与**循环/监督控件** + 当前方案卡 + 监督记录卡 + **可展开迭代表**（评测完整判定、来源命令行、生效方案、该轮监督、该轮 write/edit 改动） |
+| 「算子优化」会话 Tab | `conversation.view` 槽，**按需出现**：算子优化模式的会话常显示；其余会话检测到评测/plan/循环 armed 才持有注册。内容：SVG 曲线（y 域聚焦收敛带，离群点顶边截断，hover 精确值）+ 状态芯片与**循环/监督控件** + 当前方案卡 + 监督记录卡 + **可展开迭代表**（评测完整判定、来源命令行、生效方案、该轮监督、该轮 write/edit 改动） |
 | `cockpit_plan` 工具 | 模型汇报 phase/approach/hypothesis/next；调用本身即记录 |
 | `cockpit_finalize` 工具 | 无 id 评测管线的收尾记录（按 `artifact_path`）+ 上述复测 |
 | `self_compact` 工具 | 包装官方 `compaction` seam；仅当组合里有 compaction provider 时注册 |
@@ -47,6 +47,15 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 4. 会话页顶部出现「算子优化」Tab——曲线、状态、方案、监督，全在里面；想引导随时打字。
 
 GPU 在评测命令跑的地方——本机、容器、远程提交都行，插件不关心。
+
+## 算子优化模式（agent preset 自动落盘）
+
+装上插件后（部署组合了 `agentPresets` 时），Node 半会把一个「算子优化模式」preset 写进用户 preset 根（`~/.dsh/.agent-presets/kernel-opt/`，**仅当不存在时**；想重置就删掉该目录再重启）。新建会话选这个模式：
+
+- persona 就是任务书的通用半：盘点材料 → `cockpit_plan` 报 resolved plan → 组装评测入口（契约行）→ 自由迭代 → 诚实收尾。你只需要在第一条消息里给三样：**kernel 在哪、怎么评测（或让它用 AKO4ALL 内置评测器）、预算/卡信息**；
+- 该模式的会话「算子优化」Tab **常显示**（不等第一次评测）；
+- preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），落盘后想改就直接改——插件永不覆盖已存在的副本；
+- 关闭自动落盘：config `preset.install: false`；换 id：`preset.id`（Tab 常显示判定只认默认 id，改 id 后回退到信号检测）。
 
 ## 循环与监督
 
@@ -102,6 +111,8 @@ dsh --profile web --dump-config | grep kernel-cockpit   # 应出现 bundle 层
 | `changeTools` | `['write', 'edit']` | 计为"该轮改动"的结构化文件工具名，与评测的 artifact 匹配后挂到该行 |
 | `replay.enabled` | `true` | finalize 复测开关 |
 | `replay.timeoutSec` | `900` | 复测命令超时（秒） |
+| `preset.install` | `true` | 「算子优化模式」preset 自动落盘开关 |
+| `preset.id` | `kernel-opt` | preset 落盘目录/id（改动后 Tab 常显示回退为信号检测） |
 | `loop.defaultBudget` | `20` | `/kloop` 不带数字时的预算 |
 | `supervisor.*` | 无 | 见「循环与监督」 |
 

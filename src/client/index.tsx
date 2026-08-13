@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from '../wire.ts'
-import { CONTROL_PATH, SERIES_PATH, samePath } from '../wire.ts'
+import { CONTROL_PATH, PRESET_ID, SERIES_PATH, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -980,9 +980,17 @@ export function apply(ctx: Context): void {
     }
     const sync = async (): Promise<void> => {
       const gen = ++generation
-      const current = ctx.sessions.list.getSnapshot().current
+      const state = ctx.sessions.list.getSnapshot()
+      const current = state.current
       if (current === undefined) {
         hide()
+        return
+      }
+      // Preset-first: a session composed from the kernel-opt preset is a
+      // kernel-optimization session by declaration — the tab shows before
+      // any evaluation lands, no series fetch needed.
+      if (state.byId[current]?.agentPreset === PRESET_ID) {
+        show()
         return
       }
       try {

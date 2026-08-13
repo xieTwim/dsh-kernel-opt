@@ -24,7 +24,13 @@
  */
 import type { IncomingMessage } from 'node:http'
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { cp } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -38,7 +44,7 @@ import {
   decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
-import { CONTROL_PATH, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
+import { CONTROL_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
 import type { WireControl, WireIteration, WireSeries } from './wire.ts'
 
 export const name = 'kernel-cockpit'
@@ -77,6 +83,20 @@ export interface Config {
     defaultBudget?: number
     /** Consecutive zero-progress continuations tolerated (default 2). */
     maxNoProgressRounds?: number
+  }
+  /**
+   * 「算子优化模式」agent preset self-install. On by default: when the
+   * deployment composes `agentPresets`, the bundled preset directory is
+   * copied once into the user preset root (`~/.dsh/.agent-presets/<id>/`),
+   * never overwriting an existing copy. The cockpit tab always shows for
+   * sessions composed from the DEFAULT id — an overridden `id` keeps the
+   * preset but falls back to signal-based tab detection.
+   */
+  preset?: {
+    /** Master switch (default true). */
+    install?: boolean
+    /** Directory/preset id to install under (default `kernel-opt`). */
+    id?: string
   }
   /**
    * Finalize replay: when `cockpit_finalize` names an artifact whose best
@@ -118,6 +138,16 @@ function resolveProjection(config: Config): ProjectionConfig {
     shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
     planTool: DEFAULT_PROJECTION.planTool,
   }
+}
+
+/** Absolute path of the bundled preset directory (repo/package layout). */
+function bundledPresetDir(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), '../preset/kernel-opt')
+}
+
+/** Expand a leading `~/` the way the preset roots document it. */
+function expandHome(path: string): string {
+  return path.startsWith('~') ? join(homedir(), path.slice(1)) : path
 }
 
 /** Outcome of one replay execution. */
@@ -559,6 +589,29 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
       },
     })
+  })
+
+  // Agent-preset self-install: composing this plugin makes an「算子优化模式」
+  // preset appear in the picker. Copy-once into the user preset root — never
+  // clobbers an existing (possibly user-edited) copy; delete that directory
+  // to re-seed. Host discovery is unmemoized, so it shows up without a
+  // restart. Best-effort: any failure leaves the cockpit fully functional.
+  ctx.inject(['agentPresets'], (pctx) => {
+    if (config.preset?.install === false) return
+    const id = config.preset?.id ?? PRESET_ID
+    void (async () => {
+      try {
+        const userRoot = pctx.agentPresets.roots.find(root => root.trust === 'user')
+        if (userRoot === undefined) return
+        const source = bundledPresetDir()
+        if (!existsSync(join(source, 'agent.cordis.yml'))) return
+        const target = join(expandHome(userRoot.path), id)
+        if (existsSync(target)) return
+        await cp(source, target, { recursive: true })
+      } catch {
+        // Preset install is a convenience; the cockpit works without it.
+      }
+    })()
   })
 
   // Series + control routes — the series is a pure projection of
