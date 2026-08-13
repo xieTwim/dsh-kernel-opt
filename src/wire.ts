@@ -168,6 +168,15 @@ export interface WireSeries {
   control?: WireControl
 }
 
+/**
+ * Whether two logged paths plausibly address the same file (exact, or one is
+ * the other's path suffix). Shared protocol helper: the projection matches
+ * changes/finalizes with it and the panel matches replay coverage.
+ */
+export function samePath(a: string, b: string): boolean {
+  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
+}
+
 /** Route the Node half serves and the panel polls (query: `?sessionId=`). */
 export const SERIES_PATH = '/plugins/kernel-cockpit/series'
 
