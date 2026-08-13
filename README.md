@@ -6,7 +6,7 @@
 
 | 组成 | 说明 |
 |---|---|
-| 「算子优化」会话 Tab | `conversation.view` 槽;SVG 曲线(跨度大时自动 log 轴)+ 状态芯片 + 当前方案卡 + 监督建议卡 + 迭代表 |
+| 「算子优化」会话 Tab | `conversation.view` 槽;SVG 曲线(y 域聚焦收敛带 [best×0.97, P90×1.25],离群点顶边截断并标注最大值,hover 显示精确值;跨度大时自动 log 轴)+ 状态芯片 + 当前方案卡 + 监督建议卡 + 迭代表 |
 | `cockpit_plan` 工具 | 模型汇报 phase/approach/hypothesis/next;调用本身即记录 |
 | `self_compact` 工具 | 包装官方 `compaction` seam(`compactNow`);仅当组合里有 compaction provider 时注册 |
 | `/kloop [预算]` 命令 | **kernel 优化循环**:按 run 状态驱动的续跑(不是定时器)——turn 落定且预算未尽、未 finalize、上轮有进展才续投;`stop`/`status` 子命令 |

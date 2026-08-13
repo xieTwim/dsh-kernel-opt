@@ -163,43 +163,82 @@ const CHART = { w: 640, h: 200, l: 56, r: 16, t: 16, b: 26 }
 interface ChartModel {
   /** x in viewBox units per iteration index. */
   x: (index: number) => number
-  /** y in viewBox units for a latency. */
+  /** y in viewBox units for a latency (clamped into the focus domain). */
   y: (latencyMs: number) => number
+  /** Whether a latency lies above the focus domain (pinned to the top edge). */
+  clamped: (latencyMs: number) => boolean
   /** Whether the y axis is log10. */
   log: boolean
-  min: number
+  /** Focus-domain bounds, and the true series maximum for the clamp label. */
+  lo: number
+  hi: number
   max: number
+  /** Latency at a fraction of the axis height (0 = domain bottom), for gridlines. */
+  atFraction: (f: number) => number
 }
 
-/** Build the y mapping from the measured latencies (log when the span is wide). */
+/** Nearest-rank quantile of an ascending-sorted array. */
+function quantile(sorted: readonly number[], q: number): number {
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))] ?? 0
+}
+
+/**
+ * Build the y mapping from the measured latencies. The domain focuses on the
+ * convergence band [best × 0.97, P90 × 1.25]: a run whose early exploration
+ * sits far above its converged band would otherwise compress every later
+ * improvement into a flat line, log axis or not. Points above the band stay
+ * visible, pinned to the top edge with an ↑ mark and the maximum labeled.
+ */
 function chartModel(measured: readonly WireIteration[], count: number): ChartModel | null {
-  const lats = measured.map(p => p.latencyMs).filter((v): v is number => v !== undefined)
-  if (lats.length === 0) return null
-  const min = Math.min(...lats)
-  const max = Math.max(...lats)
-  const log = min > 0 && max / min > 20
-  const lo = log ? Math.log10(min) : min
-  const hi = log ? Math.log10(max) : max
-  const span = hi - lo || 1
+  const sorted = measured
+    .map(p => p.latencyMs)
+    .filter((v): v is number => v !== undefined)
+    .sort((a, b) => a - b)
+  if (sorted.length === 0) return null
+  const min = sorted[0] ?? 0
+  const max = sorted[sorted.length - 1] ?? 0
+  let hi = max
+  if (sorted.length >= 6) {
+    const band = quantile(sorted, 0.9) * 1.25
+    if (band < hi) hi = band
+  }
+  const lo = min * 0.97
+  const log = lo > 0 && hi / lo > 20
+  const toAxis = (v: number): number => (log ? Math.log10(v) : v)
+  const axLo = toAxis(lo)
+  const span = toAxis(hi) - axLo || 1
   const innerW = CHART.w - CHART.l - CHART.r
   const innerH = CHART.h - CHART.t - CHART.b
   const denom = Math.max(1, count - 1)
   return {
     x: index => CHART.l + (innerW * index) / denom,
     y: (latencyMs) => {
-      const v = log ? Math.log10(latencyMs) : latencyMs
-      return CHART.t + innerH * (1 - (v - lo) / span)
+      const v = Math.min(toAxis(latencyMs), axLo + span)
+      return CHART.t + innerH * (1 - (v - axLo) / span)
     },
-    log, min, max,
+    clamped: latencyMs => latencyMs > hi,
+    log, lo, hi, max,
+    atFraction: (f) => {
+      const v = axLo + span * f
+      return log ? 10 ** v : v
+    },
   }
 }
 
 /** Latency curve with per-point status, best line, profile ▲ and finalize ★. */
-function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
-  const { series, bestLabel } = props
+function Chart(props: {
+  series: WireSeries
+  bestLabel: string
+  statusLabel: (status: ReturnType<typeof statusOf>) => string
+}): ReactNode {
+  const { series, bestLabel, statusLabel } = props
   const { iterations, profileSeqs, bestIndex } = series
   const model = useMemo(() => chartModel(iterations, iterations.length), [iterations])
   if (model === null) return null
+  // The clamp label rides the first occurrence of the true maximum.
+  const maxClampedIndex = iterations.findIndex(
+    p => p.latencyMs === model.max && model.clamped(p.latencyMs),
+  )
 
   const best = bestIndex !== null ? iterations[bestIndex] : undefined
   const linePoints = iterations
@@ -225,14 +264,28 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
       style={{ width: '100%', height: 'auto', display: 'block' }}
       role="img"
     >
-      {/* frame + y extremes */}
+      {/* frame + y domain bounds */}
       <line x1={CHART.l} y1={CHART.t} x2={CHART.l} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       <line x1={CHART.l} y1={CHART.h - CHART.b} x2={CHART.w - CHART.r} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
-      <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={11} fill={COLOR.dim}>{formatLatency(model.max)}</text>
-      <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={11} fill={COLOR.dim}>{formatLatency(model.min)}</text>
+      <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.hi)}</text>
+      <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.lo)}</text>
       {model.log
-        ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2} textAnchor="end" fontSize={10} fill={COLOR.caption}>log</text>
+        ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2 + 14} textAnchor="end" fontSize={11} fill={COLOR.caption}>log</text>
         : null}
+
+      {/* horizontal gridlines (mid one labeled) */}
+      {[0.25, 0.5, 0.75].map((f) => {
+        const value = model.atFraction(f)
+        const gy = model.y(value)
+        return (
+          <g key={`g${String(f)}`}>
+            <line x1={CHART.l} x2={CHART.w - CHART.r} y1={gy} y2={gy} stroke={COLOR.border} strokeWidth={1} strokeDasharray="2 5" opacity={0.55} />
+            {f === 0.5
+              ? <text x={CHART.l - 6} y={gy + 4} textAnchor="end" fontSize={10} fill={COLOR.caption}>{formatLatency(value)}</text>
+              : null}
+          </g>
+        )
+      })}
 
       {/* best dashed line */}
       {best?.latencyMs !== undefined
@@ -243,7 +296,7 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
                 y1={model.y(best.latencyMs)} y2={model.y(best.latencyMs)}
                 stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
               />
-              <text x={CHART.w - CHART.r} y={model.y(best.latencyMs) - 4} textAnchor="end" fontSize={10} fill={COLOR.ok}>
+              <text x={CHART.w - CHART.r} y={model.y(best.latencyMs) - 4} textAnchor="end" fontSize={11} fill={COLOR.ok}>
                 {bestLabel} {formatLatency(best.latencyMs)}
               </text>
             </g>
@@ -260,11 +313,14 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
         const status = statusOf(p)
         const color = STATUS_COLOR[status]
         const cx = model.x(i)
+        const marks = `${bestIndex === i ? ' ★' : ''}${p.finalized === true ? ' ⚑' : ''}`
+        const tip = `#${String(i + 1)} · ${p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'} · ${statusLabel(status)}${marks}`
         if (p.latencyMs === undefined) {
           // Unmeasured (pending / failed) points sit on the baseline.
           const cy = CHART.h - CHART.b
           return (
             <g key={p.seq}>
+              <title>{tip}</title>
               <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.5}>
                 {status === 'pending'
                   ? <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite" />
@@ -275,17 +331,36 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
         }
         const cy = model.y(p.latencyMs)
         const isBest = bestIndex === i
+        const clamped = model.clamped(p.latencyMs)
         return (
           <g key={p.seq}>
+            <title>{tip}</title>
             {status === 'ok'
               ? <circle cx={cx} cy={cy} r={3.5} fill={color} />
               : <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.8} />}
+            {/* ↑ marks a point above the focus domain, pinned to the top edge. */}
+            {clamped
+              ? <text x={cx} y={CHART.t - 4} textAnchor="middle" fontSize={9} fill={COLOR.caption}>↑</text>
+              : null}
+            {clamped && i === maxClampedIndex
+              ? (
+                  <text
+                    x={cx < CHART.w / 2 ? cx + 7 : cx - 7}
+                    y={CHART.t + 4}
+                    textAnchor={cx < CHART.w / 2 ? 'start' : 'end'}
+                    fontSize={11}
+                    fill={COLOR.dim}
+                  >
+                    {formatLatency(model.max)}↑
+                  </text>
+                )
+              : null}
             {/* ★ where the best result was FIRST reached; ⚑ on the finalized pick. */}
             {isBest
-              ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={12} fill={COLOR.ok}>★</text>
+              ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={13} fill={COLOR.ok}>★</text>
               : null}
             {p.finalized === true
-              ? <text x={cx} y={cy - (isBest ? 20 : 8)} textAnchor="middle" fontSize={11} fill={COLOR.warn}>⚑</text>
+              ? <text x={cx} y={cy - (isBest ? 21 : 8)} textAnchor="middle" fontSize={12} fill={COLOR.warn}>⚑</text>
               : null}
           </g>
         )
@@ -293,17 +368,20 @@ function Chart(props: { series: WireSeries; bestLabel: string }): ReactNode {
 
       {/* profiler marks */}
       {profileXs.map((x, i) => (
-        <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 12} textAnchor="middle" fontSize={9} fill={COLOR.caption}>▲</text>
+        <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 13} textAnchor="middle" fontSize={10} fill={COLOR.caption}>▲</text>
       ))}
     </svg>
   )
 }
 
+// Sizes sit on the host type scale (ui-theme tokens 12/13/14/16): 14 body,
+// 13 secondary, 12 captions — one tier above the first draft, which read a
+// step smaller than the surrounding conversation UI.
 const chipStyle: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
   padding: '2px 10px', borderRadius: 999,
   border: `1px solid ${COLOR.border}`,
-  fontSize: 12, lineHeight: '20px', color: COLOR.dim,
+  fontSize: 13, lineHeight: '22px', color: COLOR.dim,
   whiteSpace: 'nowrap',
 }
 
@@ -331,9 +409,9 @@ export function CockpitTab(
   if (iterations.length === 0 && plans.length === 0) {
     return (
       <div style={{ padding: 24, maxWidth: 720, margin: '0 auto', fontFamily: 'system-ui', color: COLOR.dim }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
-        <div style={{ fontSize: 13, lineHeight: '22px' }}>{t('empty.body')}</div>
-        <div style={{ fontSize: 12, lineHeight: '20px', marginTop: 10, color: COLOR.caption }}>{t('loop.hint')}</div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
+        <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
+        <div style={{ fontSize: 13, lineHeight: '22px', marginTop: 10, color: COLOR.caption }}>{t('loop.hint')}</div>
       </div>
     )
   }
@@ -390,7 +468,11 @@ export function CockpitTab(
       {iterations.length > 0
         ? (
             <div style={cardStyle}>
-              <Chart series={series as WireSeries} bestLabel={t('axis.best')} />
+              <Chart
+                series={series as WireSeries}
+                bestLabel={t('axis.best')}
+                statusLabel={status => t(`status.${status}`)}
+              />
             </div>
           )
         : null}
@@ -398,32 +480,32 @@ export function CockpitTab(
       {/* latest plan */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{t('plan.title')}</span>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>{t('plan.title')}</span>
           {latestPlan !== undefined
             ? (
-                <span style={{ fontSize: 11, color: COLOR.caption }}>
+                <span style={{ fontSize: 12, color: COLOR.caption }}>
                   {t('plan.count', { n: plans.length })}
                 </span>
               )
             : null}
         </div>
         {latestPlan === undefined
-          ? <div style={{ fontSize: 13, color: COLOR.caption }}>{t('plan.none')}</div>
+          ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('plan.none')}</div>
           : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
                     ...chipStyle,
                     color: COLOR.curve, borderColor: COLOR.curve,
-                    fontSize: 11, padding: '0 8px',
+                    fontSize: 12, padding: '0 8px',
                   }}>{latestPlan.phase}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>{latestPlan.approach}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{latestPlan.approach}</span>
                 </div>
                 {latestPlan.hypothesis !== undefined
-                  ? <div style={{ fontSize: 12, color: COLOR.dim }}>{latestPlan.hypothesis}</div>
+                  ? <div style={{ fontSize: 13, color: COLOR.dim }}>{latestPlan.hypothesis}</div>
                   : null}
                 {latestPlan.next !== undefined
-                  ? <div style={{ fontSize: 12, color: COLOR.dim }}>{t('plan.next')} → {latestPlan.next}</div>
+                  ? <div style={{ fontSize: 13, color: COLOR.dim }}>{t('plan.next')} → {latestPlan.next}</div>
                   : null}
               </div>
             )}
@@ -433,8 +515,8 @@ export function CockpitTab(
       {series?.control?.supervisor.lastAdvice !== undefined
         ? (
             <div style={{ ...cardStyle, borderColor: COLOR.warn }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, color: COLOR.warn }}>{t('advice.title')}</div>
-              <div style={{ fontSize: 12, lineHeight: '20px', color: COLOR.dim, whiteSpace: 'pre-wrap' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: COLOR.warn }}>{t('advice.title')}</div>
+              <div style={{ fontSize: 13, lineHeight: '22px', color: COLOR.dim, whiteSpace: 'pre-wrap' }}>
                 {series.control.supervisor.lastAdvice}
               </div>
             </div>
@@ -445,10 +527,10 @@ export function CockpitTab(
       {iterations.length > 0
         ? (
             <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '8px 14px', fontSize: 13, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
+              <div style={{ padding: '8px 14px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
                 {t('table.title')}
               </div>
-              <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 300, overflowY: 'auto' }}>
                 {[...iterations].reverse().map((p) => {
                   const status = statusOf(p)
                   const idx = iterations.indexOf(p)
@@ -456,17 +538,17 @@ export function CockpitTab(
                   return (
                     <div key={p.seq} style={{
                       display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '4px 14px', fontSize: 12, lineHeight: '20px',
+                      padding: '5px 14px', fontSize: 13, lineHeight: '22px',
                       borderBottom: `1px solid ${COLOR.border}`,
                     }}>
-                      <span style={{ flex: 'none', width: 28, color: COLOR.caption }}>#{idx + 1}</span>
-                      <span style={{ flex: 'none', width: 52, color: COLOR.dim }}>{p.evaluationId ?? '—'}</span>
-                      <span style={{ flex: 'none', width: 86, color: COLOR.text, fontVariantNumeric: 'tabular-nums' }}>
+                      <span style={{ flex: 'none', width: 32, color: COLOR.caption }}>#{idx + 1}</span>
+                      <span style={{ flex: 'none', width: 58, color: COLOR.dim }}>{p.evaluationId ?? '—'}</span>
+                      <span style={{ flex: 'none', width: 92, color: COLOR.text, fontVariantNumeric: 'tabular-nums' }}>
                         {p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}
                       </span>
                       {/* speedup vs the reference kernel (evaluator-reported) — rises and falls. */}
                       <span style={{
-                        flex: 'none', width: 64, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
+                        flex: 'none', width: 70, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
                         color: isBest ? COLOR.ok : COLOR.dim,
                       }}>
                         {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
