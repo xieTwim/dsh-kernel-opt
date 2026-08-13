@@ -137,6 +137,14 @@ export interface WireControl {
     stopReason?: string
     /** Whether the loop machinery is composed (commands/llm present). */
     available: boolean
+    /**
+     * Whether the session carries a direct human prompt yet. Arming is gated
+     * on it: a loop started over an empty session has no task to continue and
+     * primes the model to invent one from ambient filesystem state.
+     */
+    taskReady: boolean
+    /** Budget an argument-less arm would use (config `loop.defaultBudget`). */
+    defaultBudget: number
   }
   supervisor: {
     /** Whether reviews run at continuation points (per-session toggle). */
@@ -207,12 +215,13 @@ export const PRESET_ID = 'kernel-opt'
 export const SERIES_PATH = '/plugins/kernel-opt/series'
 
 /**
- * Control route (POST): `{ sessionId, action, budget?, provider?, model? }`
+ * Control route. POST `{ sessionId, action, budget?, provider?, model? }`
  * with action one of `loop-arm` / `loop-stop` / `supervise-on` /
  * `supervise-off` / `supervise-use` (both provider+model set the session
- * override; both empty resets to config). Responds with the fresh
- * {@link WireControl}. The slash commands remain the scriptable twin of the
- * same state.
+ * override; both empty resets to config). GET `?sessionId=` returns the same
+ * fresh {@link WireControl} without acting — the lightweight poll for the
+ * chat-side loop affordances. The slash commands remain the scriptable twin
+ * of the same state.
  */
 export const CONTROL_PATH = '/plugins/kernel-opt/control'
 

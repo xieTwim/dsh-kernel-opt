@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // SlotMap merge: conversation.view is declared by the conversation contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WireChange, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
+import type { WireChange, WireControl, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -52,7 +52,9 @@ const zh = {
   'axis.best': '最佳',
   'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
   'loop.stopped': '循环已停:{reason}',
-  'loop.hint': '也可用命令:/kloop [预算] · /supervise on|off · /supervise use <provider>/<model>',
+  'chat.loop': '循环',
+  'chat.loopTitle': '启动优化循环(预算 {budget},可在评测页调整)',
+  'ctl.needTask': '先把任务告诉 Agent(要优化的 kernel 和评测方式),再启动循环',
   'sup.on': '监督 on',
   'sup.off': '监督 off',
   'sup.needCfg': '未配置监督模型:下拉选一个,或在插件 config 加 supervisor: { provider, model }',
@@ -112,7 +114,9 @@ const en = {
   'axis.best': 'best',
   'loop.armed': 'looping · round {round} · {done}/{budget} evals',
   'loop.stopped': 'loop stopped: {reason}',
-  'loop.hint': 'Commands: /kloop [budget] · /supervise on|off · /supervise use <provider>/<model>',
+  'chat.loop': 'Loop',
+  'chat.loopTitle': 'Start the optimization loop (budget {budget}; adjustable on the Evaluations tab)',
+  'ctl.needTask': 'Tell the agent the task first (which kernel, how to evaluate), then arm the loop',
   'sup.on': 'supervisor on',
   'sup.off': 'supervisor off',
   'sup.needCfg': 'No supervisor model configured: pick one below, or add supervisor: { provider, model } to the plugin config',
@@ -188,6 +192,38 @@ function useModels(): WireModels | null {
     return () => { alive = false }
   }, [])
   return models
+}
+
+/**
+ * Lightweight control-state poll (GET on the control route) for the
+ * chat-side loop affordances — a fraction of the series payload, so the
+ * composer seats can poll without dragging the full iteration table along.
+ */
+function useControl(sessionId: string, pollMs = 2000): { control: WireControl | null; refetch: () => void } {
+  const [control, setControl] = useState<WireControl | null>(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let alive = true
+    const pull = async (): Promise<void> => {
+      try {
+        const res = await fetch(`${CONTROL_PATH}?sessionId=${encodeURIComponent(sessionId)}`, {
+          headers: { accept: 'application/json' },
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as { control?: WireControl }
+        if (alive && data.control !== undefined) setControl(data.control)
+      } catch {
+        // Transient failure: keep showing the last known state.
+      }
+    }
+    void pull()
+    const timer = setInterval(() => { void pull() }, pollMs)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [sessionId, pollMs, tick])
+  return { control, refetch: () => { setTick(value => value + 1) } }
 }
 
 function useSeries(sessionId: string): { series: WireSeries | null; refetch: () => void } {
@@ -766,7 +802,12 @@ export function KernelOptTab(
                 />
                 <button
                   type="button"
-                  style={buttonStyle(COLOR.curve)}
+                  style={{
+                    ...buttonStyle(COLOR.curve),
+                    ...(control.loop.taskReady ? {} : { opacity: 0.45, cursor: 'not-allowed' }),
+                  }}
+                  disabled={!control.loop.taskReady}
+                  title={control.loop.taskReady ? undefined : t('ctl.needTask')}
                   onClick={() => {
                     const budget = Number(budgetDraft)
                     void post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
@@ -867,7 +908,6 @@ export function KernelOptTab(
             <div style={{ padding: '18px 4px', color: COLOR.dim }}>
               <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
               <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
-              <div style={{ fontSize: 13, lineHeight: '22px', marginTop: 10, color: COLOR.caption }}>{t('loop.hint')}</div>
             </div>
           )
         : null}
@@ -1023,6 +1063,91 @@ export function KernelOptTab(
   )
 }
 
+/**
+ * Composer tool-row loop button — the idle half of the chat-side loop
+ * affordance. Rendered only while the loop is startable (machinery composed,
+ * not armed); disabled with an explanation until the session carries a human
+ * task, mirroring the Node-side arming gate.
+ */
+export function ChatLoopButton(
+  props: PropsRuntime<'conversation.input.left'> & PropsLocale<'kernel-opt'>,
+): ReactNode {
+  const { t } = props
+  const sessionId = props.session.sessionId
+  const { control, refetch } = useControl(sessionId)
+  if (control === null || !control.loop.available || control.loop.armed) return null
+  const ready = control.loop.taskReady
+  const arm = async (): Promise<void> => {
+    try {
+      await fetch(CONTROL_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId, action: 'loop-arm', budget: control.loop.defaultBudget }),
+      })
+    } catch {
+      // Transient failure: the poll keeps showing the authoritative state.
+    }
+    refetch()
+  }
+  return (
+    <button
+      type="button"
+      style={{
+        ...buttonStyle(COLOR.curve),
+        ...(ready ? {} : { opacity: 0.45, cursor: 'not-allowed', color: COLOR.caption, borderColor: COLOR.border }),
+      }}
+      disabled={!ready}
+      title={ready ? t('chat.loopTitle', { budget: control.loop.defaultBudget }) : t('ctl.needTask')}
+      onClick={() => { void arm() }}
+    >
+      ⟳ {t('chat.loop')}
+    </button>
+  )
+}
+
+/**
+ * Above-composer strip — the armed half of the chat-side loop affordance:
+ * round/budget state plus a stop button, so a running loop is visible and
+ * stoppable without leaving the chat view. Renders nothing while disarmed,
+ * so the idle composer stays untouched.
+ */
+export function ChatLoopStrip(
+  props: PropsRuntime<'conversation.input.dock'> & PropsLocale<'kernel-opt'>,
+): ReactNode {
+  const { t } = props
+  const sessionId = props.session.sessionId
+  const { control, refetch } = useControl(sessionId)
+  if (control === null || !control.loop.armed) return null
+  const stop = async (): Promise<void> => {
+    try {
+      await fetch(CONTROL_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId, action: 'loop-stop' }),
+      })
+    } catch {
+      // Transient failure: the poll keeps showing the authoritative state.
+    }
+    refetch()
+  }
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '5px 12px', fontSize: 13, fontFamily: 'system-ui',
+      border: `1px solid ${COLOR.curve}`, borderRadius: 10,
+      background: COLOR.tip, color: COLOR.text,
+    }}>
+      <span style={{ color: COLOR.curve, fontWeight: 500 }}>
+        ⟳ {t('loop.armed', { round: control.loop.round, done: control.loop.evalsDone, budget: control.loop.budget })}
+      </span>
+      <span style={{ flex: 1 }} />
+      <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void stop() }}>
+        ■ {t('ctl.stop')}
+      </button>
+    </div>
+  )
+}
+
 /** Client-half service requirements. */
 export const inject = ['slots', 'locale', 'sessions']
 
@@ -1055,15 +1180,23 @@ export function apply(ctx: Context): void {
     let generation = 0
     const show = (): void => {
       if (disposed || hold !== undefined) return
-      hold = ctx.slots.register({
-        name: 'conversation.view',
-        id: 'kernel-opt',
-        order: 30,
-        // Locale-thunked like the host's own tabs (ui-trajectory), so the
-        // tab name follows the active language without re-registration.
-        label: () => t('tab.label'),
-        locale: NS,
-      }, KernelOptTab)
+      // The tab and both chat-side loop affordances ride one visibility
+      // decision: a session that deserves the evaluation tab also deserves
+      // the composer loop entry and the armed strip.
+      const holds = [
+        ctx.slots.register({
+          name: 'conversation.view',
+          id: 'kernel-opt',
+          order: 30,
+          // Locale-thunked like the host's own tabs (ui-trajectory), so the
+          // tab name follows the active language without re-registration.
+          label: () => t('tab.label'),
+          locale: NS,
+        }, KernelOptTab),
+        ctx.slots.register({ name: 'conversation.input.left', id: 'kernel-opt-loop', order: 50, locale: NS }, ChatLoopButton),
+        ctx.slots.register({ name: 'conversation.input.dock', id: 'kernel-opt-strip', order: 50, locale: NS }, ChatLoopStrip),
+      ]
+      hold = () => { for (const dispose of holds) dispose() }
     }
     const hide = (): void => {
       hold?.()

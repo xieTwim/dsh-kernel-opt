@@ -5,7 +5,7 @@
  */
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { collectResultText, matchesTool, parseResultJson, project } from '../src/projection.ts'
+import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { continuationText, wrapUpText } from '../src/loop.ts'
 
@@ -223,6 +223,31 @@ test('project: non-plugin user messages never become rounds', () => {
     },
   ]
   assert.equal(project('s', events).rounds.length, 0)
+})
+
+test('hasUserTask: only a direct human prompt arms the gate', () => {
+  // Empty log, tool traffic, and the loop's own plugin-sourced continuations
+  // never count; a user-sourced message does — including the `message`
+  // wrapper variant accepted against shape drift.
+  seq = 0
+  assert.equal(hasUserTask([]), false)
+  const noTask: ProjectionEvent[] = [
+    call('bash', 'c1', { command: 'ls' }),
+    loopMessage('[kernel-loop round 1] 0/20 evaluations used.'),
+  ]
+  assert.equal(hasUserTask(noTask), false)
+  const direct: ProjectionEvent = {
+    type: 'user/message',
+    seq: 90,
+    data: { role: 'user', content: [{ type: 'text', text: '优化 solution.py' }], source: { kind: 'user' } },
+  }
+  assert.equal(hasUserTask([...noTask, direct]), true)
+  const wrapped: ProjectionEvent = {
+    type: 'user/message',
+    seq: 91,
+    data: { message: { role: 'user', content: [{ type: 'text', text: 'task' }], source: { kind: 'user' } } },
+  }
+  assert.equal(hasUserTask([wrapped]), true)
 })
 
 test('project: unparsable result leaves a measured-nothing row, not a crash', () => {

@@ -29,7 +29,10 @@
       any form). Report a resolved plan with kernel_plan and restate it in
       one short paragraph so the human can correct you; ask only what
       inventory cannot answer (typically: which kernel, how to evaluate,
-      budget). With no bench at all, one option is to install the open-source
+      budget). If the session carries no task from the user at all, ask and
+      wait — never adopt a task dug out of the filesystem (stale sibling run
+      directories and other sessions' files are not your task). With no
+      bench at all, one option is to install the open-source
       AKO4ALL toolkit from GitHub and use its built-in evaluator (assemble the
       kernel as a Model with get_inputs); it is an optional external tool, not
       the environment you are running in. (2) Assemble your own
