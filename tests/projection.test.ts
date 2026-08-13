@@ -61,7 +61,7 @@ test('collectResultText walks text blocks; parseResultJson tolerates prose wrapp
 test('project: iterations, plan, profile marks, finalize star, best index', () => {
   seq = 0
   const events: ProjectionEvent[] = [
-    call('cockpit_plan', 'p1', { phase: 'explore', approach: 'baseline triton', hypothesis: 'reference point' }),
+    call('kernel_plan', 'p1', { phase: 'explore', approach: 'baseline triton', hypothesis: 'reference point' }),
     call('ako__kernel_evaluate', 'c1', { kernel_id: 'k1' }),
     result('c1', { evaluation_id: '0001', compiled: true, correct: true, latency_ms: 10.0, native_metrics: { speedup: 1.0 } }),
     call('ako__kernel_profile', 'pr1', { sections: ['SpeedOfLight'] }),
@@ -142,7 +142,7 @@ function loopMessage(text: string): ProjectionEvent {
     data: {
       role: 'user',
       content: [{ type: 'text', text }],
-      source: { kind: 'plugin', plugin: 'kernel-cockpit' },
+      source: { kind: 'plugin', plugin: 'kernel-opt' },
     },
   }
 }
@@ -247,7 +247,7 @@ test('shell channel: bash trailer lines become self-reported points with provena
     result('b1', [
       '[bench] compiling...',
       'Trial 1: 1.31 ms',
-      '  KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.23,"correct":true,"evaluation_id":"agent-made-up","native_metrics":{"ref_runtime_ms":4.92}}  # exit 0',
+      '  KERNEL_EVAL={"artifact":"solution/k.py","latency_ms":1.23,"correct":true,"evaluation_id":"agent-made-up","native_metrics":{"ref_runtime_ms":4.92}}  # exit 0',
       'done',
     ].join('\n')),
   ]
@@ -273,12 +273,12 @@ test('shell channel: invalid payloads and mid-line mentions are ignored; multipl
   const events = [
     call('bash', 'b1', { command: 'bash scripts/bench_all.sh' }),
     result('b1', [
-      'KERNEL_COCKPIT_EVAL={"artifact":"a.py","latency_ms":2.0,"correct":true}',
-      'KERNEL_COCKPIT_EVAL={"artifact":"b.py","latency_ms":1.5,"correct":true,"workload_indices":[0,3]}',
-      'KERNEL_COCKPIT_EVAL={"latency_ms":9.9,"correct":true}',
-      'KERNEL_COCKPIT_EVAL={"artifact":"c.py","latency_ms":9.9}',
-      'KERNEL_COCKPIT_EVAL={broken json',
-      'docs say: the line KERNEL_COCKPIT_EVAL={"artifact":"doc.py","latency_ms":0.1,"correct":true} reports results',
+      'KERNEL_EVAL={"artifact":"a.py","latency_ms":2.0,"correct":true}',
+      'KERNEL_EVAL={"artifact":"b.py","latency_ms":1.5,"correct":true,"workload_indices":[0,3]}',
+      'KERNEL_EVAL={"latency_ms":9.9,"correct":true}',
+      'KERNEL_EVAL={"artifact":"c.py","latency_ms":9.9}',
+      'KERNEL_EVAL={broken json',
+      'docs say: the line KERNEL_EVAL={"artifact":"doc.py","latency_ms":0.1,"correct":true} reports results',
     ].join('\n')),
   ]
   const series = project('s', events)
@@ -288,20 +288,20 @@ test('shell channel: invalid payloads and mid-line mentions are ignored; multipl
   assert.deepEqual(series.iterations[1]?.workloadSubset, [0, 3])
 })
 
-test('finalize by artifact: cockpit_finalize flags the best honest point and parses the replay trailer', () => {
+test('finalize by artifact: kernel_finalize flags the best honest point and parses the replay trailer', () => {
   const events = [
     call('bash', 'b1', { command: 'bash scripts/bench.sh' }),
-    result('b1', 'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":2.4,"correct":true}'),
+    result('b1', 'KERNEL_EVAL={"artifact":"solution/k.py","latency_ms":2.4,"correct":true}'),
     call('bash', 'b2', { command: 'bash scripts/bench.sh' }),
-    result('b2', 'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.1,"correct":true}'),
+    result('b2', 'KERNEL_EVAL={"artifact":"solution/k.py","latency_ms":1.1,"correct":true}'),
     call('bash', 'b3', { command: 'bash scripts/bench.sh' }),
-    result('b3', 'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":0.9,"correct":false}'),
-    call('cockpit_finalize', 'f1', { artifact_path: 'solution/k.py' }),
+    result('b3', 'KERNEL_EVAL={"artifact":"solution/k.py","latency_ms":0.9,"correct":false}'),
+    call('kernel_finalize', 'f1', { artifact_path: 'solution/k.py' }),
     result('f1', [
       'Finalize recorded for solution/k.py.',
-      '[cockpit-replay] bash scripts/bench.sh',
+      '[replay] bash scripts/bench.sh',
       'Trial 1: 1.15 ms',
-      'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.12,"correct":true}',
+      'KERNEL_EVAL={"artifact":"solution/k.py","latency_ms":1.12,"correct":true}',
     ].join('\n')),
   ]
   const series = project('s', events)

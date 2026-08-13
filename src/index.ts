@@ -1,16 +1,16 @@
 /**
- * dsh-kernel-cockpit — Node half.
+ * dsh-kernel-opt — Node half.
  *
- * Live kernel-optimization cockpit for DeepSeek Harness. The session log is
+ * Live kernel-optimization panel and loop for DeepSeek Harness. The session log is
  * the only data source: kernel evaluations (evaluator tool results, or
- * `KERNEL_COCKPIT_EVAL=` contract trailers in shell output), profiler calls,
- * finalize picks, and the model's own `cockpit_plan` reports are projected
+ * `KERNEL_EVAL=` contract trailers in shell output), profiler calls,
+ * finalize picks, and the model's own `kernel_plan` reports are projected
  * out of `session.events` per query and served as JSON for the browser panel
  * — no plugin-side derived state to drift or leak, and replayed sessions
  * render identically.
  *
  * On top of the projection sit the run controls:
- * - `cockpit_plan` / `self_compact` tools — the model's levers (plan
+ * - `kernel_plan` / `self_compact` tools — the model's levers (plan
  *   reporting; log-preserving context compaction through the `compaction`
  *   seam, registered only when a provider is composed in);
  * - `/kloop` — a kernel-opt loop that re-drives the agent at turn settle
@@ -20,7 +20,7 @@
  *   each continuation point and rides its advice on the continuation
  *   message; failures degrade to "no advice", never a stalled loop.
  *
- * @module @xietwim/dsh-kernel-cockpit
+ * @module @xietwim/dsh-kernel-opt
  */
 import type { IncomingMessage } from 'node:http'
 import { spawn } from 'node:child_process'
@@ -47,17 +47,17 @@ import type { LoopState } from './loop.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
 import type { WireControl, WireIteration, WireModels, WireSeries } from './wire.ts'
 
-export const name = 'kernel-cockpit'
+export const name = 'kernel-opt'
 export const inject = ['tools', 'agents', 'sessions']
 
 /** Plugin id stamped on plugin-sourced messages. */
-const PLUGIN_ID = 'kernel-cockpit'
+const PLUGIN_ID = 'kernel-opt'
 
 /** Delay between a logged turn end and the idle check that may continue. */
 const SETTLE_DELAY_MS = 1200
 
 /**
- * Cockpit configuration. All fields optional; tool-name defaults cover any
+ * Plugin configuration. All fields optional; tool-name defaults cover any
  * evaluator named `kernel_evaluate` / `kernel_profile` / `run_finalize`.
  * Names match exactly or as a separator-delimited suffix, so MCP server
  * prefixes (e.g. `mcp__myeval__kernel_evaluate`) are covered without
@@ -73,7 +73,7 @@ export interface Config {
   /** Tool names treated as structured artifact changes (default `write`/`edit`). */
   changeTools?: string[]
   /**
-   * Shell tools whose results are scanned for the `KERNEL_COCKPIT_EVAL=`
+   * Shell tools whose results are scanned for the `KERNEL_EVAL=`
    * contract trailer (self-reported channel; default `['bash']`).
    */
   shellTools?: string[]
@@ -88,7 +88,7 @@ export interface Config {
    * 「算子优化模式」agent preset self-install. On by default: when the
    * deployment composes `agentPresets`, the bundled preset directory is
    * copied once into the user preset root (`~/.dsh/.agent-presets/<id>/`),
-   * never overwriting an existing copy. The cockpit tab always shows for
+   * never overwriting an existing copy. the evaluation tab always shows for
    * sessions composed from the DEFAULT id — an overridden `id` keeps the
    * preset but falls back to signal-based tab detection.
    */
@@ -99,7 +99,7 @@ export interface Config {
     id?: string
   }
   /**
-   * Finalize replay: when `cockpit_finalize` names an artifact whose best
+   * Finalize replay: when `kernel_finalize` names an artifact whose best
    * measurement is self-reported (shell channel), the plugin re-executes the
    * recorded command once — outside any agent turn — and appends the output
    * to the tool result; the trailer inside becomes the verified final
@@ -237,7 +237,7 @@ function readJsonBody(req: IncomingMessage, maxBytes = 16_384): Promise<Record<s
 }
 
 /**
- * Mount the cockpit: model tools, kernel loop + supervisor commands, and the
+ * Mount the plugin: model tools, kernel loop + supervisor commands, and the
  * per-session series route the browser panel polls.
  * @param ctx - plugin context.
  * @param config - optional routing/loop/supervisor overrides.
@@ -294,18 +294,18 @@ export function apply(ctx: Context, config: Config = {}): void {
     const state = stateFor(sessionId)
     if (enabled && effectiveSupervisor(state) === undefined) {
       return 'No supervisor model configured. Pick one (/supervise use <provider>/<model>, or the panel picker), '
-        + 'or add to the kernel-cockpit plugin config: supervisor: { provider: <route>, model: <id> } — '
+        + 'or add to the kernel-opt plugin config: supervisor: { provider: <route>, model: <id> } — '
         + 'a distinct route/model from the primary.'
     }
     state.supervise = enabled
     return null
   }
 
-  // cockpit_plan — the call itself is the record: the projection reads the
+  // kernel_plan — the call itself is the record: the projection reads the
   // logged arguments, so the tool body only acknowledges.
   ctx.tools.register(defineTool({
-    name: 'cockpit_plan',
-    description: 'Report your CURRENT kernel-optimization plan to the human cockpit panel. '
+    name: 'kernel_plan',
+    description: 'Report your CURRENT kernel-optimization plan to the human evaluation panel. '
       + 'Call BEFORE starting a new approach and again whenever the plan changes, so the human '
       + 'can steer early instead of after a wasted iteration. Keep every field to one short line. '
       + 'phase: loop stage (e.g. explore / tune / verify / stuck). approach: the technique being '
@@ -326,21 +326,21 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
   }))
 
-  // cockpit_finalize — the finalize record for evaluation pipelines with no
+  // kernel_finalize — the finalize record for evaluation pipelines with no
   // evaluator-issued ids (the self-reported channel). The call itself is the
   // record; when the artifact's best measurement is self-reported and replay
   // is enabled, the plugin re-executes that recorded command once and appends
   // its output — the trailer inside becomes the verified [replay] final
   // measurement, read back by the projection like everything else.
   ctx.tools.register(defineTool({
-    name: 'cockpit_finalize',
+    name: 'kernel_finalize',
     description: 'Record your FINAL kernel choice by artifact path (for evaluation pipelines without '
       + 'evaluator-issued ids; with an id-issuing evaluator call its own finalize instead). Call once, at the '
       + 'end, with the artifact you stand behind — restore it verbatim first if a later edit regressed it. '
-      + 'When the best measurement for that artifact is self-reported, the cockpit replays the recorded '
+      + 'When the best measurement for that artifact is self-reported, the plugin replays the recorded '
       + 'benchmark command once and appends the output as the verified final measurement.',
     parameters: {
-      artifact_path: { type: 'string', required: true, description: 'Path of the final artifact, as printed in its KERNEL_COCKPIT_EVAL trailer.' },
+      artifact_path: { type: 'string', required: true, description: 'Path of the final artifact, as printed in its KERNEL_EVAL trailer.' },
       note: { type: 'string', description: 'One-line closing note (optional).' },
     },
     output: {
@@ -418,7 +418,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     lctx.effect(() => () => {
       for (const timer of timers) clearTimeout(timer)
       timers.clear()
-    }, 'kernel-cockpit: loop timers')
+    }, 'kernel-opt: loop timers')
 
     /** One supervisor review; any failure degrades to unreviewed/no advice. */
     const review = async (
@@ -533,7 +533,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     bridge.arm = armLoop
     lctx.effect(() => () => {
       delete bridge.arm
-    }, 'kernel-cockpit: loop bridge')
+    }, 'kernel-opt: loop bridge')
 
     // The loop trigger is the logged turn boundary — the same surface the
     // projection reads, so a continuation can never race its own data.
@@ -638,7 +638,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // preset appear in the picker. Copy-once into the user preset root — never
   // clobbers an existing (possibly user-edited) copy; delete that directory
   // to re-seed. Host discovery is unmemoized, so it shows up without a
-  // restart. Best-effort: any failure leaves the cockpit fully functional.
+  // restart. Best-effort: any failure leaves the plugin fully functional.
   ctx.inject(['agentPresets'], (pctx) => {
     if (config.preset?.install === false) return
     const id = config.preset?.id ?? PRESET_ID
@@ -652,7 +652,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (existsSync(target)) return
         await cp(source, target, { recursive: true })
       } catch {
-        // Preset install is a convenience; the cockpit works without it.
+        // Preset install is a convenience; the plugin works without it.
       }
     })()
   })
@@ -711,7 +711,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           respond(500, { error: error instanceof Error ? error.message : String(error) })
         }
       },
-    }), 'kernel-cockpit: series route')
+    }), 'kernel-opt: series route')
 
     wctx.effect(() => wctx.webServer.register({
       kind: 'exact',
@@ -785,7 +785,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           }
         })()
       },
-    }), 'kernel-cockpit: control route')
+    }), 'kernel-opt: control route')
   })
 
   // Models route — the panel's supervisor picker. Read-only enumeration of
@@ -824,6 +824,6 @@ export function apply(ctx: Context, config: Config = {}): void {
           }
         })()
       },
-    }), 'kernel-cockpit: models route')
+    }), 'kernel-opt: models route')
   })
 }

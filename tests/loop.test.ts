@@ -99,7 +99,7 @@ test('finalize hint is threaded into continuation and wrap-up texts', () => {
   assert.ok(continuationText(1, 0, 20, null, false, 0, 'my_finalize').includes('my_finalize'))
   assert.ok(wrapUpText(20, 20, 'budget', 'my_finalize').includes('my_finalize'))
   // Defaults name both finalize tools.
-  assert.ok(wrapUpText(20, 20, 'budget').includes('cockpit_finalize'))
+  assert.ok(wrapUpText(20, 20, 'budget').includes('kernel_finalize'))
 })
 
 test('supervisor digest carries provenance for self-reported rows', () => {

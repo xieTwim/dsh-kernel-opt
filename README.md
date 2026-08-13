@@ -1,6 +1,6 @@
-# dsh-kernel-cockpit
+# dsh-kernel-opt
 
-**算子优化驾驶舱** — DeepSeek Harness 插件：模型在长优化循环里跑，人类在会话页的「评测」Tab 实时看到 **latency 曲线、每个点的正确性/reward-hack 状态与来源、profile ▲、首达最佳 ★ 与 finalize ⚑ 标记、模型当前方案、监督记录**，并可随时插话引导（原生 steering）；模型自己可以在换方案族时压缩上下文继续干（`self_compact`）。
+**DSH 算子优化插件**：模型在长优化循环里跑，人类在会话页的「评测」Tab 实时看到 **latency 曲线、每个点的正确性/reward-hack 状态与来源、profile ▲、首达最佳 ★ 与 finalize ⚑ 标记、模型当前方案、监督记录**，并可随时插话引导（原生 steering）；模型自己可以在换方案族时压缩上下文继续干（`self_compact`）。
 
 数据全部从**会话日志**投影派生（零插件侧状态），回放的会话渲染结果与实时完全一致。
 
@@ -11,7 +11,7 @@
 **① 契约行（自带评测的默认路径）。** 评测脚本在结束时向 stdout 打印一行：
 
 ```
-KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
+KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ```
 
 模型经 `bash` 跑它，面板从 shell 结果里解析这一行。必需字段只有 `artifact`（测的是哪个文件）和 `correct`；测得延迟时给 `latency_ms`；可选 `compiled` / `error` / `native_metrics`（数值映射，`speedup` 或 `ref_runtime_ms` 会成为加速比列）/ `reward_hack_detected` / `workload_indices`。一行一个评测，行首开始，行内 JSON 后可跟杂质。
@@ -26,18 +26,18 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 | 契约行 | `自报` | 模型可控的 stdout——每个点展示**产生它的命令行**，一眼可辨 `echo` 出来的假点；监督模型的 digest 里同样带命令行 |
 | finalize 复测 | `复测` | 插件自己重放命令得到——非模型转述 |
 
-**finalize 复测（verify the verdict, not the signal）**：模型调 `cockpit_finalize {artifact_path}` 收尾时，若该 artifact 的最优测量来自自报级，插件在 agent 回合之外把记录过的那条命令**重放一次**，输出附在工具结果里——其中的契约行成为"复测"级最终数字。轨迹是自报的，**最终数字是复测的**。复测失败/关闭时面板标注"最终数字未复测"。
+**finalize 复测（verify the verdict, not the signal）**：模型调 `kernel_finalize {artifact_path}` 收尾时，若该 artifact 的最优测量来自自报级，插件在 agent 回合之外把记录过的那条命令**重放一次**，输出附在工具结果里——其中的契约行成为"复测"级最终数字。轨迹是自报的，**最终数字是复测的**。复测失败/关闭时面板标注"最终数字未复测"。
 
 | 组成 | 说明 |
 |---|---|
 | 「评测」会话 Tab | `conversation.view` 槽，**按需出现**：算子优化模式的会话常显示；其余会话检测到评测/plan/循环 armed 才持有注册。内容：SVG 曲线（y 域聚焦收敛带，离群点顶边截断，hover 精确值）+ 状态芯片与**循环/监督控件** + 当前方案卡 + 监督记录卡 + **可展开迭代表**（评测完整判定、来源命令行、生效方案、该轮监督、该轮 write/edit 改动） |
-| `cockpit_plan` 工具 | 模型汇报 phase/approach/hypothesis/next；调用本身即记录 |
-| `cockpit_finalize` 工具 | 无 id 评测管线的收尾记录（按 `artifact_path`）+ 上述复测 |
+| `kernel_plan` 工具 | 模型汇报 phase/approach/hypothesis/next；调用本身即记录 |
+| `kernel_finalize` 工具 | 无 id 评测管线的收尾记录（按 `artifact_path`）+ 上述复测 |
 | `self_compact` 工具 | 包装官方 `compaction` seam；仅当组合里有 compaction provider 时注册 |
 | `/kloop [预算]` 命令 | **kernel 优化循环**：按 run 状态驱动的续跑——turn 落定且预算未尽、未 finalize、上轮有进展才续投；续投消息带停滞计数；预算耗尽/停滞先投**收尾轮**再停 |
 | `/supervise on\|off` 命令 | **第二模型监督**：每个续跑点复审 run digest（含每点来源命令行），建议随续投消息注入；失败降级为无建议 |
 | series / control / models 路由 | `GET …/series?sessionId=` 即时投影；`POST …/control` 驱动与 slash 命令同一份循环/监督状态（含 `supervise-use` 会话级换监督模型）；`GET …/models` 供面板选择器枚举 provider/model |
-| `skills/kernel-cockpit` | 优化协议（盘点→组装评测入口→自由迭代→诚实收尾），可选装 |
+| `skills/kernel-opt` | 优化协议（盘点→组装评测入口→自由迭代→诚实收尾），可选装 |
 
 ## 快速上手（自带 kernel）
 
@@ -52,7 +52,7 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 
 装上插件后（部署组合了 `agentPresets` 时），Node 半会把一个「算子优化模式」preset 写进用户 preset 根（`~/.dsh/.agent-presets/kernel-opt/`，**仅当不存在时**；想重置就删掉该目录再重启）。新建会话选这个模式：
 
-- persona 就是任务书的通用半：盘点材料 → `cockpit_plan` 报 resolved plan → 组装评测入口（契约行）→ 自由迭代 → 诚实收尾。你只需要在第一条消息里给三样：**kernel 在哪、怎么评测（或让它用 AKO4ALL 内置评测器）、预算/卡信息**；
+- persona 就是任务书的通用半：盘点材料 → `kernel_plan` 报 resolved plan → 组装评测入口（契约行）→ 自由迭代 → 诚实收尾。你只需要在第一条消息里给三样：**kernel 在哪、怎么评测（或让它用 AKO4ALL 内置评测器）、预算/卡信息**；
 - 该模式的会话「评测」Tab **常显示**（不等第一次评测）；
 - preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），落盘后想改就直接改——插件永不覆盖已存在的副本；
 - 关闭自动落盘：config `preset.install: false`；换 id：`preset.id`（Tab 常显示判定只认默认 id，改 id 后回退到信号检测）。
@@ -76,7 +76,7 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 **监督模型两层解析**：面板下拉/`/supervise use` 的**会话级覆盖** > 插件 config 默认。下拉选项来自 models 路由（`llm.listProviders()`/`listModels()`，发现失败的 provider 仍列出、模型手填走 `/supervise use`）；覆盖只换路由，temperature/maxTokens 等复审纪律仍随 config。没配 config 也可以：下拉选一个（或 `/supervise use`）后 `/supervise on` 即可用。config 写法（`~/.dsh/cordis.patch.yml` 的插件行，或 profile patch）：
 
 ```yaml
-- id: kernel-cockpit
+- id: kernel-opt
   config:
     supervisor:
       provider: deepseek-official   # Models 设置里的 provider 路由
@@ -90,15 +90,15 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 构建产物随仓库分发（`lib/` 已提交），安装免构建：
 
 ```sh
-dsh plugin --profile web add /path/to/dsh-kernel-cockpit   # 本地目录
+dsh plugin --profile web add /path/to/dsh-kernel-opt   # 本地目录
 # 或 git 源(pin commit;私有仓库需本机 git 具备访问权):
-dsh plugin --profile web add "github:xieTwim/dsh-kernel-cockpit#<sha>"
+dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt#<sha>"
 ```
 
 重启 `dsh web` 生效。验证：
 
 ```sh
-dsh --profile web --dump-config | grep kernel-cockpit   # 应出现 bundle 层
+dsh --profile web --dump-config | grep kernel-opt   # 应出现 bundle 层
 # 在有评测/plan/循环信号的会话里,顶部视图切换出现「评测」(无关会话不显示 Tab)
 ```
 
@@ -109,7 +109,7 @@ dsh --profile web --dump-config | grep kernel-cockpit   # 应出现 bundle 层
 | `benchTools` | `['kernel_evaluate']` | 计入曲线的评测**工具**名（精确或分隔符后缀匹配，MCP 前缀自动覆盖） |
 | `shellTools` | `['bash']` | 扫描契约行的 shell 工具名（自报通道；后台 job 读取器不默认收——轮询重复读会复制契约行） |
 | `profileTools` | `['kernel_profile']` | 记为 ▲ 标记的 profiler 工具名 |
-| `finalizeTools` | `['run_finalize', 'cockpit_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标 ⚑，`artifact_path` 参数把该 artifact 最优诚实点标 ⚑ |
+| `finalizeTools` | `['run_finalize', 'kernel_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标 ⚑，`artifact_path` 参数把该 artifact 最优诚实点标 ⚑ |
 | `changeTools` | `['write', 'edit']` | 计为"该轮改动"的结构化文件工具名，与评测的 artifact 匹配后挂到该行 |
 | `replay.enabled` | `true` | finalize 复测开关 |
 | `replay.timeoutSec` | `900` | 复测命令超时（秒） |

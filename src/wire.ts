@@ -1,6 +1,6 @@
 /**
  * Wire types and protocol constants shared by the Node half (series/control
- * routes, loop texts) and the browser half (cockpit panel). The continuation
+ * routes, loop texts) and the browser half (the panel). The continuation
  * message anchors live here because they are a two-sided protocol: `loop.ts`
  * builds continuation/wrap-up texts around them, and `projection.ts` parses
  * the same texts back out of the session log.
@@ -85,7 +85,7 @@ export interface WireChange {
   truncated?: boolean
 }
 
-/** One `cockpit_plan` call — the model's stated plan at that point. */
+/** One `kernel_plan` call — the model's stated plan at that point. */
 export interface WirePlan {
   /** Session-log seq of the plan call. */
   seq: number
@@ -167,7 +167,7 @@ export interface WireModels {
   }[]
 }
 
-/** Series payload served at the cockpit route for one session. */
+/** Series payload served at the series route for one session. */
 export interface WireSeries {
   /** Session the series was projected from. */
   sessionId: string
@@ -183,7 +183,7 @@ export interface WireSeries {
   rounds: WireRound[]
   /** Index into `iterations` of the best honest measurement, if any. */
   bestIndex: number | null
-  /** Loop/supervisor state when the cockpit loop is present for this session. */
+  /** Loop/supervisor state when the kernel loop is present for this session. */
   control?: WireControl
 }
 
@@ -199,12 +199,12 @@ export function samePath(a: string, b: string): boolean {
 /**
  * Id of the bundled「算子优化模式」agent preset the Node half seeds into the
  * user preset root. Shared constant: sessions composed from this preset id
- * always show the cockpit tab (before any evaluation lands).
+ * always show the evaluation tab (before any evaluation lands).
  */
 export const PRESET_ID = 'kernel-opt'
 
 /** Route the Node half serves and the panel polls (query: `?sessionId=`). */
-export const SERIES_PATH = '/plugins/kernel-cockpit/series'
+export const SERIES_PATH = '/plugins/kernel-opt/series'
 
 /**
  * Control route (POST): `{ sessionId, action, budget?, provider?, model? }`
@@ -214,17 +214,17 @@ export const SERIES_PATH = '/plugins/kernel-cockpit/series'
  * {@link WireControl}. The slash commands remain the scriptable twin of the
  * same state.
  */
-export const CONTROL_PATH = '/plugins/kernel-cockpit/control'
+export const CONTROL_PATH = '/plugins/kernel-opt/control'
 
 /** Models route (GET): the {@link WireModels} catalog for the picker. */
-export const MODELS_PATH = '/plugins/kernel-cockpit/models'
+export const MODELS_PATH = '/plugins/kernel-opt/models'
 
 /**
  * Prefix of the evaluation contract trailer line. Any evaluation pipeline —
- * whatever it does internally — participates in the cockpit by printing one
+ * whatever it does internally — participates in the panel by printing one
  * line to stdout:
  *
- * `KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.23,"correct":true}`
+ * `KERNEL_EVAL={"artifact":"solution/k.py","latency_ms":1.23,"correct":true}`
  *
  * Required: `artifact` (which file this measures) and `correct`; `latency_ms`
  * whenever the run was timed. Optional: `compiled`, `error`, `native_metrics`
@@ -232,14 +232,14 @@ export const MODELS_PATH = '/plugins/kernel-cockpit/models'
  * `reward_hack_detected`, `workload_indices`. One line per evaluation. This is
  * a public contract — published scripts print it, so it must never change.
  */
-export const EVAL_TRAILER_PREFIX = 'KERNEL_COCKPIT_EVAL='
+export const EVAL_TRAILER_PREFIX = 'KERNEL_EVAL='
 
 /**
- * Line the Node half writes into a `cockpit_finalize` tool result naming the
+ * Line the Node half writes into a `kernel_finalize` tool result naming the
  * command it replayed; the projection reads it back as the replay point's
  * provenance.
  */
-export const REPLAY_LINE_PREFIX = '[cockpit-replay] '
+export const REPLAY_LINE_PREFIX = '[replay] '
 
 /** First-line prefix of a continuation message (`round N` follows). */
 export const LOOP_LINE_PREFIX = '[kernel-loop round '

@@ -1,11 +1,11 @@
 /**
- * dsh-kernel-cockpit — browser half.
+ * dsh-kernel-opt — browser half.
  *
  * 「评测」 session tab (`conversation.view` slot): polls the Node half's
  * series route and renders the live optimization picture — latency curve over
  * evaluations (log scale when the journey is wide), correctness/reward-hack
  * status per point, profiler ▲ and finalize ★ marks, the model's latest
- * `cockpit_plan`, and an iteration table. Pure projection of the session log;
+ * `kernel_plan`, and an iteration table. Pure projection of the session log;
  * a replayed session renders identically.
  * @module
  */
@@ -24,12 +24,12 @@ import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, samePath } from '../
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** Kernel-cockpit copy. */
-    'kernel-cockpit': CockpitKey
+    /** Kernel-opt panel copy. */
+    'kernel-opt': LocaleKey
   }
 }
 
-const NS = 'kernel-cockpit'
+const NS = 'kernel-opt'
 const zh = {
   'tab.label': '评测',
   'empty.title': '还没有评测数据',
@@ -40,7 +40,7 @@ const zh = {
   'chips.hacks': '{count} 次 reward-hack 拦截',
   'chips.pending': '评测中…',
   'plan.title': '当前方案',
-  'plan.none': '模型尚未调用 cockpit_plan 汇报方案。',
+  'plan.none': '模型尚未调用 kernel_plan 汇报方案。',
   'plan.next': '下一步',
   'plan.count': '第 {n} 次汇报',
   'table.title': '迭代记录',
@@ -88,8 +88,8 @@ const zh = {
   'row.unverifiedFinal': '最终数字未复测(自报值)',
   'table.final': '提交',
 } satisfies Record<string, string>
-/** Cockpit locale key union. */
-type CockpitKey = keyof typeof zh
+/** Panel locale key union. */
+type LocaleKey = keyof typeof zh
 const en = {
   'tab.label': 'Evaluations',
   'empty.title': 'No evaluations yet',
@@ -100,7 +100,7 @@ const en = {
   'chips.hacks': '{count} reward-hacks caught',
   'chips.pending': 'evaluating…',
   'plan.title': 'Current plan',
-  'plan.none': 'The model has not reported a plan via cockpit_plan yet.',
+  'plan.none': 'The model has not reported a plan via kernel_plan yet.',
   'plan.next': 'Next',
   'plan.count': 'report #{n}',
   'table.title': 'Iterations',
@@ -169,7 +169,7 @@ const COLOR = {
   warn: '#d18a1f',
 }
 
-/** Session-scoped polling hook for the cockpit series (+ manual refetch). */
+/** Session-scoped polling hook for the panel series (+ manual refetch). */
 /** One-shot fetch of the supervisor model catalog (picker options). */
 function useModels(): WireModels | null {
   const [models, setModels] = useState<WireModels | null>(null)
@@ -547,7 +547,7 @@ function reviewBefore(rounds: readonly WireRound[], seq: number): WireRound | un
 }
 
 /** One structured artifact change, rendered as labeled monospace blocks. */
-function ChangeBlock(props: { change: WireChange; t: PropsLocale<'kernel-cockpit'>['t'] }): ReactNode {
+function ChangeBlock(props: { change: WireChange; t: PropsLocale<'kernel-opt'>['t'] }): ReactNode {
   const { change, t } = props
   return (
     <div style={{ marginBottom: 6 }}>
@@ -577,7 +577,7 @@ function IterationDetail(props: {
   point: WireIteration
   plans: readonly WirePlan[]
   rounds: readonly WireRound[]
-  t: PropsLocale<'kernel-cockpit'>['t']
+  t: PropsLocale<'kernel-opt'>['t']
   unverifiedFinal?: boolean
 }): ReactNode {
   const { point, plans, rounds, t, unverifiedFinal } = props
@@ -685,9 +685,9 @@ function IterationDetail(props: {
   )
 }
 
-/** The cockpit tab. */
-export function CockpitTab(
-  props: PropsRuntime<'conversation.view'> & PropsLocale<'kernel-cockpit'>,
+/** the evaluation tab. */
+export function KernelOptTab(
+  props: PropsRuntime<'conversation.view'> & PropsLocale<'kernel-opt'>,
 ): ReactNode {
   const { t, sessionId } = props
   const { series, refetch } = useSeries(sessionId)
@@ -1026,11 +1026,11 @@ export function CockpitTab(
 /** Client-half service requirements. */
 export const inject = ['slots', 'locale', 'sessions']
 
-/** How often the watcher re-checks the current session for cockpit signals. */
+/** How often the watcher re-checks the current session for kernel-opt signals. */
 const DETECT_MS = 3000
 
-/** Whether a session has anything the cockpit tab could show. */
-function cockpitRelevant(series: WireSeries): boolean {
+/** Whether a session has anything the evaluation tab could show. */
+function kernelOptRelevant(series: WireSeries): boolean {
   return series.iterations.length > 0
     || series.plans.length > 0
     || series.control?.loop.armed === true
@@ -1048,7 +1048,7 @@ function cockpitRelevant(series: WireSeries): boolean {
  */
 export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'kernel-cockpit: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'kernel-opt: dictionaries')
   ctx.slots.inject('conversation.view', () => {
     let hold: (() => void) | undefined
     let disposed = false
@@ -1057,13 +1057,13 @@ export function apply(ctx: Context): void {
       if (disposed || hold !== undefined) return
       hold = ctx.slots.register({
         name: 'conversation.view',
-        id: 'kernel-cockpit',
+        id: 'kernel-opt',
         order: 30,
         // Locale-thunked like the host's own tabs (ui-trajectory), so the
         // tab name follows the active language without re-registration.
         label: () => t('tab.label'),
         locale: NS,
-      }, CockpitTab)
+      }, KernelOptTab)
     }
     const hide = (): void => {
       hold?.()
@@ -1095,7 +1095,7 @@ export function apply(ctx: Context): void {
         }
         const data = (await res.json()) as WireSeries
         if (gen !== generation || disposed) return
-        if (cockpitRelevant(data)) show()
+        if (kernelOptRelevant(data)) show()
         else hide()
       } catch {
         // Transient network error: keep the current visibility.
