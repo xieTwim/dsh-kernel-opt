@@ -1,35 +1,74 @@
 ---
 name: kernel-cockpit
-description: Discipline for long kernel-optimization loops under the kernel-cockpit plugin — when to report a plan, when to self-compact, how the human steers.
+description: Protocol for long kernel-optimization runs under the kernel-cockpit plugin — inventory the materials, assemble your own evaluation entry that prints the contract trailer, iterate freely with checkpoint commits, finalize honestly. The panel derives everything from the session log.
 ---
 
-# kernel-cockpit 循环纪律
+# kernel-cockpit 优化协议
 
-本 skill 配合 `dsh-kernel-cockpit` 插件使用。面板从会话日志派生,你不需要为它做任何额外记录——只需遵守两条纪律,人类就能实时看懂并引导你的优化循环。
+本 skill 配合 `dsh-kernel-cockpit` 插件使用。面板、循环、监督全部从**会话日志**派生——你不需要为它们做任何额外记录。协议只有四段：起步盘点、评测入口、自由迭代、诚实收尾。
 
-## 1. cockpit_plan:先声明,再动手
+## 0. 起步：盘点材料，报告 Resolved Plan
 
-在**每次开始一个新方案**(新的 kernel 结构、新的 tiling 策略、新的方法族)之前,调用 `cockpit_plan`:
+用户会以**任意形式**提供材料。自己浏览工作区（不要跑固定清单），识别出：
 
-- `phase`:explore(找方向)/ tune(参数微调)/ verify(验证正确性与稳定性)/ stuck(卡住,需要人类输入)/ done。
-- `approach`:一句话说清这次要做什么,如 "split-K over KV, BLOCK_H=8"。
-- `hypothesis`:为什么它应该更快(一句话)。
-- `next`:紧接着的第一个动作。
+- **kernel**（必需）——要优化的代码，文件或目录，语言不限；
+- **reference**（可选）——正确性金标准；没有就以原始 kernel 为金标准；
+- **输入数据**（可选）——硬编码、独立文件、`.npz`/`.bin` 裸数据都行，你自己接线；
+- **评测脚本**（可选）——用户自己的 bench；读懂它、包装它，**不要改它的 trial 数/参考处理**（那是用户的契约；快迭代开关只用用户暴露的，没有就问）；
+- **硬件信息 / knowledge / hints**（可选）。
 
-方案变化时**再调一次**。人类靠这个卡片决定要不要在你浪费一轮评测之前插话引导(用户输入会以 steering 方式插进你的下一步)。`phase=stuck` 是显式请求人类引导的信号。
+没有评测脚本时，装公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL) 拿它的内置评测器（`bench/kernelbench/bench.py`，把材料组装成 `Model`/`get_inputs()` 即可用，组装模式见其 GUIDE）。
 
-## 2. self_compact:换方案族时清上下文
+盘点完成后，先调 `cockpit_plan`（phase=explore，approach 写一句 resolved plan），再用一小段文字向用户复述你认定的各项（kernel 路径 / 评测方式 / 预算），**只在真有歧义时才提问**——复述是为了让用户能在你没想到要问的地方纠正你。
 
-满足以下任一条件时,调用 `self_compact`(带 `reason`,说明什么信息必须存活):
+## 1. 评测入口：你自己组装，末尾打一行契约
 
-- 你要**换到不同的方法族**,旧方案的逐行调试细节不再有用;
-- 累积的工具输出(profile 全文、编译报错)已经消费完毕,只剩结论有用;
-- 你注意到自己开始重复检索早已确认过的事实。
+评测怎么跑由你定（推荐包一个 `scripts/bench.sh`）。**唯一硬性要求**：每完成一次真实评测，向 stdout 打印一行契约（行首，一行一个评测）：
 
-压缩只影响模型可见上下文;完整历史仍在会话日志里,面板曲线不受影响。**不要**在评测仍在进行、或刚拿到需要逐行分析的 profile 输出时压缩。
+```
+KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
+```
 
-## 3. 诚实红线
+| 字段 | 必需 | 含义 |
+|---|---|---|
+| `artifact` | ✅ | 本次测的是哪个文件（路径） |
+| `correct` | ✅ | 正确性判定（未验证就写 `false`） |
+| `latency_ms` | 测得就写 | 延迟毫秒数 |
+| `compiled` / `error` | 可选 | 编译结果 / 失败信息 |
+| `native_metrics` | 可选 | 数值映射；`speedup` 或 `ref_runtime_ms` 会变成面板的加速比列 |
+| `reward_hack_detected` / `workload_indices` | 可选 | 评测器的反作弊标记 / 子集评测 |
 
-- 评测数字以 `kernel_evaluate` 的返回为准,不要在 plan 里声称未测得的加速比。
-- 出现 `reward_hack_detected` 时,当作方法失败处理并换方向,不要绕检测器。
-- `correct: false` 的低延迟不是进展;面板会把它标红并排除出 best。
+规矩：
+
+- **前台跑 bench**（不要 `run_in_background`——后台 job 的输出面板不收）；
+- 包装脚本**env 自包含**（conda activate / PATH export 写进脚本里）——这同时是 finalize 复测能成功的前提；
+- 契约行**只能由真实评测产生**。`echo`/`cat` 出一行契约=伪造：面板给每个点标注产生它的命令行，监督模型会审这些命令行，人类看得见;
+- 有 MCP/注册工具评测器时不用契约行——工具结果 JSON 直接进面板（同样字段，走 `benchTools` 配置），且不可伪造。
+
+## 2. 迭代：自由，但有三个 checkpoint
+
+改 kernel → 评测 → 看结果 → 再改。不用写迭代日志、不用逐轮 commit——日志和面板就是记录。目录结构自便，多变体并行（`experiments/candidate-A/B/`）也行：面板按 `artifact` 逐点记录，各变体曲线自然分开。
+
+**git checkpoint 三时机**（`git commit`，不必更频繁）：出现新的最佳结果时；换方法族时；finalize 时。commit 是 artifact 检查点（回滚/对比），不是日志。
+
+**快迭代**：昂贵的 reference 对"比较两个 solution"没有贡献——循环里按 solution 自身延迟排序（signal），只在提交赢家前跑全量出真 speedup（verdict）。这些开关只对**你自己写的**包装/内置评测器用；用户脚本的参数是用户契约。
+
+**停滞**：循环续跑消息会带"距上次改进已 N 评"的计数。要不要重新 profile、换方法族、上网查，你自己判断——没有固定门槛。同样，**不要为改写而改写**：带宽顶限的 elementwise op 该做的可能是调度而不是重写；改动半径跟着 headroom 证据走。
+
+**cockpit_plan**：开始新方案（新结构/新 tiling/新方法族）前调一次，变了再调。`phase=stuck` 是显式请求人类引导的信号。**self_compact**：换方法族、旧调试细节不再有用时调（带 `reason` 说明什么必须存活）；评测进行中或刚拿到要逐行分析的 profile 时不要压。
+
+## 3. 收尾：最优 artifact 原样恢复 → 全量 verdict → finalize
+
+最优版本经常不是最后版本。结束时：
+
+1. 从 git **原样恢复**最优 iter 的 artifact（`git checkout <sha> -- <path>`，绝不凭记忆重写）；
+2. 跑一次**全量 verdict**（完整 trial 数、真实 reference）；
+3. finalize：评测器发 id 的（如 `run_finalize`）用它的 id；否则调 `cockpit_finalize` 传 `artifact_path`——插件会把该 artifact 最优点的记录命令**重放一次**，重放输出里的契约行成为"复测"级最终数字（这就是包装脚本要 env 自包含的原因）；
+4. 总结：最佳结果、什么有效、什么无效、下次先试什么。
+
+## 4. 诚实红线
+
+- 评测数字以真实执行输出为准；不在 plan/总结里声称未测得的加速比。
+- 伪造契约行（echo/cat/手写）是伪造实验数据，没有任何理由可以做。
+- `reward_hack_detected` 出现时当作方法失败并换方向，不要绕检测器；`correct: false` 的低延迟不是进展。
+- 不要对着 finalize 复测做特化（比如检测复测环境走捷径）——复测就是要在你之外再测一次。
