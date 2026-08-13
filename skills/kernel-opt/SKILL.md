@@ -19,7 +19,7 @@ description: Protocol for long kernel-optimization runs under the kernel-opt plu
 - **评测脚本**（可选）——用户自己的 bench；读懂它、包装它，**不要改它的 trial 数/参考处理**（那是用户的契约；快迭代开关只用用户暴露的，没有就问）；
 - **硬件信息 / knowledge / hints**（可选）。
 
-没有评测脚本时，装公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL) 拿它的内置评测器（`bench/kernelbench/bench.py`，把材料组装成 `Model`/`get_inputs()` 即可用，组装模式见其 GUIDE）。
+**手里有 kernel 但没有评测手段时**，装公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL) 拿它的内置评测器（`bench/kernelbench/bench.py`，把材料组装成 `Model`/`get_inputs()` 即可用，组装模式见其 GUIDE）。它只回答"怎么评测"，不回答"优化什么"——没有任务时，不要把"装 AKO4ALL 挑个公开 kernel 试跑"当作选项提给用户，直接问任务就好。
 
 盘点完成后，先调 `kernel_plan`（phase=explore，approach 写一句 resolved plan），再用一小段文字向用户复述你认定的各项（kernel 路径 / 评测方式 / 预算），**只在真有歧义时才提问**——复述是为了让用户能在你没想到要问的地方纠正你。
 

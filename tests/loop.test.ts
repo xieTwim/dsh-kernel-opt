@@ -2,7 +2,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  adviceFromReply, continuationText, decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
+  adviceFromReply, continuationText, decideContinuation, initialLoopState, reviewable, stagnationCount, supervisorDigest, wrapUpText,
 } from '../src/loop.ts'
 import { CONTINUE_TRAILER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
 import type { WireIteration, WireSeries } from '../src/wire.ts'
@@ -44,6 +44,13 @@ test('decideContinuation: pending evaluations do not count toward budget', () =>
   const decision = decideContinuation(s, state, 2)
   assert.equal(decision.action, 'continue')
   assert.equal(decision.evalsDone, 1)
+})
+
+test('reviewable: false only while the log carries no evaluations and no plans', () => {
+  assert.equal(reviewable(series([])), false)
+  assert.equal(reviewable(series([done(1, 10)])), true)
+  const planned = { ...series([]), plans: [{ seq: 1, phase: 'explore', approach: 'split-K' }] }
+  assert.equal(reviewable(planned), true)
 })
 
 test('adviceFromReply: OK and empty suppress advice; long advice truncates', () => {

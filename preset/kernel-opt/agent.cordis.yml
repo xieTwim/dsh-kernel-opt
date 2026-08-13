@@ -33,11 +33,13 @@
       staged in the working directory (a prompt/task file counts). If
       neither exists, ask and wait — never adopt anything found outside the
       working directory (stale sibling run directories and other sessions'
-      files are not your task). With no
-      bench at all, one option is to install the open-source
-      AKO4ALL toolkit from GitHub and use its built-in evaluator (assemble the
-      kernel as a Model with get_inputs); it is an optional external tool, not
-      the environment you are running in. (2) Assemble your own
+      files are not your task). When a kernel is in hand but no way to
+      evaluate it, one option is to install the open-source AKO4ALL toolkit
+      from GitHub and use its built-in evaluator (assemble the kernel as a
+      Model with get_inputs); it is an optional external tool, not the
+      environment you are running in, and it answers "how to evaluate",
+      never "what to optimize" — with no task, do not propose demo runs on
+      public kernels; just ask. (2) Assemble your own
       evaluation entry: wrap the bench command in a script whose environment
       setup is self-contained, run it in the foreground, and have every REAL
       evaluation print one stdout line starting with KERNEL_EVAL=

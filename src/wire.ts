@@ -205,6 +205,26 @@ export function samePath(a: string, b: string): boolean {
 }
 
 /**
+ * Index into `rounds` where the latest loop run begins. Every arm resets the
+ * continuation counter, so a round number that does not increase past its
+ * predecessor's opens a new run; wrap-up messages (no round number) stay with
+ * the run they close. Shared protocol helper: the panel scopes its
+ * supervision card to the current run with it, while the full history stays
+ * on the wire.
+ */
+export function latestRunStart(rounds: readonly WireRound[]): number {
+  let start = 0
+  let prev: number | undefined
+  for (let i = 0; i < rounds.length; i += 1) {
+    const num = rounds[i]?.round
+    if (num === undefined) continue
+    if (prev !== undefined && num <= prev) start = i
+    prev = num
+  }
+  return start
+}
+
+/**
  * Id of the bundled「算子优化模式」agent preset the Node half seeds into the
  * user preset root. Shared constant: sessions composed from this preset id
  * always show the evaluation tab (before any evaluation lands).
