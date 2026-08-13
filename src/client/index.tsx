@@ -52,14 +52,18 @@ const zh = {
   'axis.best': '最佳',
   'loop.armed': '循环中 · 第 {round} 轮 · {done}/{budget} 评测',
   'loop.stopped': '循环已停:{reason}',
-  'chat.loop': '循环',
-  'chat.loopTitle': '启动优化循环(预算 {budget},可在评测页调整)',
   'ctl.needTask': '先把任务告诉 Agent(要优化的 kernel 和评测方式),再启动循环',
+  'sec.loop': '循环',
+  'sec.sup': '监督',
+  'pop.budget': '评测预算',
+  'pop.supervise': '第二模型监督',
+  'pop.model': '监督模型',
+  'pop.footer': '优化曲线与完整记录在「评测」页',
   'sup.on': '监督 on',
   'sup.off': '监督 off',
   'sup.needCfg': '未配置监督模型:下拉选一个,或在插件 config 加 supervisor: { provider, model }',
   'sup.model': '监督模型',
-  'sup.default': '跟随配置',
+  'sup.default': '默认:{route}',
   'sup.pick': '选择监督模型…',
   'ctl.start': '启动循环',
   'ctl.stop': '停止循环',
@@ -114,14 +118,18 @@ const en = {
   'axis.best': 'best',
   'loop.armed': 'looping · round {round} · {done}/{budget} evals',
   'loop.stopped': 'loop stopped: {reason}',
-  'chat.loop': 'Loop',
-  'chat.loopTitle': 'Start the optimization loop (budget {budget}; adjustable on the Evaluations tab)',
   'ctl.needTask': 'Tell the agent the task first (which kernel, how to evaluate), then arm the loop',
+  'sec.loop': 'Loop',
+  'sec.sup': 'Supervision',
+  'pop.budget': 'Evaluation budget',
+  'pop.supervise': 'Second-model supervision',
+  'pop.model': 'Supervisor model',
+  'pop.footer': 'Curve and full records live on the Evaluations tab',
   'sup.on': 'supervisor on',
   'sup.off': 'supervisor off',
   'sup.needCfg': 'No supervisor model configured: pick one below, or add supervisor: { provider, model } to the plugin config',
   'sup.model': 'Supervisor model',
-  'sup.default': 'follow config',
+  'sup.default': 'default: {route}',
   'sup.pick': 'pick a supervisor model…',
   'ctl.start': 'Start loop',
   'ctl.stop': 'Stop loop',
@@ -166,12 +174,21 @@ const COLOR = {
   dim: 'var(--dsw-alias-label-primary-dimmed, #3d444d)',
   caption: 'var(--dsw-alias-label-tertiary, #5a6270)',
   border: 'var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
+  borderL2: 'var(--dsw-alias-border-l2, rgba(0,0,0,.15))',
+  inputBg: 'var(--dsw-alias-bg-layer-1, #fff)',
+  primaryFill: 'var(--dsw-alias-button-primary-fill, #4d6bfe)',
+  primaryText: 'var(--dsw-alias-label-primary-foreground, #fff)',
+  menuBg: 'var(--dsw-specific-menu, #fff)',
+  menuBorder: 'var(--dsw-alias-border-inverted, rgba(0,0,0,.08))',
   tip: 'var(--dsw-specific-tip, rgba(77,107,254,.06))',
   curve: 'var(--dsw-specific-primary, #4d6bfe)',
   ok: '#1f8f5f',
   bad: '#d93a3f',
   warn: '#d18a1f',
 }
+
+/** Elevated-surface shadow (host menu dropdowns use shadow-lv3). */
+const MENU_SHADOW = 'var(--dsw-shadow-lv3, 0 8px 24px rgba(0,0,0,.14))'
 
 /** Session-scoped polling hook for the panel series (+ manual refetch). */
 /** One-shot fetch of the supervisor model catalog (picker options). */
@@ -510,32 +527,72 @@ const cardStyle: CSSProperties = {
 }
 
 /** Chip-shaped select for the supervisor model picker. */
-const selectStyle: CSSProperties = {
-  ...chipStyle,
-  cursor: 'pointer',
-  background: 'transparent',
-  fontFamily: 'inherit',
-  color: COLOR.dim,
-  maxWidth: 240,
+/**
+ * Compact capsule button, after the host Button primitive's `sm` geometry
+ * (h28 / r14 / 12px, borderless). `outline`/`primary` variants below mirror
+ * the host's variant fills.
+ */
+const capsuleStyle: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+  height: 28, padding: '0 12px', border: 'none', borderRadius: 14,
+  fontSize: 12, lineHeight: '18px', fontFamily: 'inherit', whiteSpace: 'nowrap',
+  color: COLOR.text, background: 'transparent', cursor: 'pointer',
 }
 
-/** Chip-shaped button; accent colors border + text. */
+/** Outline capsule (host dialog-cancel variant); accent colors border + text. */
 function buttonStyle(accent?: string): CSSProperties {
   return {
-    ...chipStyle,
-    cursor: 'pointer',
-    background: 'transparent',
-    fontFamily: 'inherit',
-    ...(accent !== undefined ? { color: accent, borderColor: accent } : {}),
+    ...capsuleStyle,
+    border: `1px solid ${accent ?? COLOR.borderL2}`,
+    ...(accent !== undefined ? { color: accent } : {}),
   }
 }
 
+/** Filled primary capsule (host button-primary fill). */
+const primaryBtnStyle: CSSProperties = {
+  ...capsuleStyle,
+  background: COLOR.primaryFill,
+  color: COLOR.primaryText,
+}
+
+/** Disabled dressing for either button variant. */
+const disabledBtnStyle: CSSProperties = { opacity: 0.4, cursor: 'not-allowed' }
+
+/** Field geometry after the host Input primitive (r8, l2 border, layer-1 bg). */
+const fieldStyle: CSSProperties = {
+  height: 28, padding: '0 8px', borderRadius: 8,
+  border: `1px solid ${COLOR.borderL2}`, background: COLOR.inputBg,
+  fontSize: 12, fontFamily: 'inherit', color: COLOR.text, outline: 'none',
+}
+
+const selectStyle: CSSProperties = {
+  ...fieldStyle,
+  cursor: 'pointer',
+  maxWidth: 260,
+}
+
 const inputStyle: CSSProperties = {
-  ...chipStyle,
-  width: 72,
-  background: 'transparent',
-  fontFamily: 'inherit',
-  outline: 'none',
+  ...fieldStyle,
+  width: 64,
+}
+
+/** Control-row label ("循环" / "监督"). */
+const rowLabelStyle: CSSProperties = {
+  flex: 'none', minWidth: 32, fontSize: 12, color: COLOR.caption,
+}
+
+/** Popover card, after the host MenuDropdown surface (r12, lv3 shadow). */
+const popoverStyle: CSSProperties = {
+  position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, zIndex: 41,
+  minWidth: 264, display: 'flex', flexDirection: 'column', gap: 10, padding: 12,
+  border: `1px solid ${COLOR.menuBorder}`, borderRadius: 12,
+  background: COLOR.menuBg, boxShadow: MENU_SHADOW,
+  fontFamily: 'system-ui', fontSize: 13, color: COLOR.text,
+}
+
+/** One labeled row inside the popover. */
+const popoverRowStyle: CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
 }
 
 /** Monospace block for kernel text/diff halves; accent = left-border meaning. */
@@ -721,7 +778,88 @@ function IterationDetail(props: {
   )
 }
 
-/** the evaluation tab. */
+/** Locale binding shape shared by the panel and the chat-side components. */
+type T = PropsLocale<'kernel-opt'>['t']
+
+/**
+ * Supervision on/off capsule, shared by the panel row and the launch
+ * popover. Unconfigured (no config route, no session override) renders
+ * disabled with the how-to in its tooltip.
+ */
+function SuperviseToggle(props: { control: WireControl; t: T; onToggle: () => void }): ReactNode {
+  const { control, t, onToggle } = props
+  const enabled = control.supervisor.enabled
+  const configured = control.supervisor.configured
+  return (
+    <button
+      type="button"
+      style={{
+        ...buttonStyle(enabled ? COLOR.warn : undefined),
+        ...(configured ? {} : disabledBtnStyle),
+      }}
+      disabled={!configured}
+      title={configured ? undefined : t('sup.needCfg')}
+      onClick={onToggle}
+    >
+      {t(enabled ? 'sup.on' : 'sup.off')}
+    </button>
+  )
+}
+
+/**
+ * Supervisor-model picker, shared by the panel row and the launch popover.
+ * Two-layer semantics: '' = the plugin-config default (labeled with the
+ * actual route when one is configured), any other value = session override.
+ */
+function SupervisorSelect(props: {
+  control: WireControl
+  models: WireModels | null
+  t: T
+  onUse: (provider: string, model: string) => void
+  style?: CSSProperties
+}): ReactNode {
+  const { control, models, t, onUse } = props
+  const effective = control.supervisor.effective
+  const overrideValue = effective !== undefined && effective.source === 'session'
+    ? `${effective.provider}/${effective.model}`
+    : ''
+  const providers = models?.providers ?? []
+  const known = providers.flatMap(p => p.models.map(m => `${p.id}/${m.id}`))
+  const configRoute = control.supervisor.configRoute
+  const defaultLabel = configRoute !== undefined
+    ? t('sup.default', { route: `${configRoute.provider}/${configRoute.model}` })
+    : t('sup.pick')
+  return (
+    <select
+      value={overrideValue}
+      title={t('sup.model')}
+      style={{ ...selectStyle, ...props.style }}
+      onChange={(event) => {
+        const value = event.target.value
+        if (value === '') {
+          onUse('', '')
+          return
+        }
+        // First slash splits: provider routes carry no slash, model ids may
+        // (org/model).
+        const slash = value.indexOf('/')
+        onUse(value.slice(0, slash), value.slice(slash + 1))
+      }}
+    >
+      <option value="">{defaultLabel}</option>
+      {overrideValue !== '' && !known.includes(overrideValue)
+        ? <option value={overrideValue}>{overrideValue}</option>
+        : null}
+      {providers.map(provider => provider.models.map(model => (
+        <option key={`${provider.id}/${model.id}`} value={`${provider.id}/${model.id}`}>
+          {`${provider.id}/${model.id}`}
+        </option>
+      )))}
+    </select>
+  )
+}
+
+/** The evaluation tab. */
 export function KernelOptTab(
   props: PropsRuntime<'conversation.view'> & PropsLocale<'kernel-opt'>,
 ): ReactNode {
@@ -767,137 +905,102 @@ export function KernelOptTab(
       display: 'flex', flexDirection: 'column', gap: 14,
       fontFamily: 'system-ui', color: COLOR.text,
     }}>
-      {/* header chips + run controls */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        {control?.loop.armed === true
-          ? (
-              <>
-                <span style={{ ...chipStyle, color: COLOR.curve, borderColor: COLOR.curve }}>
-                  ⟳ {t('loop.armed', {
-                    round: control.loop.round,
-                    done: control.loop.evalsDone,
-                    budget: control.loop.budget,
-                  })}
-                </span>
-                <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void post('loop-stop') }}>
-                  ■ {t('ctl.stop')}
-                </button>
-              </>
-            )
-          : null}
-        {control !== undefined && control.loop.armed === false && control.loop.available
-          ? (
-              <>
-                {control.loop.stopReason !== undefined
-                  ? <span style={chipStyle}>{t('loop.stopped', { reason: reasonLabel(control.loop.stopReason) })}</span>
-                  : null}
-                <input
-                  type="number"
-                  min={1}
-                  max={9999}
-                  value={budgetDraft}
-                  title={t('ctl.budget')}
-                  style={inputStyle}
-                  onChange={(event) => { setBudgetDraft(event.target.value) }}
-                />
-                <button
-                  type="button"
-                  style={{
-                    ...buttonStyle(COLOR.curve),
-                    ...(control.loop.taskReady ? {} : { opacity: 0.45, cursor: 'not-allowed' }),
-                  }}
-                  disabled={!control.loop.taskReady}
-                  title={control.loop.taskReady ? undefined : t('ctl.needTask')}
-                  onClick={() => {
-                    const budget = Number(budgetDraft)
-                    void post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
-                  }}
-                >
-                  ⟳ {t('ctl.start')}
-                </button>
-              </>
-            )
-          : null}
+      {/* controls: one row for the loop, one for supervision, then data chips */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <span style={rowLabelStyle}>{t('sec.loop')}</span>
+          {control?.loop.armed === true
+            ? (
+                <>
+                  <span style={{ fontSize: 13, color: COLOR.curve, fontWeight: 500 }}>
+                    ⟳ {t('loop.armed', {
+                      round: control.loop.round,
+                      done: control.loop.evalsDone,
+                      budget: control.loop.budget,
+                    })}
+                  </span>
+                  <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void post('loop-stop') }}>
+                    ■ {t('ctl.stop')}
+                  </button>
+                </>
+              )
+            : null}
+          {control !== undefined && control.loop.armed === false && control.loop.available
+            ? (
+                <>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={budgetDraft}
+                    title={t('ctl.budget')}
+                    style={inputStyle}
+                    onChange={(event) => { setBudgetDraft(event.target.value) }}
+                  />
+                  <button
+                    type="button"
+                    style={{ ...primaryBtnStyle, ...(control.loop.taskReady ? {} : disabledBtnStyle) }}
+                    disabled={!control.loop.taskReady}
+                    title={control.loop.taskReady ? undefined : t('ctl.needTask')}
+                    onClick={() => {
+                      const budget = Number(budgetDraft)
+                      void post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
+                    }}
+                  >
+                    ⟳ {t('ctl.start')}
+                  </button>
+                  {control.loop.stopReason !== undefined
+                    ? (
+                        <span style={{ fontSize: 12, color: COLOR.caption }}>
+                          {t('loop.stopped', { reason: reasonLabel(control.loop.stopReason) })}
+                        </span>
+                      )
+                    : null}
+                </>
+              )
+            : null}
+        </div>
         {control !== undefined
           ? (
-              <>
-                {control.supervisor.configured
-                  ? (
-                      <button
-                        type="button"
-                        style={buttonStyle(control.supervisor.enabled ? COLOR.warn : undefined)}
-                        title={control.supervisor.effective !== undefined
-                          ? `${control.supervisor.effective.provider}/${control.supervisor.effective.model} (${control.supervisor.effective.source})`
-                          : undefined}
-                        onClick={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
-                      >
-                        {t(control.supervisor.enabled ? 'sup.on' : 'sup.off')}
-                      </button>
-                    )
-                  : (
-                      <span style={{ ...chipStyle, color: COLOR.caption }} title={t('sup.needCfg')}>
-                        {t('sup.off')}
-                      </span>
-                    )}
-                {models !== null && models.providers.length > 0
-                  ? (() => {
-                      const effective = control.supervisor.effective
-                      const overrideValue = effective !== undefined && effective.source === 'session'
-                        ? `${effective.provider}/${effective.model}`
-                        : ''
-                      const known = models.providers.flatMap(p => p.models.map(m => `${p.id}/${m.id}`))
-                      return (
-                        <select
-                          value={overrideValue}
-                          title={t('sup.model')}
-                          style={selectStyle}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            if (value === '') {
-                              void post('supervise-use', { provider: '', model: '' })
-                              return
-                            }
-                            // First slash splits: provider routes carry no
-                            // slash, model ids may (org/model).
-                            const slash = value.indexOf('/')
-                            void post('supervise-use', { provider: value.slice(0, slash), model: value.slice(slash + 1) })
-                          }}
-                        >
-                          <option value="">{t('sup.default')}</option>
-                          {overrideValue !== '' && !known.includes(overrideValue)
-                            ? <option value={overrideValue}>{overrideValue}</option>
-                            : null}
-                          {models.providers.map(provider => provider.models.map(model => (
-                            <option key={`${provider.id}/${model.id}`} value={`${provider.id}/${model.id}`}>
-                              {`${provider.id}/${model.id}`}
-                            </option>
-                          )))}
-                        </select>
-                      )
-                    })()
-                  : null}
-              </>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <span style={rowLabelStyle}>{t('sec.sup')}</span>
+                <SuperviseToggle
+                  control={control}
+                  t={t}
+                  onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
+                />
+                <SupervisorSelect
+                  control={control}
+                  models={models}
+                  t={t}
+                  onUse={(provider, model) => { void post('supervise-use', { provider, model }) }}
+                />
+              </div>
             )
           : null}
-        {iterations.length > 0
-          ? <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
-          : null}
-        {best?.latencyMs !== undefined
+        {iterations.length > 0 || (series !== null && series.profileSeqs.length > 0)
           ? (
-              <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok, fontWeight: 500 }}>
-                {t('chips.best', { latency: formatLatency(best.latencyMs) })}
-                {best.speedup !== undefined ? ` · ×${best.speedup.toPrecision(3)}` : ''}
-              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
+                {best?.latencyMs !== undefined
+                  ? (
+                      <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok, fontWeight: 500 }}>
+                        {t('chips.best', { latency: formatLatency(best.latencyMs) })}
+                        {best.speedup !== undefined ? ` · ×${best.speedup.toPrecision(3)}` : ''}
+                      </span>
+                    )
+                  : null}
+                {series !== null && series.profileSeqs.length > 0
+                  ? <span style={chipStyle}>{t('chips.profiles', { count: series.profileSeqs.length })}</span>
+                  : null}
+                {hackCount > 0
+                  ? <span style={{ ...chipStyle, color: COLOR.warn, borderColor: COLOR.warn }}>{t('chips.hacks', { count: hackCount })}</span>
+                  : null}
+                {pendingCount > 0
+                  ? <span style={{ ...chipStyle, color: COLOR.caption }}>{t('chips.pending')}</span>
+                  : null}
+              </div>
             )
-          : null}
-        {series !== null && series.profileSeqs.length > 0
-          ? <span style={chipStyle}>{t('chips.profiles', { count: series.profileSeqs.length })}</span>
-          : null}
-        {hackCount > 0
-          ? <span style={{ ...chipStyle, color: COLOR.warn, borderColor: COLOR.warn }}>{t('chips.hacks', { count: hackCount })}</span>
-          : null}
-        {pendingCount > 0
-          ? <span style={{ ...chipStyle, color: COLOR.caption }}>{t('chips.pending')}</span>
           : null}
       </div>
 
@@ -1064,10 +1167,12 @@ export function KernelOptTab(
 }
 
 /**
- * Composer tool-row loop button — the idle half of the chat-side loop
- * affordance. Rendered only while the loop is startable (machinery composed,
- * not armed); disabled with an explanation until the session carries a human
- * task, mirroring the Node-side arming gate.
+ * Composer tool-row loop launcher — the idle half of the chat-side loop
+ * affordance. One trigger capsule in the tool row; clicking opens a
+ * menu-styled popover carrying the full launch settings (budget, supervision
+ * toggle, supervisor model), the arm button (gated until the session has a
+ * human task, mirroring the Node-side gate), and a pointer to the
+ * Evaluations tab for the live curve.
  */
 export function ChatLoopButton(
   props: PropsRuntime<'conversation.input.left'> & PropsLocale<'kernel-opt'>,
@@ -1075,33 +1180,90 @@ export function ChatLoopButton(
   const { t } = props
   const sessionId = props.session.sessionId
   const { control, refetch } = useControl(sessionId)
+  const models = useModels()
+  const [open, setOpen] = useState(false)
+  const [budgetDraft, setBudgetDraft] = useState<string | null>(null)
   if (control === null || !control.loop.available || control.loop.armed) return null
-  const ready = control.loop.taskReady
-  const arm = async (): Promise<void> => {
+  const post = async (action: string, extra?: Record<string, unknown>): Promise<void> => {
     try {
       await fetch(CONTROL_PATH, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId, action: 'loop-arm', budget: control.loop.defaultBudget }),
+        body: JSON.stringify({ sessionId, action, ...extra }),
       })
     } catch {
       // Transient failure: the poll keeps showing the authoritative state.
     }
     refetch()
   }
+  const ready = control.loop.taskReady
+  const budgetValue = budgetDraft ?? String(control.loop.defaultBudget)
+  const arm = async (): Promise<void> => {
+    const budget = Number(budgetValue)
+    await post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
+    setOpen(false)
+  }
   return (
-    <button
-      type="button"
-      style={{
-        ...buttonStyle(COLOR.curve),
-        ...(ready ? {} : { opacity: 0.45, cursor: 'not-allowed', color: COLOR.caption, borderColor: COLOR.border }),
-      }}
-      disabled={!ready}
-      title={ready ? t('chat.loopTitle', { budget: control.loop.defaultBudget }) : t('ctl.needTask')}
-      onClick={() => { void arm() }}
-    >
-      ⟳ {t('chat.loop')}
-    </button>
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        style={buttonStyle(COLOR.curve)}
+        title={t('ctl.start')}
+        onClick={() => { setOpen(value => !value) }}
+      >
+        ⟳ {t('ctl.start')}
+      </button>
+      {open
+        ? (
+            <>
+              {/* Click-away layer: the popover closes like a host menu. */}
+              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => { setOpen(false) }} />
+              <div style={popoverStyle}>
+                <label style={popoverRowStyle}>
+                  <span>{t('pop.budget')}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={budgetValue}
+                    style={inputStyle}
+                    onChange={(event) => { setBudgetDraft(event.target.value) }}
+                  />
+                </label>
+                <div style={popoverRowStyle}>
+                  <span>{t('pop.supervise')}</span>
+                  <SuperviseToggle
+                    control={control}
+                    t={t}
+                    onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
+                  />
+                </div>
+                <div style={popoverRowStyle}>
+                  <span>{t('pop.model')}</span>
+                  <SupervisorSelect
+                    control={control}
+                    models={models}
+                    t={t}
+                    onUse={(provider, model) => { void post('supervise-use', { provider, model }) }}
+                    style={{ maxWidth: 170 }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  style={{ ...primaryBtnStyle, ...(ready ? {} : disabledBtnStyle), marginTop: 2 }}
+                  disabled={!ready}
+                  onClick={() => { void arm() }}
+                >
+                  ⟳ {t('ctl.start')}
+                </button>
+                <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                  {ready ? t('pop.footer') : t('ctl.needTask')}
+                </div>
+              </div>
+            </>
+          )
+        : null}
+    </span>
   )
 }
 
@@ -1134,7 +1296,7 @@ export function ChatLoopStrip(
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
       padding: '5px 12px', fontSize: 13, fontFamily: 'system-ui',
-      border: `1px solid ${COLOR.curve}`, borderRadius: 10,
+      border: `1px solid ${COLOR.curve}`, borderRadius: 12,
       background: COLOR.tip, color: COLOR.text,
     }}>
       <span style={{ color: COLOR.curve, fontWeight: 500 }}>

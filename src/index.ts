@@ -702,6 +702,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         supervisor: {
           enabled: state?.supervise ?? false,
           configured: effectiveSupervisor(state) !== undefined,
+          ...(config.supervisor !== undefined
+            ? { configRoute: { provider: config.supervisor.provider, model: config.supervisor.model } }
+            : {}),
           ...((): { effective?: WireControl['supervisor']['effective'] } => {
             const effective = effectiveSupervisor(state)
             return effective !== undefined ? { effective } : {}
