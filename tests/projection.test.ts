@@ -237,3 +237,82 @@ test('project: unparsable result leaves a measured-nothing row, not a crash', ()
   assert.equal(series.iterations[0]?.latencyMs, undefined)
   assert.equal(series.bestIndex, null)
 })
+
+test('shell channel: bash trailer lines become self-reported points with provenance + changes', () => {
+  const events = [
+    call('write', 'w1', { file_path: 'solution/k.py', content: 'v2 kernel' }),
+    call('bash', 'ls1', { command: 'ls trajectory' }),
+    result('ls1', 'nothing relevant'),
+    call('bash', 'b1', { command: 'bash scripts/bench.sh' }),
+    result('b1', [
+      '[bench] compiling...',
+      'Trial 1: 1.31 ms',
+      '  KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.23,"correct":true,"evaluation_id":"agent-made-up","native_metrics":{"ref_runtime_ms":4.92}}  # exit 0',
+      'done',
+    ].join('\n')),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 1)
+  const point = series.iterations[0]!
+  assert.equal(point.channel, 'shell')
+  assert.equal(point.tool, 'bash')
+  assert.equal(point.command, 'bash scripts/bench.sh')
+  assert.equal(point.artifactPath, 'solution/k.py')
+  assert.equal(point.latencyMs, 1.23)
+  assert.equal(point.correct, true)
+  assert.ok(point.speedup !== undefined && Math.abs(point.speedup - 4) < 1e-9)
+  // The non-eval bash call between write and bench must not consume changes.
+  assert.equal(point.changes?.length, 1)
+  assert.equal(point.changes?.[0]?.kind, 'write')
+  // Agent-relayed ids never become identity on the self-reported channel.
+  assert.equal(point.evaluationId, undefined)
+  assert.equal(series.bestIndex, 0)
+})
+
+test('shell channel: invalid payloads and mid-line mentions are ignored; multiple trailers all count', () => {
+  const events = [
+    call('bash', 'b1', { command: 'bash scripts/bench_all.sh' }),
+    result('b1', [
+      'KERNEL_COCKPIT_EVAL={"artifact":"a.py","latency_ms":2.0,"correct":true}',
+      'KERNEL_COCKPIT_EVAL={"artifact":"b.py","latency_ms":1.5,"correct":true,"workload_indices":[0,3]}',
+      'KERNEL_COCKPIT_EVAL={"latency_ms":9.9,"correct":true}',
+      'KERNEL_COCKPIT_EVAL={"artifact":"c.py","latency_ms":9.9}',
+      'KERNEL_COCKPIT_EVAL={broken json',
+      'docs say: the line KERNEL_COCKPIT_EVAL={"artifact":"doc.py","latency_ms":0.1,"correct":true} reports results',
+    ].join('\n')),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 2)
+  assert.equal(series.iterations[0]?.artifactPath, 'a.py')
+  assert.equal(series.iterations[1]?.artifactPath, 'b.py')
+  assert.deepEqual(series.iterations[1]?.workloadSubset, [0, 3])
+})
+
+test('finalize by artifact: cockpit_finalize flags the best honest point and parses the replay trailer', () => {
+  const events = [
+    call('bash', 'b1', { command: 'bash scripts/bench.sh' }),
+    result('b1', 'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":2.4,"correct":true}'),
+    call('bash', 'b2', { command: 'bash scripts/bench.sh' }),
+    result('b2', 'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.1,"correct":true}'),
+    call('bash', 'b3', { command: 'bash scripts/bench.sh' }),
+    result('b3', 'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":0.9,"correct":false}'),
+    call('cockpit_finalize', 'f1', { artifact_path: 'solution/k.py' }),
+    result('f1', [
+      'Finalize recorded for solution/k.py.',
+      '[cockpit-replay] bash scripts/bench.sh',
+      'Trial 1: 1.15 ms',
+      'KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.12,"correct":true}',
+    ].join('\n')),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 4)
+  // Best honest point (1.1, correct) carries the flag — not the faster incorrect one.
+  assert.equal(series.iterations[1]?.finalized, true)
+  assert.equal(series.iterations[0]?.finalized, undefined)
+  assert.equal(series.iterations[2]?.finalized, undefined)
+  const replay = series.iterations[3]!
+  assert.equal(replay.channel, 'replay')
+  assert.equal(replay.finalized, true)
+  assert.equal(replay.command, 'bash scripts/bench.sh')
+  assert.equal(replay.latencyMs, 1.12)
+})

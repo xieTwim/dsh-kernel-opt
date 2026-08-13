@@ -64,6 +64,11 @@ export interface Config {
   finalizeTools?: string[]
   /** Tool names treated as structured artifact changes (default `write`/`edit`). */
   changeTools?: string[]
+  /**
+   * Shell tools whose results are scanned for the `KERNEL_COCKPIT_EVAL=`
+   * contract trailer (self-reported channel; default `['bash']`).
+   */
+  shellTools?: string[]
   /** Kernel-loop tuning. */
   loop?: {
     /** Budget when `/kloop` is armed without a number (default 20). */
@@ -94,6 +99,7 @@ function resolveProjection(config: Config): ProjectionConfig {
     profileTools: config.profileTools ?? DEFAULT_PROJECTION.profileTools,
     finalizeTools: config.finalizeTools ?? DEFAULT_PROJECTION.finalizeTools,
     changeTools: config.changeTools ?? DEFAULT_PROJECTION.changeTools,
+    shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
     planTool: DEFAULT_PROJECTION.planTool,
   }
 }

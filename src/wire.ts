@@ -51,6 +51,16 @@ export interface WireIteration {
   artifactPath?: string
   /** Structured artifact edits logged since the previous evaluation call. */
   changes?: WireChange[]
+  /**
+   * How the measurement entered the log. Absent = a registered/MCP tool
+   * result (not forgeable by the agent). `'shell'` = a contract trailer line
+   * parsed out of a shell tool's output — agent-relayed, so self-reported;
+   * judge it with `command`. `'replay'` = the plugin re-executed the recorded
+   * command itself at finalize (not agent-relayed).
+   */
+  channel?: 'shell' | 'replay'
+  /** Command line that produced this point (shell/replay channels). */
+  command?: string
 }
 
 /**
@@ -168,6 +178,28 @@ export const SERIES_PATH = '/plugins/kernel-cockpit/series'
  * twin of the same state.
  */
 export const CONTROL_PATH = '/plugins/kernel-cockpit/control'
+
+/**
+ * Prefix of the evaluation contract trailer line. Any evaluation pipeline —
+ * whatever it does internally — participates in the cockpit by printing one
+ * line to stdout:
+ *
+ * `KERNEL_COCKPIT_EVAL={"artifact":"solution/k.py","latency_ms":1.23,"correct":true}`
+ *
+ * Required: `artifact` (which file this measures) and `correct`; `latency_ms`
+ * whenever the run was timed. Optional: `compiled`, `error`, `native_metrics`
+ * (numeric map; `speedup`/`ref_runtime_ms` feed the speedup column),
+ * `reward_hack_detected`, `workload_indices`. One line per evaluation. This is
+ * a public contract — published scripts print it, so it must never change.
+ */
+export const EVAL_TRAILER_PREFIX = 'KERNEL_COCKPIT_EVAL='
+
+/**
+ * Line the Node half writes into a `cockpit_finalize` tool result naming the
+ * command it replayed; the projection reads it back as the replay point's
+ * provenance.
+ */
+export const REPLAY_LINE_PREFIX = '[cockpit-replay] '
 
 /** First-line prefix of a continuation message (`round N` follows). */
 export const LOOP_LINE_PREFIX = '[kernel-loop round '
