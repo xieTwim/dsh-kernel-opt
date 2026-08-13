@@ -545,13 +545,14 @@ function buttonStyle(accent?: string): CSSProperties {
 }
 
 /**
- * Filled primary capsule. Deliberately the accent blue (send-button family)
- * rather than the host's `button-primary-fill` token — that one resolves to
- * a near-black fill which reads far too heavy inside the panel and popover.
+ * Filled primary capsule — the send button's exact recipe (`button-info-fill`
+ * + static white glyph; the `button-primary-fill` token resolves to ink and
+ * reads far too heavy here). Gated/disabled renders at opacity 0.4, which is
+ * also how the send circle gets its soft pre-send blue.
  */
 const primaryBtnStyle: CSSProperties = {
   ...capsuleStyle,
-  background: COLOR.curve,
+  background: 'var(--dsw-alias-button-info-fill, #4d6bfe)',
   color: '#fff',
 }
 
@@ -1312,19 +1313,28 @@ export function ChatLoopStrip(
     refetch()
   }
   return (
+    // Width rides the composer card's own tokens (the QueueDock recipe), so
+    // the strip lines up with the input card instead of spanning the page.
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      padding: '5px 12px', fontSize: 13, fontFamily: 'system-ui',
-      border: `1px solid ${COLOR.curve}`, borderRadius: 12,
-      background: COLOR.tip, color: COLOR.text,
+      boxSizing: 'border-box',
+      width: 'calc(100% - var(--dsh-composer-side-clearance, 12px) * 2)',
+      maxWidth: 'var(--dsh-composer-card-max-width, 800px)',
+      margin: '0 auto',
     }}>
-      <span style={{ color: COLOR.curve, fontWeight: 500 }}>
-        ⟳ {t('loop.armed', { round: control.loop.round, done: control.loop.evalsDone, budget: control.loop.budget })}
-      </span>
-      <span style={{ flex: 1 }} />
-      <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void stop() }}>
-        ■ {t('ctl.stop')}
-      </button>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '5px 12px', fontSize: 13, fontFamily: 'system-ui',
+        border: `1px solid ${COLOR.curve}`, borderRadius: 12,
+        background: COLOR.tip, color: COLOR.text,
+      }}>
+        <span style={{ color: COLOR.curve, fontWeight: 500 }}>
+          ⟳ {t('loop.armed', { round: control.loop.round, done: control.loop.evalsDone, budget: control.loop.budget })}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void stop() }}>
+          ■ {t('ctl.stop')}
+        </button>
+      </div>
     </div>
   )
 }
