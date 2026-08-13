@@ -31,6 +31,8 @@ export interface LoopState {
   stopReason?: 'finalized' | 'budget' | 'no-progress' | 'stopped'
   /** Whether the supervisor reviews at continuation points. */
   supervise: boolean
+  /** Session-level supervisor route override (wins over plugin config). */
+  supervisorOverride?: { provider: string; model: string }
   /** Last supervisor advice delivered (panel display). */
   lastAdvice?: string
 }

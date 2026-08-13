@@ -141,11 +141,30 @@ export interface WireControl {
   supervisor: {
     /** Whether reviews run at continuation points (per-session toggle). */
     enabled: boolean
-    /** Whether a supervisor model is configured at all (plugin config). */
+    /** Whether any supervisor route is in effect (config or session override). */
     configured: boolean
+    /** The route reviews would use, and where it came from. */
+    effective?: {
+      provider: string
+      model: string
+      /** `'session'` = panel/command override for this session; `'config'` = plugin config. */
+      source: 'session' | 'config'
+    }
     /** Last delivered advice, for display. */
     lastAdvice?: string
   }
+}
+
+/** Provider/model catalog served for the panel's supervisor picker. */
+export interface WireModels {
+  providers: {
+    /** Provider route key (as accepted by the supervisor config). */
+    id: string
+    /** Display name. */
+    name: string
+    /** Models on that route; empty when discovery failed or none published. */
+    models: { id: string; name: string }[]
+  }[]
 }
 
 /** Series payload served at the cockpit route for one session. */
@@ -188,12 +207,17 @@ export const PRESET_ID = 'kernel-opt'
 export const SERIES_PATH = '/plugins/kernel-cockpit/series'
 
 /**
- * Control route (POST): `{ sessionId, action, budget? }` with action one of
- * `loop-arm` / `loop-stop` / `supervise-on` / `supervise-off`. Responds with
- * the fresh {@link WireControl}. The slash commands remain the scriptable
- * twin of the same state.
+ * Control route (POST): `{ sessionId, action, budget?, provider?, model? }`
+ * with action one of `loop-arm` / `loop-stop` / `supervise-on` /
+ * `supervise-off` / `supervise-use` (both provider+model set the session
+ * override; both empty resets to config). Responds with the fresh
+ * {@link WireControl}. The slash commands remain the scriptable twin of the
+ * same state.
  */
 export const CONTROL_PATH = '/plugins/kernel-cockpit/control'
+
+/** Models route (GET): the {@link WireModels} catalog for the picker. */
+export const MODELS_PATH = '/plugins/kernel-cockpit/models'
 
 /**
  * Prefix of the evaluation contract trailer line. Any evaluation pipeline —

@@ -44,8 +44,8 @@ import {
   decideContinuation, initialLoopState, stagnationCount, supervisorDigest, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
-import { CONTROL_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
-import type { WireControl, WireIteration, WireSeries } from './wire.ts'
+import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
+import type { WireControl, WireIteration, WireModels, WireSeries } from './wire.ts'
 
 export const name = 'kernel-cockpit'
 export const inject = ['tools', 'agents', 'sessions']
@@ -275,13 +275,29 @@ export function apply(ctx: Context, config: Config = {}): void {
     return true
   }
 
+  /**
+   * The supervisor route reviews would use for a session: the session
+   * override wins, plugin config is the fallback, absent means unconfigured.
+   */
+  const effectiveSupervisor = (
+    state: LoopState | undefined,
+  ): { provider: string; model: string; source: 'session' | 'config' } | undefined => {
+    if (state?.supervisorOverride !== undefined) return { ...state.supervisorOverride, source: 'session' }
+    if (config.supervisor !== undefined) {
+      return { provider: config.supervisor.provider, model: config.supervisor.model, source: 'config' }
+    }
+    return undefined
+  }
+
   /** Toggle supervision; returns an error string when the gate fails. */
   const setSupervise = (sessionId: string, enabled: boolean): string | null => {
-    if (enabled && config.supervisor === undefined) {
-      return 'No supervisor model configured. Add to the kernel-cockpit plugin config: '
-        + 'supervisor: { provider: <route>, model: <id> } — a distinct route/model from the primary.'
+    const state = stateFor(sessionId)
+    if (enabled && effectiveSupervisor(state) === undefined) {
+      return 'No supervisor model configured. Pick one (/supervise use <provider>/<model>, or the panel picker), '
+        + 'or add to the kernel-cockpit plugin config: supervisor: { provider: <route>, model: <id> } — '
+        + 'a distinct route/model from the primary.'
     }
-    stateFor(sessionId).supervise = enabled
+    state.supervise = enabled
     return null
   }
 
@@ -409,7 +425,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       sessionId: string,
       state: LoopState,
     ): Promise<{ advice: string | null; reviewed: boolean }> => {
-      const supervisor = config.supervisor
+      const supervisor = effectiveSupervisor(state)
       if (supervisor === undefined || !state.supervise) return { advice: null, reviewed: false }
       const session = lctx.sessions.get(SessionId(sessionId))
       if (session === undefined) return { advice: null, reviewed: false }
@@ -424,8 +440,10 @@ export function apply(ctx: Context, config: Config = {}): void {
             content: [{ type: 'text', text: digest }],
             source: { kind: 'plugin', plugin: PLUGIN_ID },
           })],
-          ...(supervisor.temperature !== undefined ? { temperature: supervisor.temperature } : {}),
-          maxTokens: supervisor.maxTokens ?? 400,
+          // Sampling knobs stay config-owned: an override picks the route,
+          // not the review discipline.
+          ...(config.supervisor?.temperature !== undefined ? { temperature: config.supervisor.temperature } : {}),
+          maxTokens: config.supervisor?.maxTokens ?? 400,
           signal: AbortSignal.timeout(60_000),
         })
         for await (const chunk of stream) {
@@ -564,28 +582,53 @@ export function apply(ctx: Context, config: Config = {}): void {
 
     lctx.commands.register({
       name: 'supervise',
-      description: 'Second-model supervisor: /supervise on|off toggles review at kernel-loop '
-        + 'continuation points (requires supervisor {provider, model} in the kernel-cockpit plugin config).',
-      input: { hint: 'on | off | status' },
+      description: 'Second-model supervisor: /supervise on|off toggles review at kernel-loop continuation '
+        + 'points; /supervise use <provider>/<model> overrides the supervisor route for this session '
+        + '("use default" follows the plugin config again).',
+      input: { hint: 'on | off | use <provider>/<model> | status' },
       handler: (invocation) => {
         const raw = invocation.rawInput.trim()
         const state = stateFor(invocation.agent.id)
         if (raw === 'on') {
           const error = setSupervise(invocation.agent.id, true)
           if (error !== null) return { kind: 'error', text: error }
-          const supervisor = config.supervisor
+          const supervisor = effectiveSupervisor(state)
           return {
             kind: 'success',
-            text: `Supervisor on${supervisor !== undefined ? ` (${supervisor.provider}/${supervisor.model})` : ''}; reviews run at kernel-loop continuation points.`,
+            text: `Supervisor on${supervisor !== undefined ? ` (${supervisor.provider}/${supervisor.model}, ${supervisor.source})` : ''}; reviews run at kernel-loop continuation points.`,
           }
         }
         if (raw === 'off') {
           setSupervise(invocation.agent.id, false)
           return { kind: 'success', text: 'Supervisor off.' }
         }
+        if (raw.startsWith('use ') || raw === 'use') {
+          const spec = raw.slice(3).trim()
+          if (spec === 'default' || spec === '') {
+            delete state.supervisorOverride
+            const fallback = effectiveSupervisor(state)
+            return {
+              kind: 'success',
+              text: fallback !== undefined
+                ? `Supervisor override cleared; following config: ${fallback.provider}/${fallback.model}.`
+                : 'Supervisor override cleared; nothing configured — /supervise use <provider>/<model> to pick one.',
+            }
+          }
+          // First slash splits: provider routes carry no slash, model ids may.
+          const slash = spec.indexOf('/')
+          if (slash <= 0 || slash === spec.length - 1) {
+            return { kind: 'error', text: 'Usage: /supervise use <provider>/<model> (or `use default` to follow config).' }
+          }
+          state.supervisorOverride = { provider: spec.slice(0, slash), model: spec.slice(slash + 1) }
+          return {
+            kind: 'success',
+            text: `Supervisor model for this session: ${spec}.${state.supervise ? '' : ' Enable with /supervise on.'}`,
+          }
+        }
+        const effective = effectiveSupervisor(state)
         return {
           kind: 'success',
-          text: `supervisor ${state.supervise ? 'on' : 'off'}; ${config.supervisor !== undefined ? `configured: ${config.supervisor.provider}/${config.supervisor.model}` : 'not configured'}.`,
+          text: `supervisor ${state.supervise ? 'on' : 'off'}; ${effective !== undefined ? `route: ${effective.provider}/${effective.model} (${effective.source})` : 'not configured'}.`,
         }
       },
     })
@@ -632,7 +675,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         },
         supervisor: {
           enabled: state?.supervise ?? false,
-          configured: config.supervisor !== undefined,
+          configured: effectiveSupervisor(state) !== undefined,
+          ...((): { effective?: WireControl['supervisor']['effective'] } => {
+            const effective = effectiveSupervisor(state)
+            return effective !== undefined ? { effective } : {}
+          })(),
           ...(state?.lastAdvice !== undefined ? { lastAdvice: state.lastAdvice } : {}),
         },
       }
@@ -710,6 +757,19 @@ export function apply(ctx: Context, config: Config = {}): void {
               error = setSupervise(sessionId, true)
             } else if (action === 'supervise-off') {
               error = setSupervise(sessionId, false)
+            } else if (action === 'supervise-use') {
+              const state = stateFor(sessionId)
+              const provider = typeof body['provider'] === 'string' ? body['provider'].trim() : ''
+              const model = typeof body['model'] === 'string' ? body['model'].trim() : ''
+              if (provider === '' && model === '') {
+                // Both empty = follow config again.
+                delete state.supervisorOverride
+              } else if (provider === '' || model === '') {
+                respond(400, { error: 'provider and model must both be given (or both empty to follow config)' })
+                return
+              } else {
+                state.supervisorOverride = { provider, model }
+              }
             } else {
               respond(400, { error: `unknown action: ${action}` })
               return
@@ -726,5 +786,44 @@ export function apply(ctx: Context, config: Config = {}): void {
         })()
       },
     }), 'kernel-cockpit: control route')
+  })
+
+  // Models route — the panel's supervisor picker. Read-only enumeration of
+  // provider routes and their models; a provider whose discovery fails still
+  // appears with an empty model list (its route is selectable by hand).
+  ctx.inject(['webServer', 'llm'], (mctx) => {
+    mctx.effect(() => mctx.webServer.register({
+      kind: 'exact',
+      path: MODELS_PATH,
+      handler: (req, res) => {
+        const respond = (status: number, payload: unknown): void => {
+          res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify(payload))
+        }
+        if (req.method !== undefined && req.method !== 'GET') {
+          respond(405, { error: 'GET only' })
+          return
+        }
+        void (async () => {
+          try {
+            const catalog: WireModels = { providers: [] }
+            for (const provider of mctx.llm.listProviders().slice(0, 20)) {
+              let models: { id: string; name: string }[] = []
+              try {
+                models = (await mctx.llm.listModels(provider.id))
+                  .slice(0, 50)
+                  .map(model => ({ id: model.id, name: model.name }))
+              } catch {
+                // Discovery-less providers stay listed, model field free-form.
+              }
+              catalog.providers.push({ id: provider.id, name: provider.name, models })
+            }
+            respond(200, catalog)
+          } catch (error) {
+            respond(500, { error: error instanceof Error ? error.message : String(error) })
+          }
+        })()
+      },
+    }), 'kernel-cockpit: models route')
   })
 }

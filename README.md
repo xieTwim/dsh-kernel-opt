@@ -36,7 +36,7 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 | `self_compact` 工具 | 包装官方 `compaction` seam；仅当组合里有 compaction provider 时注册 |
 | `/kloop [预算]` 命令 | **kernel 优化循环**：按 run 状态驱动的续跑——turn 落定且预算未尽、未 finalize、上轮有进展才续投；续投消息带停滞计数；预算耗尽/停滞先投**收尾轮**再停 |
 | `/supervise on\|off` 命令 | **第二模型监督**：每个续跑点复审 run digest（含每点来源命令行），建议随续投消息注入；失败降级为无建议 |
-| series / control 路由 | `GET …/series?sessionId=` 即时投影；`POST …/control` 驱动与 slash 命令同一份循环/监督状态 |
+| series / control / models 路由 | `GET …/series?sessionId=` 即时投影；`POST …/control` 驱动与 slash 命令同一份循环/监督状态（含 `supervise-use` 会话级换监督模型）；`GET …/models` 供面板选择器枚举 provider/model |
 | `skills/kernel-cockpit` | 优化协议（盘点→组装评测入口→自由迭代→诚实收尾），可选装 |
 
 ## 快速上手（自带 kernel）
@@ -62,7 +62,9 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 ```sh
 /kloop            # 启动循环,默认预算 20 次评测(/kloop 30 自定义)
 /kloop stop       # 停;/kloop status 查看
-/supervise on     # 开启第二模型监督(需先配置,见下)
+/supervise on     # 开启第二模型监督(需先有监督模型:配置或当场指定,见下)
+/supervise use deepseek-official/deepseek-v4-flash   # 本会话换监督模型
+/supervise use default                               # 回到配置默认
 ```
 
 也可以全程不打命令：面板顶部有**启动/停止按钮 + 预算输入 + 监督开关**（control 路由），与 slash 命令驱动同一份状态。
@@ -71,7 +73,7 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 
 **监督记录是从会话日志解析回来的**：每轮续投消息里的建议块（或 OK 行）由投影按固定锚点解析成 `rounds`，面板的「监督记录」卡与迭代表展开里的"该轮监督"都来自它——重启、回放后依然完整。
 
-监督模型是硬门槛配置（`~/.dsh/cordis.patch.yml` 的插件行，或 profile patch）：
+**监督模型两层解析**：面板下拉/`/supervise use` 的**会话级覆盖** > 插件 config 默认。下拉选项来自 models 路由（`llm.listProviders()`/`listModels()`，发现失败的 provider 仍列出、模型手填走 `/supervise use`）；覆盖只换路由，temperature/maxTokens 等复审纪律仍随 config。没配 config 也可以：下拉选一个（或 `/supervise use`）后 `/supervise on` 即可用。config 写法（`~/.dsh/cordis.patch.yml` 的插件行，或 profile patch）：
 
 ```yaml
 - id: kernel-cockpit
