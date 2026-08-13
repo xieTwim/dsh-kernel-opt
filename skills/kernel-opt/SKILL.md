@@ -1,11 +1,11 @@
 ---
-name: kernel-cockpit
-description: Protocol for long kernel-optimization runs under the kernel-cockpit plugin — inventory the materials, assemble your own evaluation entry that prints the contract trailer, iterate freely with checkpoint commits, finalize honestly. The panel derives everything from the session log.
+name: kernel-opt
+description: Protocol for long kernel-optimization runs under the kernel-opt plugin — inventory the materials, assemble your own evaluation entry that prints the contract trailer, iterate freely with checkpoint commits, finalize honestly. The panel derives everything from the session log.
 ---
 
-# kernel-cockpit 优化协议
+# kernel-opt 优化协议
 
-本 skill 配合 `dsh-kernel-cockpit` 插件使用。面板、循环、监督全部从**会话日志**派生——你不需要为它们做任何额外记录。协议只有四段：起步盘点、评测入口、自由迭代、诚实收尾。
+本 skill 配合 `dsh-kernel-opt` 插件使用。面板、循环、监督全部从**会话日志**派生——你不需要为它们做任何额外记录。协议只有四段：起步盘点、评测入口、自由迭代、诚实收尾。
 
 ## 0. 起步：盘点材料，报告 Resolved Plan
 
@@ -19,14 +19,14 @@ description: Protocol for long kernel-optimization runs under the kernel-cockpit
 
 没有评测脚本时，装公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL) 拿它的内置评测器（`bench/kernelbench/bench.py`，把材料组装成 `Model`/`get_inputs()` 即可用，组装模式见其 GUIDE）。
 
-盘点完成后，先调 `cockpit_plan`（phase=explore，approach 写一句 resolved plan），再用一小段文字向用户复述你认定的各项（kernel 路径 / 评测方式 / 预算），**只在真有歧义时才提问**——复述是为了让用户能在你没想到要问的地方纠正你。
+盘点完成后，先调 `kernel_plan`（phase=explore，approach 写一句 resolved plan），再用一小段文字向用户复述你认定的各项（kernel 路径 / 评测方式 / 预算），**只在真有歧义时才提问**——复述是为了让用户能在你没想到要问的地方纠正你。
 
 ## 1. 评测入口：你自己组装，末尾打一行契约
 
 评测怎么跑由你定（推荐包一个 `scripts/bench.sh`）。**唯一硬性要求**：每完成一次真实评测，向 stdout 打印一行契约（行首，一行一个评测）：
 
 ```
-KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
+KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ```
 
 | 字段 | 必需 | 含义 |
@@ -55,7 +55,7 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 
 **停滞**：循环续跑消息会带"距上次改进已 N 评"的计数。要不要重新 profile、换方法族、上网查，你自己判断——没有固定门槛。同样，**不要为改写而改写**：带宽顶限的 elementwise op 该做的可能是调度而不是重写；改动半径跟着 headroom 证据走。
 
-**cockpit_plan**：开始新方案（新结构/新 tiling/新方法族）前调一次，变了再调。`phase=stuck` 是显式请求人类引导的信号。**self_compact**：换方法族、旧调试细节不再有用时调（带 `reason` 说明什么必须存活）；评测进行中或刚拿到要逐行分析的 profile 时不要压。
+**kernel_plan**：开始新方案（新结构/新 tiling/新方法族）前调一次，变了再调。`phase=stuck` 是显式请求人类引导的信号。**self_compact**：换方法族、旧调试细节不再有用时调（带 `reason` 说明什么必须存活）；评测进行中或刚拿到要逐行分析的 profile 时不要压。
 
 ## 3. 收尾：最优 artifact 原样恢复 → 全量 verdict → finalize
 
@@ -63,7 +63,7 @@ KERNEL_COCKPIT_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct"
 
 1. 从 git **原样恢复**最优 iter 的 artifact（`git checkout <sha> -- <path>`，绝不凭记忆重写）；
 2. 跑一次**全量 verdict**（完整 trial 数、真实 reference）；
-3. finalize：评测器发 id 的（如 `run_finalize`）用它的 id；否则调 `cockpit_finalize` 传 `artifact_path`——插件会把该 artifact 最优点的记录命令**重放一次**，重放输出里的契约行成为"复测"级最终数字（这就是包装脚本要 env 自包含的原因）；
+3. finalize：评测器发 id 的（如 `run_finalize`）用它的 id；否则调 `kernel_finalize` 传 `artifact_path`——插件会把该 artifact 最优点的记录命令**重放一次**，重放输出里的契约行成为"复测"级最终数字（这就是包装脚本要 env 自包含的原因）；
 4. 总结：最佳结果、什么有效、什么无效、下次先试什么。
 
 ## 4. 诚实红线

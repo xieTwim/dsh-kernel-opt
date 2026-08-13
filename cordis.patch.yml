@@ -1,11 +1,12 @@
-# kernel-cockpit bundle patch: mounts the Node half (cockpit_plan /
-# self_compact tools + the per-session series route). The browser half is
-# discovered through this package's `dsh.client` declaration — no extra row.
+# kernel-opt bundle patch: mounts the Node half (kernel_plan / kernel_finalize
+# tools, the kernel loop, and the series/control/models routes). The browser
+# half is discovered through this package's `dsh.client` declaration — no
+# extra row.
 #
-# Optional config keys (all default to the AKO runtime MCP tool names):
+# Optional config keys (defaults shown; any bench tooling works):
 #   benchTools:    ['kernel_evaluate']
 #   profileTools:  ['kernel_profile']
-#   finalizeTools: ['run_finalize']
+#   finalizeTools: ['run_finalize', 'kernel_finalize']
 - insert:
-    - id: kernel-cockpit
-      name: '@xietwim/dsh-kernel-cockpit'
+    - id: kernel-opt
+      name: '@xietwim/dsh-kernel-opt'

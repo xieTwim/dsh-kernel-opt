@@ -146,7 +146,7 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
       lines.push(`- [${plan.phase}] ${plan.approach}${plan.hypothesis !== undefined ? ` — ${plan.hypothesis}` : ''}`)
     }
   } else {
-    lines.push('No cockpit_plan reports yet.')
+    lines.push('No kernel_plan reports yet.')
   }
   const from = Math.max(0, series.iterations.length - tail)
   lines.push(`Iterations ${String(from + 1)}..${String(series.iterations.length)}:`)
@@ -203,7 +203,7 @@ export function continuationText(
   advice: string | null,
   reviewedOk = false,
   stagnant = 0,
-  finalizeHint = 'run_finalize / cockpit_finalize',
+  finalizeHint = 'run_finalize / kernel_finalize',
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
@@ -219,7 +219,7 @@ export function continuationText(
   }
   lines.push(
     '',
-    `${CONTINUE_TRAILER}: analyse the latest result, state the plan with cockpit_plan if it changed, improve the kernel, and evaluate again.`,
+    `${CONTINUE_TRAILER}: analyse the latest result, state the plan with kernel_plan if it changed, improve the kernel, and evaluate again.`,
     `If you are done or the remaining budget cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
   )
   return lines.join('\n')
@@ -239,13 +239,13 @@ export function wrapUpText(
   evalsDone: number,
   budget: number,
   reason: 'budget' | 'no-progress',
-  finalizeHint = 'run_finalize / cockpit_finalize',
+  finalizeHint = 'run_finalize / kernel_finalize',
 ): string {
   return [
     `${WRAPUP_LINE_PREFIX} ${String(evalsDone)}/${String(budget)} evaluations used; stopping (${reason}).`,
     '',
     'The kernel loop is ending — do not start new optimization work.',
-    `If an honest best result exists, finalize it now (${finalizeHint}; pass the evaluation_id from your evaluator, or the artifact path for cockpit_finalize).`,
+    `If an honest best result exists, finalize it now (${finalizeHint}; pass the evaluation_id from your evaluator, or the artifact path for kernel_finalize).`,
     'Restore the best artifact verbatim first if a later edit regressed it.',
     'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
   ].join('\n')

@@ -1,5 +1,5 @@
 /**
- * Pure projection from a session's logged events to the cockpit wire series.
+ * Pure projection from a session's logged events to the panel wire series.
  * The session log is the only truth: nothing here subscribes or stores state —
  * callers re-run the projection per query, so live views, reloads, and replay
  * all agree by construction.
@@ -43,8 +43,8 @@ export interface ProjectionConfig {
 export const DEFAULT_PROJECTION: ProjectionConfig = {
   benchTools: ['kernel_evaluate'],
   profileTools: ['kernel_profile'],
-  finalizeTools: ['run_finalize', 'cockpit_finalize'],
-  planTool: 'cockpit_plan',
+  finalizeTools: ['run_finalize', 'kernel_finalize'],
+  planTool: 'kernel_plan',
   changeTools: ['write', 'edit'],
   shellTools: ['bash'],
 }
@@ -336,7 +336,7 @@ function trailerPoint(
   return point
 }
 
-/** Provenance command named by a `[cockpit-replay] ` line, when present. */
+/** Provenance command named by a `[replay] ` line, when present. */
 function replayCommand(text: string): string | undefined {
   for (const line of text.split('\n')) {
     const trimmed = line.trimStart()
@@ -376,7 +376,7 @@ function changeSlice(call: CallSlice, seq: number): { path: string; change: Wire
 }
 
 /** Plugin id whose `user/message` events carry the loop protocol texts. */
-const LOOP_PLUGIN_ID = 'kernel-cockpit'
+const LOOP_PLUGIN_ID = 'kernel-opt'
 
 /**
  * Parse a kernel-loop continuation/wrap-up message back out of a
@@ -420,7 +420,7 @@ function roundSlice(event: ProjectionEvent): WireRound | null {
 }
 
 /**
- * Project a session's events into the cockpit series.
+ * Project a session's events into the panel series.
  * @param sessionId - session the events came from (echoed on the wire).
  * @param events - the session log in seq order.
  * @param config - tool-name routing.
