@@ -305,7 +305,7 @@ function capText(change: WireChange, text: string, cap: number): string {
 }
 
 /** Whether two logged paths plausibly address the same file. */
-function samePath(a: string, b: string): boolean {
+export function samePath(a: string, b: string): boolean {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
 }
 

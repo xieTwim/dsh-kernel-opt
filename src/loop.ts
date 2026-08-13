@@ -46,6 +46,20 @@ export function completedEvals(series: WireSeries): number {
 }
 
 /**
+ * Completed evaluations since the best honest measurement — the run's
+ * stagnation streak. All completed evaluations count when no best exists yet.
+ */
+export function stagnationCount(series: WireSeries): number {
+  let count = 0
+  for (let i = series.iterations.length - 1; i >= 0; i -= 1) {
+    if (series.bestIndex !== null && i <= series.bestIndex) break
+    const point = series.iterations[i]
+    if (point !== undefined && point.pending !== true) count += 1
+  }
+  return count
+}
+
+/**
  * What the loop should do at one settled-turn checkpoint. A `wrap-up`
  * disarms like a stop, but first delivers one closing message asking the
  * model to finalize its best honest result — budget exhaustion and stalling
@@ -95,7 +109,11 @@ function digestRow(point: WireIteration, index: number, bestIndex: number | null
   const latency = point.latencyMs !== undefined ? `${point.latencyMs}ms` : '—'
   const star = point.finalized === true ? ' ★finalized' : ''
   const best = bestIndex === index ? ' ←best' : ''
-  return `#${String(index + 1)} ${point.evaluationId ?? '?'} ${latency} ${status}${star}${best}`
+  const channel = point.channel !== undefined ? ` [${point.channel}]` : ''
+  const command = point.command !== undefined
+    ? ` cmd:"${point.command.length > 60 ? `${point.command.slice(0, 60)}…` : point.command}"`
+    : ''
+  return `#${String(index + 1)} ${point.evaluationId ?? '?'} ${latency} ${status}${star}${best}${channel}${command}`
 }
 
 /**
@@ -112,6 +130,13 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
   const lines: string[] = [
     `Budget: ${String(evalsDone)}/${String(state.budget)} evaluations used; continuation round ${String(state.round)}.`,
   ]
+  const stagnant = stagnationCount(series)
+  if (stagnant >= 3) lines.push(`Stagnation: ${String(stagnant)} evaluations since the last improvement.`)
+  const shellCount = series.iterations.filter(p => p.channel === 'shell').length
+  if (shellCount > 0) {
+    lines.push(`Provenance: ${String(shellCount)}/${String(series.iterations.length)} evaluations are self-reported `
+      + '(parsed from agent-run shell output; cmd shown per row). A row whose cmd is not a benchmark invocation is fabricated.')
+  }
   const plans = series.plans.slice(-3)
   if (plans.length > 0) {
     lines.push('Recent plans (oldest first):')
@@ -138,6 +163,7 @@ export const SUPERVISOR_SYSTEM = [
   '- budget discipline: repeated evaluations of one idea without a stated hypothesis waste budget;',
   '- approach diversity: several consecutive failures of one family should trigger a family switch;',
   '- plan hygiene: plans should exist and match what the table shows;',
+  '- provenance: on [shell] rows the trajectory is self-reported — judge whether each cmd is a real benchmark invocation and whether the numbers move like real measurements;',
   '- finishing: near budget exhaustion the agent should finalize its best honest result.',
   'If the run looks healthy, reply exactly OK.',
   'Otherwise reply with at most 3 short imperative sentences of advice. No preamble, no code.',
@@ -162,6 +188,10 @@ export function adviceFromReply(reply: string): string | null {
  * @param budget - armed budget.
  * @param advice - supervisor advice, if any.
  * @param reviewedOk - a review ran and approved (ignored when advice given).
+ * @param stagnant - completed evaluations since the last improvement (a
+ *   re-assessment nudge rides along from 3 — data plus a suggestion, never an
+ *   order; the agent owns its policy).
+ * @param finalizeHint - finalize tool name(s) to name in the closing line.
  * @returns the followup text.
  */
 export function continuationText(
@@ -170,10 +200,16 @@ export function continuationText(
   budget: number,
   advice: string | null,
   reviewedOk = false,
+  stagnant = 0,
+  finalizeHint = 'run_finalize / cockpit_finalize',
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
   ]
+  if (stagnant >= 3) {
+    lines.push(`Note: ${String(stagnant)} evaluations since the last improvement — consider re-profiling or `
+      + 'switching approach family before spending more budget on the current line.')
+  }
   if (advice !== null) {
     lines.push('', REVIEW_HEADER, advice)
   } else if (reviewedOk) {
@@ -181,8 +217,8 @@ export function continuationText(
   }
   lines.push(
     '',
-    `${CONTINUE_TRAILER}: analyse the latest result, state the plan with cockpit_plan if it changed, improve solution.py, and evaluate again.`,
-    'If you are done or the remaining budget cannot beat the current best, call run_finalize with the evaluation_id you stand behind, then summarize.',
+    `${CONTINUE_TRAILER}: analyse the latest result, state the plan with cockpit_plan if it changed, improve the kernel, and evaluate again.`,
+    `If you are done or the remaining budget cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
   )
   return lines.join('\n')
 }
@@ -194,14 +230,21 @@ export function continuationText(
  * @param evalsDone - completed evaluations at the stop decision.
  * @param budget - armed budget.
  * @param reason - why the loop is ending.
+ * @param finalizeHint - finalize tool name(s) to name.
  * @returns the followup text.
  */
-export function wrapUpText(evalsDone: number, budget: number, reason: 'budget' | 'no-progress'): string {
+export function wrapUpText(
+  evalsDone: number,
+  budget: number,
+  reason: 'budget' | 'no-progress',
+  finalizeHint = 'run_finalize / cockpit_finalize',
+): string {
   return [
     `${WRAPUP_LINE_PREFIX} ${String(evalsDone)}/${String(budget)} evaluations used; stopping (${reason}).`,
     '',
     'The kernel loop is ending — do not start new optimization work.',
-    'If an honest best result exists, call run_finalize with its evaluation_id now.',
+    `If an honest best result exists, finalize it now (${finalizeHint}; pass the evaluation_id from your evaluator, or the artifact path for cockpit_finalize).`,
+    'Restore the best artifact verbatim first if a later edit regressed it.',
     'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
   ].join('\n')
 }
