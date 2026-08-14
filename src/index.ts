@@ -512,7 +512,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const supervisor = effectiveSupervisor(state)
       if (supervisor === undefined || !state.supervise) return { advice: null, note: null, reviewed: false }
       try {
-        const base = supervisorDigest(series, state)
+        const base = supervisorDigest(series, state, 10, evalsPerTurn)
         const digest = mode === 'closing'
           ? `${base}\nThe run has finalized — this is the closing audit: judge the final `
             + 'table and its provenance (the finalize and its replay above all); continuation advice is moot.'
