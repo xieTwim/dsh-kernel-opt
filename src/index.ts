@@ -86,11 +86,13 @@ export interface Config {
   }
   /**
    * 「算子优化模式」agent preset self-install. On by default: when the
-   * deployment composes `agentPresets`, the bundled preset directory is
-   * copied once into the user preset root (`~/.dsh/.agent-presets/<id>/`),
-   * never overwriting an existing copy. the evaluation tab always shows for
-   * sessions composed from the DEFAULT id — an overridden `id` keeps the
-   * preset but falls back to signal-based tab detection.
+   * deployment composes `agentPresets`, the bundled preset directory
+   * (persona + the built-in evaluator under `evaluator/`) is seeded
+   * per-file into the user preset root (`~/.dsh/.agent-presets/<id>/`) —
+   * existing files are never overwritten; missing ones top up on boot. The
+   * evaluation tab always shows for sessions composed from the DEFAULT id
+   * — an overridden `id` keeps the preset but falls back to signal-based
+   * tab detection.
    */
   preset?: {
     /** Master switch (default true). */
@@ -657,10 +659,13 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   // Agent-preset self-install: composing this plugin makes an「算子优化模式」
-  // preset appear in the picker. Copy-once into the user preset root — never
-  // clobbers an existing (possibly user-edited) copy; delete that directory
-  // to re-seed. Host discovery is unmemoized, so it shows up without a
-  // restart. Best-effort: any failure leaves the plugin fully functional.
+  // preset appear in the picker. Per-FILE top-up into the user preset root:
+  // files that already exist there (possibly user-edited) are never
+  // overwritten, while bundled files the copy does not have yet (e.g. the
+  // evaluator/ directory added after an older install) are seeded in. Delete
+  // a file or the directory to re-seed it. Host discovery is unmemoized, so
+  // it shows up without a restart. Best-effort: any failure leaves the
+  // plugin fully functional.
   ctx.inject(['agentPresets'], (pctx) => {
     if (config.preset?.install === false) return
     const id = config.preset?.id ?? PRESET_ID
@@ -671,8 +676,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const source = bundledPresetDir()
         if (!existsSync(join(source, 'agent.cordis.yml'))) return
         const target = join(expandHome(userRoot.path), id)
-        if (existsSync(target)) return
-        await cp(source, target, { recursive: true })
+        await cp(source, target, { recursive: true, force: false })
       } catch {
         // Preset install is a convenience; the plugin works without it.
       }

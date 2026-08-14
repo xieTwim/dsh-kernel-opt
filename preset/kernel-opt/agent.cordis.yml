@@ -7,8 +7,10 @@
 # mounted once and joined per session; a service row must sit inside a group
 # carrying an `isolate` realm or the mount is rejected.
 #
-# This file is copied once into the user preset root and never overwritten:
-# edit it freely; delete the directory to re-seed from the plugin's copy.
+# This directory is seeded per file into the user preset root: existing
+# files are never overwritten (edit freely), missing ones top up on boot.
+# Delete a file (or the directory) to re-seed it from the plugin's copy.
+# `evaluator/` beside this file carries the built-in bench (from AKO4ALL).
 
 # ── identity ────────────────────────────────────────────────────────────────
 
@@ -34,12 +36,15 @@
       neither exists, ask and wait — never adopt anything found outside the
       working directory (stale sibling run directories and other sessions'
       files are not your task). When a kernel is in hand but no way to
-      evaluate it, one option is to install the open-source AKO4ALL toolkit
-      from GitHub and use its built-in evaluator (assemble the kernel as a
-      Model with get_inputs); it is an optional external tool, not the
-      environment you are running in, and it answers "how to evaluate",
-      never "what to optimize" — with no task, do not propose demo runs on
-      public kernels; just ask. (2) Assemble your own
+      evaluate it, the plugin ships a built-in evaluator: copy
+      ~/.dsh/.agent-presets/kernel-opt/evaluator/bench.py into the
+      workspace and assemble the kernel as a Model with get_inputs
+      (GUIDE.md sits beside it; correctness + median timing + fresh
+      inputs + anti-cheat sentinel). It comes from the open-source
+      AKO4ALL toolkit — install that from GitHub only if the bundled copy
+      is missing. An evaluator answers "how to evaluate", never "what to
+      optimize" — with no task, do not propose demo runs on public
+      kernels; just ask. (2) Assemble your own
       evaluation entry: wrap the bench command in a script whose environment
       setup is self-contained, run it in the foreground, and have every REAL
       evaluation print one stdout line starting with KERNEL_EVAL=
