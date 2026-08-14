@@ -19,7 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // SlotMap merge: conversation.view is declared by the conversation contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WireChange, WireControl, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
+import type { WireChange, WireControl, WireEnv, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, inWrapUpPhase, latestRunStart, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -39,6 +39,15 @@ const zh = {
   'chips.profiles': '{count} 次 profile',
   'chips.hacks': '{count} 次作弊检出',
   'chips.pending': '评测中…',
+  'env.title': '评测环境',
+  'env.none': 'Agent 尚未汇报评测环境（数字所在的机器未知）。',
+  'env.location': '运行位置',
+  'env.device': '计算设备',
+  'env.constraint': '约束',
+  'env.versions': '工具链',
+  'env.probe': '来源命令',
+  'env.notes': '备注',
+  'env.reported': '由 Agent 汇报',
   'plan.title': '当前方案',
   'plan.none': 'Agent 尚未汇报优化方案。',
   'plan.next': '下一步',
@@ -134,6 +143,15 @@ const en = {
   'chips.profiles': '{count} profiles',
   'chips.hacks': '{count} reward-hacks caught',
   'chips.pending': 'evaluating…',
+  'env.title': 'Evaluation environment',
+  'env.none': 'The agent has not reported where these evaluations run.',
+  'env.location': 'Location',
+  'env.device': 'Device',
+  'env.constraint': 'Constraint',
+  'env.versions': 'Toolchain',
+  'env.probe': 'Read from',
+  'env.notes': 'Notes',
+  'env.reported': 'agent-reported',
   'plan.title': 'Current plan',
   'plan.none': 'The agent has not reported an optimization plan yet.',
   'plan.next': 'Next',
@@ -796,6 +814,53 @@ function ReviewDetail(props: {
   )
 }
 
+/**
+ * Evaluation environment card: the machine the numbers were taken on. Purely
+ * agent-reported (see `WireEnv`) — the panel's host is not necessarily the
+ * benchmark's host, and a user instruction can rule a local device out — so
+ * it is labelled as reported and shows the probe command when one was given.
+ */
+function EnvCard(props: { env: WireEnv | undefined; t: PropsLocale<'kernel-opt'>['t'] }): ReactNode {
+  const { env, t } = props
+  const row = (label: string, value: string): ReactNode => (
+    <div style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: '21px' }}>
+      <span style={{ flex: 'none', minWidth: 62, color: COLOR.caption }}>{label}</span>
+      <span style={{ color: COLOR.text, wordBreak: 'break-word' }}>{value}</span>
+    </div>
+  )
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>{t('env.title')}</span>
+        {env !== undefined
+          ? <span style={{ fontSize: 12, color: COLOR.caption }}>{t('env.reported')}</span>
+          : null}
+      </div>
+      {env === undefined
+        ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('env.none')}</div>
+        : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {row(t('env.device'), env.device)}
+              {row(t('env.location'), env.location)}
+              {env.constraint !== undefined ? row(t('env.constraint'), env.constraint) : null}
+              {env.versions !== undefined
+                ? row(t('env.versions'), Object.entries(env.versions).map(([k, v]) => `${k} ${v}`).join(' · '))
+                : null}
+              {env.notes !== undefined ? row(t('env.notes'), env.notes) : null}
+              {env.probe !== undefined
+                ? (
+                    <div style={{ display: 'flex', gap: 10, fontSize: 12, lineHeight: '20px', marginTop: 2 }}>
+                      <span style={{ flex: 'none', minWidth: 62, color: COLOR.caption }}>{t('env.probe')}</span>
+                      <code style={{ color: COLOR.caption, wordBreak: 'break-all' }}>{env.probe}</code>
+                    </div>
+                  )
+                : null}
+            </div>
+          )}
+    </div>
+  )
+}
+
 /** One structured artifact change, rendered as labeled monospace blocks. */
 function ChangeBlock(props: { change: WireChange; t: PropsLocale<'kernel-opt'>['t'] }): ReactNode {
   const { change, t } = props
@@ -1065,6 +1130,8 @@ export function KernelOptTab(
   const rounds = series?.rounds ?? []
   const control = series?.control
   const latestPlan = plans.length > 0 ? plans[plans.length - 1] : undefined
+  const envs = series?.envs ?? []
+  const env = envs.length > 0 ? envs[envs.length - 1] : undefined
   const best = series !== null && series.bestIndex !== null ? iterations[series.bestIndex] : undefined
   const hackCount = iterations.filter(p => p.rewardHack === true).length
   const pendingCount = iterations.filter(p => p.pending === true).length
@@ -1238,6 +1305,9 @@ export function KernelOptTab(
             </div>
           )
         : null}
+
+      {/* the machine behind the numbers (hidden while the panel is empty) */}
+      {empty ? null : <EnvCard env={env} t={t} />}
 
       {/* latest plan (hidden while empty — the guidance block covers it) */}
       {empty

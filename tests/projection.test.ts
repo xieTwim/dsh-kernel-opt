@@ -265,6 +265,30 @@ test('project: a finalize challenge lands as that round\'s review, advice intact
   assert.equal(plain[0]?.challenge, undefined)
 })
 
+test('project: kernel_env reports project into the env series', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    call('kernel_env', 'e1', {
+      location: 'kernel-box via rt',
+      device: 'NVIDIA H100 80GB x1',
+      constraint: 'user pinned CUDA_VISIBLE_DEVICES=0',
+      versions: { python: '3.11.9', torch: '2.6.0+cu124', cuda: '12.4', cores: 96 },
+      probe: 'nvidia-smi; python -c "import torch"',
+    }),
+    call('kernel_env', 'e2', { location: 'Modal B200', device: 'NVIDIA B200 x1' }),
+    // A report missing a required field is not a report.
+    call('kernel_env', 'e3', { location: 'nowhere' }),
+  ]
+  const { envs } = project('s', events)
+  assert.equal(envs.length, 2)
+  assert.equal(envs[0]?.device, 'NVIDIA H100 80GB x1')
+  assert.equal(envs[0]?.constraint, 'user pinned CUDA_VISIBLE_DEVICES=0')
+  assert.deepEqual(envs[0]?.versions, { python: '3.11.9', torch: '2.6.0+cu124', cuda: '12.4', cores: '96' })
+  assert.ok(envs[0]?.probe?.startsWith('nvidia-smi'))
+  // The latest report wins on the panel; earlier ones stay on the wire.
+  assert.equal(envs[envs.length - 1]?.location, 'Modal B200')
+})
+
 test('project: non-plugin user messages never become rounds', () => {
   seq = 0
   const events: ProjectionEvent[] = [

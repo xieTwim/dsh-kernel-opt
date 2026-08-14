@@ -85,6 +85,35 @@ export interface WireChange {
   truncated?: boolean
 }
 
+/**
+ * One `kernel_env` call — the environment the agent's EVALUATIONS run in.
+ *
+ * Deliberately agent-reported rather than probed by the plugin. The plugin
+ * runs on the host that serves the panel, but the benchmark may execute on a
+ * remote box (rt/ssh), a cloud runner, or a container — and even on one
+ * machine the user may have ruled a device out ("CPU only", a pinned
+ * `CUDA_VISIBLE_DEVICES`). Only the agent knows where it decided to measure
+ * and under which constraint, so a plugin-side probe would confidently
+ * describe the wrong machine. `probe` keeps it checkable: it names the
+ * commands the facts came from, the way `command` does for a measurement.
+ */
+export interface WireEnv {
+  /** Session-log seq of the report. */
+  seq: number
+  /** Where evaluations execute, in the agent's own words. */
+  location: string
+  /** The compute device the timed runs actually use. */
+  device: string
+  /** Why this device — a user instruction or task constraint, when one applies. */
+  constraint?: string
+  /** Key toolchain versions (name → version), as the agent read them. */
+  versions?: Record<string, string>
+  /** Command(s) the facts above were read from. */
+  probe?: string
+  /** Anything else that qualifies the measurements (clock locking, sharing, …). */
+  notes?: string
+}
+
 /** One `kernel_plan` call — the model's stated plan at that point. */
 export interface WirePlan {
   /** Session-log seq of the plan call. */
@@ -199,6 +228,8 @@ export interface WireSeries {
   iterations: WireIteration[]
   /** Plan reports in log order (latest last). */
   plans: WirePlan[]
+  /** Evaluation-environment reports in log order (latest wins on the panel). */
+  envs: WireEnv[]
   /** seqs of profile-tool calls (event markers between iterations). */
   profileSeqs: number[]
   /** Kernel-loop continuation/wrap-up messages in log order. */

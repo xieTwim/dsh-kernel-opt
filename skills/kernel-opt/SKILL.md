@@ -21,7 +21,7 @@ description: Protocol for long kernel-optimization runs under the kernel-opt plu
 
 **手里有 kernel 但没有评测手段时**，用插件自带的评测器：把 `~/.dsh/.agent-presets/kernel-opt/evaluator/bench.py` 复制进工作区，把材料组装成 `Model`/`get_inputs()` 即可用（正确性 + median 计时 + fresh 输入 + mutation sentinel 反作弊；组装模式见同目录 GUIDE.md）。它来自公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)——只有自带副本不在时才去 GitHub 装。**对用户统一称"内置评测器"**：面向用户的文字（提问选项、方案复述、总结）里不要出现 AKO / AKO4ALL 这类工具包名，用户不认识它们。评测器只回答"怎么评测"，不回答"优化什么"——没有任务时，不要把"跑个公开 kernel 试试"当作选项提给用户，直接问任务就好。
 
-盘点完成后，先调 `kernel_plan`（phase=explore，approach 写一句 resolved plan），再用一小段文字向用户复述你认定的各项（kernel 路径 / 评测方式 / 预算），**只在真有歧义时才提问**——复述是为了让用户能在你没想到要问的地方纠正你。
+盘点完成后，先调 `kernel_plan`（phase=explore，approach 写一句 resolved plan），并在第一次评测前调 `kernel_env` 汇报**评测实际发生的机器**——运行位置、计时所用设备、决定该设备的用户指令（如「只许用 CPU」）、关键工具链版本、以及你读到这些事实所用的命令。注意汇报的是 benchmark 执行的那台机器：用户把你指向远程机 / 集群节点 / 云端 runner 时，那台才是要写进去的；事实要读出来，不要臆断；环境变了就再调一次。再用一小段文字向用户复述你认定的各项（kernel 路径 / 评测方式 / 预算），**只在真有歧义时才提问**——复述是为了让用户能在你没想到要问的地方纠正你。
 
 ## 1. 评测入口：你自己组装，末尾打一行契约
 
@@ -57,7 +57,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 **停滞**：循环续跑消息会带"距上次改进已 N 评"的计数。要不要重新 profile、换方法族、上网查，你自己判断——没有固定门槛。同样，**不要为改写而改写**：带宽顶限的 elementwise op 该做的可能是调度而不是重写；改动半径跟着 headroom 证据走。
 
-**kernel_plan**：开始新方案（新结构/新 tiling/新方法族）前调一次，变了再调。`phase=stuck` 是显式请求人类引导的信号。**self_compact**：换方法族、旧调试细节不再有用时调（带 `reason` 说明什么必须存活）；评测进行中或刚拿到要逐行分析的 profile 时不要压。
+**kernel_env**：第一次评测前调一次，环境变了再调——面板据此告诉人类这些数字是在哪台机器、什么设备上测的。**kernel_plan**：开始新方案（新结构/新 tiling/新方法族）前调一次，变了再调。`phase=stuck` 是显式请求人类引导的信号。**self_compact**：换方法族、旧调试细节不再有用时调（带 `reason` 说明什么必须存活）；评测进行中或刚拿到要逐行分析的 profile 时不要压。
 
 ## 3. 收尾：最优 artifact 原样恢复 → 全量 verdict → finalize
 

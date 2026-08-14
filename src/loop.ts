@@ -193,6 +193,13 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
     lines.push(`Provenance: ${String(shellCount)}/${String(series.iterations.length)} evaluations are self-reported `
       + '(parsed from agent-run shell output; cmd shown per row). A row whose cmd is not a benchmark invocation is fabricated.')
   }
+  const env = series.envs[series.envs.length - 1]
+  if (env !== undefined) {
+    lines.push(`Environment (agent-reported): ${env.device} @ ${env.location}`
+      + `${env.constraint !== undefined ? ` — constraint: ${env.constraint}` : ''}`)
+  } else {
+    lines.push('Environment: not reported — the agent has not stated where these measurements run.')
+  }
   const plans = series.plans.slice(-3)
   if (plans.length > 0) {
     lines.push('Recent plans (oldest first):')
@@ -301,6 +308,9 @@ export function adviceFromReply(reply: string): { advice: string | null; note: s
  * @param planStale - evaluations have piled up since the last plan report, so
  *   the panel's plan card no longer describes what the agent is doing; the
  *   drive asks for a fresh one (prose in chat never reaches the panel).
+ * @param envKnown - whether the evaluation environment has been reported. The
+ *   numbers on the panel mean nothing without the machine they were taken on,
+ *   and only the agent knows which machine that is.
  * @returns the followup text.
  */
 export function continuationText(
@@ -316,6 +326,7 @@ export function continuationText(
   evalsPerTurn = 0,
   okNote: string | null = null,
   planStale = false,
+  envKnown = true,
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
@@ -336,7 +347,13 @@ export function continuationText(
     )
     if (!planKnown) {
       lines.push('No kernel_plan is on record yet — report your resolved plan with it (phase, approach, hypothesis) before evaluating further.')
-    } else if (planStale) {
+    }
+    if (!envKnown) {
+      lines.push('No kernel_env is on record — report where these evaluations actually run (host, device, '
+        + 'any user constraint on the device, key toolchain versions, and the commands you read them from). '
+        + 'Latency numbers are unreadable without the machine behind them.')
+    }
+    if (planKnown && planStale) {
       lines.push('Your last kernel_plan predates the recent evaluations — call it again with what you are actually pursuing now. '
         + 'kernel_plan is the ONLY channel to the human\'s plan panel; a progress write-up in the reply text never reaches it.')
     }
