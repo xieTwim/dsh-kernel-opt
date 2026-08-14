@@ -81,6 +81,22 @@ export function unreviewedEvals(series: WireSeries): boolean {
 }
 
 /**
+ * Whether the plan card has fallen behind the run: a plan exists, but a full
+ * pace batch of evaluations has landed since it was reported. The panel's
+ * plan card is fed ONLY by `kernel_plan` calls, so an agent that switches
+ * approach and describes it in prose leaves the human reading a stale plan.
+ * @param series - current projection.
+ * @param evalsPerTurn - pace batch size (0 falls back to 3).
+ * @returns whether the drive should ask for a fresh plan report.
+ */
+export function planStale(series: WireSeries, evalsPerTurn = 3): boolean {
+  const lastPlanSeq = series.plans.reduce((seq, p) => Math.max(seq, p.seq), -1)
+  if (lastPlanSeq < 0) return false
+  const since = series.iterations.filter(p => p.pending !== true && p.seq > lastPlanSeq).length
+  return since >= Math.max(2, evalsPerTurn > 0 ? evalsPerTurn : 3)
+}
+
+/**
  * Completed evaluations since the best honest measurement — the run's
  * stagnation streak. All completed evaluations count when no best exists yet.
  */
@@ -205,7 +221,9 @@ export const SUPERVISOR_SYSTEM = [
   '- plan hygiene: plans should exist and match what the table shows;',
   '- provenance: on [shell] rows the trajectory is self-reported — judge whether each cmd is a real benchmark invocation and whether the numbers move like real measurements;',
   '- finishing: near budget exhaustion the agent should finalize its best honest result.',
-  'If the run looks healthy, reply exactly OK.',
+  'If the run looks healthy, reply `OK: ` followed by ONE short sentence naming what you checked and the strongest '
+  + 'signal you saw (e.g. "OK: four families tried, best is replay-consistent, budget on track"). The sentence is '
+  + 'shown to the human as the record of this review, so never reply with a bare OK.',
   'Otherwise reply with at most 3 short imperative sentences of advice. No preamble, no code.',
 ].join('\n')
 
@@ -225,17 +243,29 @@ export const HEADROOM_SYSTEM = [
   '  fusion or launch-overhead removal, precision/vectorization, library or compiler paths, tuning of exposed parameters;',
   '- stopping IS justified when the remaining ideas are argued to be dominated, when measurements sit at a stated',
   '  hardware or semantic floor, or when several distinct families all failed to beat the current best.',
-  'If the run is genuinely converged, reply exactly DONE.',
+  'If the run is genuinely converged, reply `DONE: ` followed by ONE short sentence stating WHY no headroom remains '
+  + '(which families were tried and what floor the measurements sit at). That sentence is shown to the human as the '
+  + 'justification for ending the run, so never reply with a bare DONE.',
   'Otherwise reply with at most 3 short imperative sentences, each naming a CONCRETE untried direction worth one evaluation. No preamble, no code.',
 ].join('\n')
 
-/** Strip a supervisor reply to advice, or null when it approves or is empty. */
-export function adviceFromReply(reply: string): string | null {
+/**
+ * Split a supervisor reply into advice and the approval note. An approving
+ * verdict carries its own one-line observation (`OK: …` / `DONE: …`): a bare
+ * "OK" recorded nothing the human could read, so the note is the record of
+ * what that review actually saw.
+ * @param reply - raw supervisor reply.
+ * @returns `advice` when it objected (else null), and `note` on approval.
+ */
+export function adviceFromReply(reply: string): { advice: string | null; note: string | null } {
   const text = reply.trim()
-  if (text.length === 0) return null
-  if (/^ok[.!]?$/i.test(text)) return null
-  if (/^done[.!]?$/i.test(text)) return null
-  return text.length > 600 ? `${text.slice(0, 600)}…` : text
+  if (text.length === 0) return { advice: null, note: null }
+  const approved = /^(ok|done)\b[.:!—-]*\s*/i.exec(text)
+  if (approved !== null) {
+    const note = text.slice(approved[0].length).trim().split('\n')[0]?.trim() ?? ''
+    return { advice: null, note: note.length > 0 ? (note.length > 300 ? `${note.slice(0, 300)}…` : note) : null }
+  }
+  return { advice: text.length > 600 ? `${text.slice(0, 600)}…` : text, note: null }
 }
 
 /**
@@ -267,6 +297,10 @@ export function adviceFromReply(reply: string): string | null {
  *   boundaries that give the supervisor periodic checkpoints and keep the
  *   budget gate near-real-time when a capable model would otherwise finish
  *   the whole run in one turn (0 = no pace line).
+ * @param okNote - the supervisor's one-line observation when it approved.
+ * @param planStale - evaluations have piled up since the last plan report, so
+ *   the panel's plan card no longer describes what the agent is doing; the
+ *   drive asks for a fresh one (prose in chat never reaches the panel).
  * @returns the followup text.
  */
 export function continuationText(
@@ -280,6 +314,8 @@ export function continuationText(
   taskKnown = true,
   planKnown = true,
   evalsPerTurn = 0,
+  okNote: string | null = null,
+  planStale = false,
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
@@ -291,7 +327,7 @@ export function continuationText(
   if (advice !== null) {
     lines.push('', REVIEW_HEADER, advice)
   } else if (reviewedOk) {
-    lines.push('', REVIEW_OK_LINE)
+    lines.push('', okNote !== null && okNote.length > 0 ? `${REVIEW_OK_LINE} ${okNote}` : REVIEW_OK_LINE)
   }
   if (taskKnown) {
     lines.push(
@@ -300,6 +336,9 @@ export function continuationText(
     )
     if (!planKnown) {
       lines.push('No kernel_plan is on record yet — report your resolved plan with it (phase, approach, hypothesis) before evaluating further.')
+    } else if (planStale) {
+      lines.push('Your last kernel_plan predates the recent evaluations — call it again with what you are actually pursuing now. '
+        + 'kernel_plan is the ONLY channel to the human\'s plan panel; a progress write-up in the reply text never reaches it.')
     }
     lines.push(
       `If you are done or the remaining budget cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
@@ -345,6 +384,7 @@ export function wrapUpText(
   finalizeHint = 'run_finalize / kernel_finalize',
   advice: string | null = null,
   reviewedOk = false,
+  okNote: string | null = null,
 ): string {
   const lines = [
     `${WRAPUP_LINE_PREFIX} ${String(evalsDone)}/${String(budget)} evaluations used; stopping (${reason}).`,
@@ -352,7 +392,7 @@ export function wrapUpText(
   if (advice !== null) {
     lines.push('', REVIEW_HEADER, advice)
   } else if (reviewedOk) {
-    lines.push('', REVIEW_OK_LINE)
+    lines.push('', okNote !== null && okNote.length > 0 ? `${REVIEW_OK_LINE} ${okNote}` : REVIEW_OK_LINE)
   }
   lines.push(
     '',
@@ -411,9 +451,10 @@ export function challengeText(
  * correct the finalized result — the loop stays disarmed either way, so the
  * reply turn is never re-driven.
  * @param advice - supervisor advice, or null when it approved.
+ * @param okNote - the supervisor's one-line justification on approval.
  * @returns the followup text.
  */
-export function finalAuditText(advice: string | null): string {
+export function finalAuditText(advice: string | null, okNote: string | null = null): string {
   const lines = [`${AUDIT_LINE_PREFIX} the run has finalized; the supervisor audited the final table.`]
   if (advice !== null) {
     lines.push(
@@ -423,7 +464,12 @@ export function finalAuditText(advice: string | null): string {
       'Do not start new optimization work beyond what the findings require.',
     )
   } else {
-    lines.push('', REVIEW_OK_LINE, '', 'No action needed — this note closes the run.')
+    lines.push(
+      '',
+      okNote !== null && okNote.length > 0 ? `${REVIEW_OK_LINE} ${okNote}` : REVIEW_OK_LINE,
+      '',
+      'No action needed — this note closes the run.',
+    )
   }
   return lines.join('\n')
 }

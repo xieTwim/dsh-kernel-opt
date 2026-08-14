@@ -41,8 +41,8 @@ import { DEFAULT_PROJECTION, hasUserTask, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, completedEvals,
-  continuationText, decideContinuation, finalAuditText, initialLoopState, reviewable,
-  stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
+  continuationText, decideContinuation, finalAuditText, initialLoopState, planStale,
+  reviewable, stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
@@ -458,9 +458,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       state: LoopState,
       series: WireSeries,
       mode: 'round' | 'closing' | 'headroom' = 'round',
-    ): Promise<{ advice: string | null; reviewed: boolean }> => {
+    ): Promise<{ advice: string | null; note: string | null; reviewed: boolean }> => {
       const supervisor = effectiveSupervisor(state)
-      if (supervisor === undefined || !state.supervise) return { advice: null, reviewed: false }
+      if (supervisor === undefined || !state.supervise) return { advice: null, note: null, reviewed: false }
       try {
         const base = supervisorDigest(series, state)
         const digest = mode === 'closing'
@@ -489,10 +489,10 @@ export function apply(ctx: Context, config: Config = {}): void {
         for await (const chunk of stream) {
           if (chunk.type === 'text-delta') reply += chunk.text
         }
-        return { advice: adviceFromReply(reply), reviewed: true }
+        return { ...adviceFromReply(reply), reviewed: true }
       } catch {
         // A broken or slow reviewer must never stall the primary loop.
-        return { advice: null, reviewed: false }
+        return { advice: null, note: null, reviewed: false }
       }
     }
 
@@ -527,7 +527,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const challengeable = challengeFinalize && state.supervise && budgetLeft > 0
           && lastFinalizeSeq > (state.challengedFinalizeSeq ?? -1)
         if (challengeable || (state.supervise && unreviewedEvals(series))) {
-          const { advice, reviewed } = await review(state, series, challengeable ? 'headroom' : 'closing')
+          const { advice, note, reviewed } = await review(state, series, challengeable ? 'headroom' : 'closing')
           state.lastAdvice = advice ?? state.lastAdvice
           // Re-check after the (possibly slow) review: a human message or a
           // stop that arrived meanwhile owns the session.
@@ -554,7 +554,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           state.stopReason = challengeable ? 'converged' : decision.reason
           if (reviewed) {
             agent.followup(createUserMessage({
-              content: [{ type: 'text', text: finalAuditText(advice) }],
+              content: [{ type: 'text', text: finalAuditText(advice, note) }],
               source: { kind: 'plugin', plugin: PLUGIN_ID },
             }))
           }
@@ -570,9 +570,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         // this drive like any continuation — the finalize is exactly where a
         // provenance audit pays, and a run finished in a single turn has no
         // other checkpoint where the supervisor could speak.
-        const { advice, reviewed } = reviewable(series)
+        const { advice, note, reviewed } = reviewable(series)
           ? await review(state, series)
-          : { advice: null, reviewed: false }
+          : { advice: null, note: null, reviewed: false }
         state.lastAdvice = advice ?? state.lastAdvice
         // Re-check after the (possibly slow) review; a human message or stop
         // that arrived meanwhile owns the session, and the next settle will
@@ -584,7 +584,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           content: [{
             type: 'text',
             text: wrapUpText(decision.evalsDone, state.budget, decision.reason, finalizeHint,
-              advice, reviewed && advice === null),
+              advice, reviewed && advice === null, note),
           }],
           source: { kind: 'plugin', plugin: PLUGIN_ID },
         }))
@@ -597,9 +597,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       state.lastEvalCount = decision.evalsDone
       // Review only when the digest carries signal: a fresh arm over an empty
       // session has nothing to audit, so no supervisor call and no OK record.
-      const { advice, reviewed } = reviewable(series)
+      const { advice, note, reviewed } = reviewable(series)
         ? await review(state, series)
-        : { advice: null, reviewed: false }
+        : { advice: null, note: null, reviewed: false }
       state.lastAdvice = advice ?? state.lastAdvice
       // Re-check idleness and armed state after the (possibly slow) review; a
       // human message or stop that arrived meanwhile owns the session.
@@ -616,7 +616,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           text: continuationText(
             state.round, decision.evalsDone, state.budget, advice,
             reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
-            series.plans.length > 0, evalsPerTurn,
+            series.plans.length > 0, evalsPerTurn, note, planStale(series, evalsPerTurn),
           ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },

@@ -427,8 +427,12 @@ function roundSlice(event: ProjectionEvent): WireRound | null {
     const num = /^\[kernel-loop round (\d+)\]/.exec(text)
     if (num !== null) round.round = Number(num[1])
   }
-  if (text.includes(REVIEW_OK_LINE)) {
+  const okAt = text.indexOf(REVIEW_OK_LINE)
+  if (okAt >= 0) {
     round.review = 'ok'
+    // The approval note rides the rest of that line.
+    const note = text.slice(okAt + REVIEW_OK_LINE.length).split('\n')[0]?.trim() ?? ''
+    if (note.length > 0) round.reviewNote = note
   } else {
     const headerAt = text.indexOf(REVIEW_HEADER)
     if (headerAt >= 0) {
