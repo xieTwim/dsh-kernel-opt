@@ -42,7 +42,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ## 快速上手（自带 kernel）
 
 1. 安装插件（见下），重启 `dsh web`；
-2. 把要优化的 kernel 丢进工作目录——reference / 输入数据 / 你自己的评测脚本都可选，**任意形式**，模型自己盘点组装；没有评测手段就装公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)，其内置评测器（正确性 + median 计时 + mutation sentinel 反作弊）开箱即用；
+2. 把要优化的 kernel 丢进工作目录——reference / 输入数据 / 你自己的评测脚本都可选，**任意形式**，模型自己盘点组装；没有评测手段就用**插件自带的评测器**（随算子优化模式落盘在 `~/.dsh/.agent-presets/kernel-opt/evaluator/`，同步自公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)：正确性 + median 计时 + fresh 输入 + mutation sentinel 反作弊），开箱即用；
 3. 对模型说"优化这个 kernel"（建议配合 skill），或直接 `/kloop 30` 交给循环；
 4. 会话页顶部出现「评测」Tab——曲线、状态、方案、监督，全在里面；想引导随时打字。
 
@@ -54,7 +54,7 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 
 - persona 就是任务书的通用半：盘点材料 → `kernel_plan` 报 resolved plan → 组装评测入口（契约行）→ 自由迭代 → 诚实收尾。你只需要在第一条消息里给三样：**kernel 在哪、怎么评测（或让它用 AKO4ALL 内置评测器）、预算/卡信息**；
 - 该模式的会话「评测」Tab **常显示**（不等第一次评测）；
-- preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），落盘后想改就直接改——插件永不覆盖已存在的副本；
+- preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），并附带 `evaluator/`（内置评测器 bench.py + GUIDE.md）。落盘按**逐文件补种**：已存在的文件永不覆盖（想改就直接改），插件新版新增的文件会在启动时补进来；删掉某个文件（或整个目录）即从插件副本重新播种；
 - 关闭自动落盘：config `preset.install: false`；换 id：`preset.id`（Tab 常显示判定只认默认 id，改 id 后回退到信号检测）。
 
 ## 循环与监督
