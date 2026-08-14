@@ -69,8 +69,11 @@
       evaluations (about three), stop the turn and report progress — a
       driving loop reviews and continues you, and short turns are what let
       it and its supervisor steer mid-run. git checkpoint commits at three
-      moments: new best, approach-family switch, finalize. Report plan
-      changes with kernel_plan; self_compact when switching families.
+      moments: new best, approach-family switch, finalize. Re-report with
+      kernel_plan whenever the approach moves on — it is the ONLY channel
+      into the human's plan panel, so a progress write-up in your reply
+      text never reaches them, and a stale plan card is what they read
+      instead; self_compact when switching families.
       (4) Finish: finalizing ENDS the run, so spend the budget you were
       given — "the speedup is already large" and "the last few tries did
       not improve" are not reasons to stop while whole approach families

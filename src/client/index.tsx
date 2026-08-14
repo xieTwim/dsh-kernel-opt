@@ -43,6 +43,8 @@ const zh = {
   'plan.none': 'Agent 尚未汇报优化方案。',
   'plan.next': '下一步',
   'plan.count': '第 {n} 次汇报',
+  'plan.history': '查看此前 {n} 次汇报',
+  'plan.hide': '收起历史汇报',
   'table.title': '迭代记录',
   'status.pending': '评测中',
   'status.ok': '通过',
@@ -135,6 +137,8 @@ const en = {
   'plan.none': 'The agent has not reported an optimization plan yet.',
   'plan.next': 'Next',
   'plan.count': 'report #{n}',
+  'plan.history': 'show {n} earlier reports',
+  'plan.hide': 'hide earlier reports',
   'table.title': 'Iterations',
   'status.pending': 'running',
   'status.ok': 'ok',
@@ -761,7 +765,10 @@ function ReviewDetail(props: {
           : ''}
       </div>
       <div style={{ color: COLOR.text, whiteSpace: 'pre-wrap' }}>
-        {t('advice.verdict')}：{round.review === 'ok' ? `✓ ${t('advice.ok')}` : round.review}
+        {t('advice.verdict')}：
+        {round.review === 'ok'
+          ? `✓ ${t('advice.ok')}${round.reviewNote !== undefined ? ` — ${round.reviewNote}` : ''}`
+          : round.review}
       </div>
     </div>
   )
@@ -1015,6 +1022,7 @@ export function KernelOptTab(
   const [budgetDraft, setBudgetDraft] = useState<string | null>(null)
   const [expandedSeq, setExpandedSeq] = useState<number | null>(null)
   const [expandedReview, setExpandedReview] = useState<number | null>(null)
+  const [planHistory, setPlanHistory] = useState(false)
 
   /** Drive the control route, then re-pull so the panel reflects it now. */
   const post = async (action: string, extra?: Record<string, unknown>): Promise<void> => {
@@ -1218,6 +1226,18 @@ export function KernelOptTab(
                 </span>
               )
             : null}
+          {/* Earlier reports stay one click away: the approach history is how
+              a reader reconstructs WHY the run went where it went. */}
+          {plans.length > 1
+            ? (
+                <span
+                  style={{ fontSize: 12, color: COLOR.curve, cursor: 'pointer' }}
+                  onClick={() => { setPlanHistory(value => !value) }}
+                >
+                  {planHistory ? t('plan.hide') : t('plan.history', { n: plans.length - 1 })}
+                </span>
+              )
+            : null}
         </div>
         {latestPlan === undefined
           ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('plan.none')}</div>
@@ -1239,6 +1259,32 @@ export function KernelOptTab(
                   : null}
               </div>
             )}
+        {planHistory && plans.length > 1
+          ? (
+              <div style={{
+                marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLOR.border}`,
+                display: 'flex', flexDirection: 'column', gap: 8,
+              }}>
+                {plans.slice(0, -1).reverse().map((plan, i) => (
+                  <div key={plan.seq} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: COLOR.caption, minWidth: 62 }}>
+                        {t('plan.count', { n: plans.length - 1 - i })}
+                      </span>
+                      <span style={{
+                        ...chipStyle, color: COLOR.caption,
+                        fontSize: 11, padding: '0 7px', lineHeight: '18px',
+                      }}>{plan.phase}</span>
+                      <span style={{ fontSize: 13, color: COLOR.dim }}>{plan.approach}</span>
+                    </div>
+                    {plan.hypothesis !== undefined
+                      ? <div style={{ fontSize: 12, color: COLOR.caption, paddingLeft: 70 }}>{plan.hypothesis}</div>
+                      : null}
+                  </div>
+                ))}
+              </div>
+            )
+          : null}
       </div>
           )}
 
@@ -1252,9 +1298,13 @@ export function KernelOptTab(
                 ? <div style={{ fontSize: 13, color: COLOR.caption }}>{t('advice.waiting')}</div>
                 : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
-                      {[...reviewedRounds].reverse().map((round) => {
+                      {[...reviewedRounds].reverse().map((round, revIndex) => {
                         const kind = reviewKind(round)
                         const open = expandedReview === round.seq
+                        // Numbered by REVIEW ordinal, not by loop round: the
+                        // first drive of a fresh session has nothing to review,
+                        // so round numbers would start the list at "2".
+                        const ordinal = reviewedRounds.length - revIndex
                         return (
                           <div key={round.seq}>
                             <div
@@ -1268,10 +1318,24 @@ export function KernelOptTab(
                                   ? t('advice.audit')
                                   : kind === 'challenge'
                                     ? t('advice.challenge')
-                                    : kind === 'wrapup' ? t('advice.wrapup') : t('advice.round', { n: round.round ?? '—' })}
+                                    : kind === 'wrapup' ? t('advice.wrapup') : t('advice.round', { n: ordinal })}
                               </span>
                               {round.review === 'ok'
-                                ? <span style={{ color: COLOR.ok }}>✓ {t('advice.ok')}</span>
+                                ? (
+                                    <>
+                                      <span style={{ flex: 'none', color: COLOR.ok }}>✓ {t('advice.ok')}</span>
+                                      {round.reviewNote !== undefined
+                                        ? (
+                                            <span style={{
+                                              color: COLOR.caption, whiteSpace: 'nowrap',
+                                              overflow: 'hidden', textOverflow: 'ellipsis',
+                                            }}>
+                                              {round.reviewNote}
+                                            </span>
+                                          )
+                                        : null}
+                                    </>
+                                  )
                                 : (
                                     <span style={{
                                       color: COLOR.dim, whiteSpace: 'nowrap',

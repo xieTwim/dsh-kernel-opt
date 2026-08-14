@@ -215,6 +215,21 @@ test('project: kernel-loop messages parse back into rounds (advice / OK / wrap-u
   assert.equal(rounds[3]?.budget, 20)
 })
 
+test('project: an approval note is parsed back off the OK line', () => {
+  seq = 0
+  const note = 'four families tried, best is replay-consistent'
+  const events: ProjectionEvent[] = [
+    loopMessage(continuationText(2, 3, 20, null, true, 0, undefined, true, true, 0, note)),
+    loopMessage(continuationText(3, 5, 20, null, true)),
+  ]
+  const { rounds } = project('s', events)
+  assert.equal(rounds[0]?.review, 'ok')
+  assert.equal(rounds[0]?.reviewNote, note)
+  // A bare approval keeps the verdict without inventing a note.
+  assert.equal(rounds[1]?.review, 'ok')
+  assert.equal(rounds[1]?.reviewNote, undefined)
+})
+
 test('project: closing-audit parses as audit round; review blocks cut at the closing anchors', () => {
   seq = 0
   const events: ProjectionEvent[] = [

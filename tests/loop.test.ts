@@ -3,7 +3,8 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
   adviceFromReply, challengeText, continuationText, decideContinuation, finalAuditText,
-  initialLoopState, reviewable, stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
+  initialLoopState, planStale, reviewable, stagnationCount, supervisorDigest,
+  unreviewedEvals, wrapUpText,
 } from '../src/loop.ts'
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
@@ -46,9 +47,9 @@ test('decideContinuation: a challenged finalize no longer ends the run', () => {
 })
 
 test('adviceFromReply: DONE approves like OK (headroom challenge)', () => {
-  assert.equal(adviceFromReply('DONE'), null)
-  assert.equal(adviceFromReply('done.'), null)
-  assert.equal(adviceFromReply('Try tiling the reduction.'), 'Try tiling the reduction.')
+  assert.equal(adviceFromReply('DONE').advice, null)
+  assert.equal(adviceFromReply('done.').advice, null)
+  assert.equal(adviceFromReply('Try tiling the reduction.').advice, 'Try tiling the reduction.')
 })
 
 test('challengeText: keeps loop anchors, states the finalize is provisional', () => {
@@ -85,13 +86,50 @@ test('reviewable: false only while the log carries no evaluations and no plans',
   assert.equal(reviewable(planned), true)
 })
 
-test('adviceFromReply: OK and empty suppress advice; long advice truncates', () => {
-  assert.equal(adviceFromReply('OK'), null)
-  assert.equal(adviceFromReply('ok.'), null)
-  assert.equal(adviceFromReply('  \n'), null)
-  assert.equal(adviceFromReply('Switch families.'), 'Switch families.')
+test('adviceFromReply: approval carries its note; advice truncates', () => {
+  assert.deepEqual(adviceFromReply('OK'), { advice: null, note: null })
+  assert.deepEqual(adviceFromReply('ok.'), { advice: null, note: null })
+  assert.deepEqual(adviceFromReply('  \n'), { advice: null, note: null })
+  // The one-line observation the rubric now requires is captured, not dropped.
+  assert.deepEqual(
+    adviceFromReply('OK: four families tried, best is replay-consistent.'),
+    { advice: null, note: 'four families tried, best is replay-consistent.' },
+  )
+  assert.deepEqual(
+    adviceFromReply('DONE: NEON path sits at the 1-exp/element floor.'),
+    { advice: null, note: 'NEON path sits at the 1-exp/element floor.' },
+  )
+  assert.deepEqual(adviceFromReply('Switch families.'), { advice: 'Switch families.', note: null })
   const long = adviceFromReply('x'.repeat(700))
-  assert.ok(long !== null && long.length <= 601)
+  assert.ok(long.advice !== null && long.advice.length <= 601)
+})
+
+test('approval notes ride the OK line in every delivery kind', () => {
+  const note = 'four families tried, best is replay-consistent'
+  assert.ok(continuationText(2, 3, 20, null, true, 0, undefined, true, true, 0, note)
+    .includes(`${REVIEW_OK_LINE} ${note}`))
+  assert.ok(wrapUpText(5, 5, 'budget', 'kernel_finalize', null, true, note).includes(`${REVIEW_OK_LINE} ${note}`))
+  assert.ok(finalAuditText(null, note).includes(`${REVIEW_OK_LINE} ${note}`))
+  // Without a note the bare line still parses as an approval.
+  assert.ok(finalAuditText(null).includes(REVIEW_OK_LINE))
+})
+
+test('planStale: a full pace batch of evaluations since the last plan', () => {
+  const plans = [{ seq: 10, phase: 'tune', approach: 'v6' }]
+  const withPlan = (its: WireIteration[]): WireSeries => ({ ...series(its), plans })
+  assert.equal(planStale(withPlan([done(11, 5), done(12, 4)]), 3), false)
+  assert.equal(planStale(withPlan([done(11, 5), done(12, 4), done(13, 4)]), 3), true)
+  // Evaluations BEFORE the plan do not age it; no plan at all is not stale.
+  assert.equal(planStale(withPlan([done(1, 5), done(2, 4), done(3, 4)]), 3), false)
+  assert.equal(planStale(series([done(1, 5), done(2, 4), done(3, 4)]), 3), false)
+})
+
+test('continuation asks for a fresh plan once the plan card fell behind', () => {
+  const stale = continuationText(3, 6, 20, null, false, 0, 'kernel_finalize', true, true, 3, null, true)
+  assert.ok(stale.includes('Your last kernel_plan predates the recent evaluations'))
+  assert.ok(stale.includes('ONLY channel'))
+  assert.ok(!continuationText(3, 6, 20, null, false, 0, 'kernel_finalize', true, true, 3, null, false)
+    .includes('predates the recent evaluations'))
 })
 
 test('digest and continuation text carry budget state and advice', () => {

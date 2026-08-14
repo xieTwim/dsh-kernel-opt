@@ -118,6 +118,12 @@ export interface WireRound {
    * the advice text when it objected, absent when no review ran.
    */
   review?: string
+  /**
+   * The supervisor's one-line observation when it approved — what that review
+   * checked and saw. Absent on objections (the advice IS the record) and on
+   * approvals from before the note was required.
+   */
+  reviewNote?: string
   /** This message was the wrap-up delivery (budget / no-progress ending). */
   wrapUp?: boolean
   /** This message was the closing audit after a finalized run. */
