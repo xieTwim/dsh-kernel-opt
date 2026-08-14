@@ -586,7 +586,7 @@ function Chart(props: {
               ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={13} fill={COLOR.ok}>★</text>
               : null}
             {finalPick
-              ? <text x={cx} y={cy - (isBest ? 21 : 8)} textAnchor="middle" fontSize={12} fill={COLOR.warn}>⚑</text>
+              ? <text x={cx} y={cy - (isBest ? 21 : 8)} textAnchor="middle" fontSize={12} fill={COLOR.curve}>⚑</text>
               : null}
           </g>
         )
@@ -615,7 +615,7 @@ const cardStyle: CSSProperties = {
   border: `1px solid ${COLOR.border}`,
   borderRadius: 12,
   background: COLOR.tip,
-  padding: '10px 14px',
+  padding: '14px 16px',
 }
 
 /** Chip-shaped select for the supervisor model picker. */
@@ -949,7 +949,7 @@ function SuperviseToggle(props: { control: WireControl; t: T; onToggle: () => vo
     <button
       type="button"
       style={{
-        ...buttonStyle(enabled ? COLOR.warn : undefined),
+        ...buttonStyle(enabled ? COLOR.curve : undefined),
         ...(configured ? {} : disabledBtnStyle),
       }}
       disabled={!configured}
@@ -1091,12 +1091,15 @@ export function KernelOptTab(
 
   return (
     <div style={{
-      padding: '16px 20px', maxWidth: 860, margin: '0 auto',
-      display: 'flex', flexDirection: 'column', gap: 14,
+      padding: '20px 20px 28px', maxWidth: 860, margin: '0 auto',
+      display: 'flex', flexDirection: 'column', gap: 20,
       fontFamily: 'system-ui', color: COLOR.text,
     }}>
-      {/* controls: one row for the loop, one for supervision, then data chips */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* controls: one row for the loop, one for supervision, then data chips.
+          The group keeps a tighter internal rhythm than the gap that separates
+          it from the data below, so it reads as one band rather than four
+          loose rows. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {control?.loop.armed === true
             ? (
@@ -1179,7 +1182,7 @@ export function KernelOptTab(
           : null}
         {iterations.length > 0 || (series !== null && series.profileSeqs.length > 0)
           ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 4 }}>
                 <span style={chipStyle} title={t('tip.iters')}>
                   {t('chips.iterations', { count: iterations.length - wrapUpChecks })}
                 </span>
@@ -1222,7 +1225,7 @@ export function KernelOptTab(
       {/* curve */}
       {iterations.length > 0
         ? (
-            <div style={cardStyle}>
+            <div style={{ ...cardStyle, padding: '12px 10px 8px' }}>
               <Chart
                 series={series as WireSeries}
                 bestLabel={t('axis.best')}
@@ -1237,7 +1240,7 @@ export function KernelOptTab(
         ? null
         : (
       <div style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>{t('plan.title')}</span>
           {latestPlan !== undefined
             ? (
@@ -1312,8 +1315,8 @@ export function KernelOptTab(
           survives restarts and replays with the rest of the projection. */}
       {reviewedRounds.length > 0 || earlierReviews > 0 || control?.supervisor.enabled === true
         ? (
-            <div style={{ ...cardStyle, borderColor: COLOR.warn }}>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: COLOR.warn }}>{t('advice.title')}</div>
+            <div style={cardStyle}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('advice.title')}</div>
               {reviewedRounds.length === 0
                 ? <div style={{ fontSize: 13, color: COLOR.caption }}>{t('advice.waiting')}</div>
                 : (
@@ -1328,7 +1331,7 @@ export function KernelOptTab(
                         return (
                           <div key={round.seq}>
                             <div
-                              style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: '22px', cursor: 'pointer' }}
+                              style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: '24px', cursor: 'pointer' }}
                               title={t('advice.expandHint')}
                               onClick={() => { setExpandedReview(open ? null : round.seq) }}
                             >
@@ -1388,7 +1391,7 @@ export function KernelOptTab(
       {iterations.length > 0
         ? (
             <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '8px 14px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
+              <div style={{ padding: '11px 16px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
                 {t('table.title')}
               </div>
               <div style={{ maxHeight: 420, overflowY: 'auto' }}>
@@ -1407,7 +1410,7 @@ export function KernelOptTab(
                       <div
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
-                          padding: '5px 14px', fontSize: 13, lineHeight: '22px',
+                          padding: '6px 16px', fontSize: 13, lineHeight: '22px',
                           borderBottom: `1px solid ${COLOR.border}`,
                           cursor: 'pointer',
                         }}
@@ -1433,7 +1436,7 @@ export function KernelOptTab(
                                 title={t('tip.wrapup')}
                                 style={{
                                   flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
-                                  borderRadius: 4, border: `1px solid ${COLOR.border}`, color: COLOR.warn,
+                                  borderRadius: 4, border: `1px solid ${COLOR.border}`, color: COLOR.caption,
                                 }}
                               >
                                 {t('row.wrapup')}
@@ -1459,7 +1462,7 @@ export function KernelOptTab(
                           : null}
                         {isBest ? <span style={{ flex: 'none', color: COLOR.ok }} title={t('tip.best')}>★</span> : null}
                         {p.finalized === true && p.channel !== 'replay'
-                          ? <span style={{ flex: 'none', color: COLOR.warn }} title={t('tip.final')}>⚑ {t('table.final')}</span>
+                          ? <span style={{ flex: 'none', color: COLOR.curve }} title={t('tip.final')}>⚑ {t('table.final')}</span>
                           : null}
                         <span
                           style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}
