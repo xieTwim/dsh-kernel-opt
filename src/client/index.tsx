@@ -69,7 +69,7 @@ const zh = {
   'advice.title': '监督记录',
   'advice.waiting': '监督已开启：循环每次驱动 Agent 继续之前，监督模型会先复审当前进展；结论与建议会自动转交 Agent 并记录在此。',
   'advice.round': '第 {n} 次复审',
-  'advice.earlier': '（更早的 {n} 条复审记录未显示，完整历史保留在会话日志中）',
+  'advice.earlier': '（此前循环的 {n} 条复审记录未显示，完整历史保留在会话日志中）',
   'reason.finalized': '已完成收尾',
   'reason.budget': '迭代次数已用完，已请求收尾',
   'reason.no-progress': '连续无进展，已请求收尾',
@@ -98,7 +98,7 @@ const zh = {
   'chips.wrapup': '收尾评测 {count} 次',
   'tip.iters': '循环内完成的优化迭代（不含收尾评测）',
   'tip.wrapup': '循环结束后的收尾评测（最终验证与复测），不计入迭代预算',
-  'tip.replay': '插件重放评测命令独立测得',
+  'tip.replay': '插件对最终版本重放评测命令独立测得',
   'row.channelTool': '工具',
   'tip.tool': '由注册评测工具直接返回，非 Agent 转述',
   'tip.final': '收尾时选定的最终版本',
@@ -146,7 +146,7 @@ const en = {
   'advice.title': 'Supervision log',
   'advice.waiting': 'Supervision on: before each continuation the supervisor reviews progress first; its conclusions and advice are handed to the agent and recorded here.',
   'advice.round': 'review {n}',
-  'advice.earlier': '({n} earlier review records hidden; the full history stays in the session log)',
+  'advice.earlier': '({n} review records from earlier loop runs hidden; the full history stays in the session log)',
   'reason.finalized': 'finalized',
   'reason.budget': 'iteration limit reached, wrap-up requested',
   'reason.no-progress': 'stalled, wrap-up requested',
@@ -175,7 +175,7 @@ const en = {
   'chips.wrapup': '{count} wrap-up checks',
   'tip.iters': 'Optimization iterations completed in the loop (wrap-up checks excluded)',
   'tip.wrapup': 'Wrap-up evaluation after the loop ended (final verification / replay); not counted against the iteration budget',
-  'tip.replay': 'Measured by the plugin replaying the recorded evaluation command',
+  'tip.replay': 'Measured by the plugin replaying the evaluation command against the final version',
   'row.channelTool': 'tool',
   'tip.tool': 'Returned directly by a registered evaluator tool, not agent-relayed',
   'tip.final': 'The final version selected at wrap-up',
@@ -358,6 +358,9 @@ function chartModel(measured: readonly WireIteration[], count: number): ChartMod
     const band = quantile(sorted, 0.9) * 1.25
     if (band < hi) hi = band
   }
+  // Headroom above the domain: without it a single-point (or new-best-last)
+  // chart pins its dot flush to the top frame, colliding with the labels.
+  hi *= 1.015
   const lo = min * 0.97
   const log = lo > 0 && hi / lo > 20
   const toAxis = (v: number): number => (log ? Math.log10(v) : v)
@@ -366,8 +369,11 @@ function chartModel(measured: readonly WireIteration[], count: number): ChartMod
   const innerW = CHART.w - CHART.l - CHART.r
   const innerH = CHART.h - CHART.t - CHART.b
   const denom = Math.max(1, count - 1)
+  // Horizontal inset keeps first/last points (and their ★/⚑ marks) off the
+  // frame edges.
+  const xPad = 14
   return {
-    x: index => CHART.l + (innerW * index) / denom,
+    x: index => CHART.l + xPad + ((innerW - 2 * xPad) * index) / denom,
     y: (latencyMs) => {
       const v = Math.min(toAxis(latencyMs), axLo + span)
       return CHART.t + innerH * (1 - (v - axLo) / span)
@@ -443,20 +449,26 @@ function Chart(props: {
         )
       })}
 
-      {/* best dashed line */}
+      {/* best dashed line — labeled at the LEFT end, away from the newest
+          points clustering at the right edge; the label flips below the line
+          when the line hugs the top frame. */}
       {best?.latencyMs !== undefined
-        ? (
-            <g>
-              <line
-                x1={CHART.l} x2={CHART.w - CHART.r}
-                y1={model.y(best.latencyMs)} y2={model.y(best.latencyMs)}
-                stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
-              />
-              <text x={CHART.w - CHART.r} y={model.y(best.latencyMs) - 4} textAnchor="end" fontSize={11} fill={COLOR.ok}>
-                {bestLabel} {formatLatency(best.latencyMs)}
-              </text>
-            </g>
-          )
+        ? (() => {
+            const bestY = model.y(best.latencyMs)
+            const below = bestY - CHART.t < 16
+            return (
+              <g>
+                <line
+                  x1={CHART.l} x2={CHART.w - CHART.r}
+                  y1={bestY} y2={bestY}
+                  stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
+                />
+                <text x={CHART.l + 8} y={below ? bestY + 15 : bestY - 5} textAnchor="start" fontSize={11} fill={COLOR.ok}>
+                  {bestLabel} {formatLatency(best.latencyMs)}
+                </text>
+              </g>
+            )
+          })()
         : null}
 
       {/* curve through measured points */}
@@ -469,11 +481,15 @@ function Chart(props: {
         const status = statusOf(p)
         const color = STATUS_COLOR[status]
         const cx = model.x(i)
-        const marks = `${bestIndex === i ? ' ★' : ''}${p.finalized === true ? ' ⚑' : ''}`
+        // The ⚑ marks the finalize PICK only; the replay row re-measures that
+        // same final version and carries its own 复测 badge in the table.
+        const finalPick = p.finalized === true && p.channel !== 'replay'
+        const marks = `${bestIndex === i ? ' ★' : ''}${finalPick ? ' ⚑' : ''}`
         const tip = `#${String(i + 1)} · ${p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'} · ${statusLabel(status)}${marks}`
         if (p.latencyMs === undefined) {
-          // Unmeasured (pending / failed) points sit on the baseline.
-          const cy = CHART.h - CHART.b
+          // Unmeasured (pending / failed) points sit just below the axis —
+          // off the value scale, so they never read as a low latency.
+          const cy = CHART.h - CHART.b + 8
           return (
             <g key={p.seq}>
               <title>{tip}</title>
@@ -515,7 +531,7 @@ function Chart(props: {
             {isBest
               ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={13} fill={COLOR.ok}>★</text>
               : null}
-            {p.finalized === true
+            {finalPick
               ? <text x={cx} y={cy - (isBest ? 21 : 8)} textAnchor="middle" fontSize={12} fill={COLOR.warn}>⚑</text>
               : null}
           </g>
@@ -911,7 +927,7 @@ export function KernelOptTab(
   const { t, sessionId } = props
   const { series, refetch } = useSeries(sessionId)
   const models = useModels()
-  const [budgetDraft, setBudgetDraft] = useState('20')
+  const [budgetDraft, setBudgetDraft] = useState<string | null>(null)
   const [expandedSeq, setExpandedSeq] = useState<number | null>(null)
 
   /** Drive the control route, then re-pull so the panel reflects it now. */
@@ -939,6 +955,11 @@ export function KernelOptTab(
   // The supervision card scopes to the CURRENT loop run: each re-arm resets
   // the round counter, so without segmentation every historical run's
   // "round 1" would pile up in the card. Earlier runs collapse to a count.
+  // The budget field mirrors the run's armed budget once one exists (kept in
+  // sync with the composer popover through the shared control state); the
+  // config default only seeds a session that has never armed.
+  const budgetValue = budgetDraft
+    ?? String(control !== undefined && control.loop.budget > 0 ? control.loop.budget : control?.loop.defaultBudget ?? 20)
   const runStart = latestRunStart(rounds)
   const reviewedRounds = rounds.slice(runStart).filter(r => r.review !== undefined)
   const earlierReviews = rounds.slice(0, runStart).filter(r => r.review !== undefined).length
@@ -986,7 +1007,7 @@ export function KernelOptTab(
                     type="number"
                     min={1}
                     max={9999}
-                    value={budgetDraft}
+                    value={budgetValue}
                     title={t('ctl.budget')}
                     style={inputStyle}
                     onChange={(event) => { setBudgetDraft(event.target.value) }}
@@ -995,7 +1016,7 @@ export function KernelOptTab(
                     type="button"
                     style={primaryBtnStyle}
                     onClick={() => {
-                      const budget = Number(budgetDraft)
+                      const budget = Number(budgetValue)
                       void post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
                     }}
                   >
@@ -1233,7 +1254,7 @@ export function KernelOptTab(
                             )
                           : null}
                         {isBest ? <span style={{ flex: 'none', color: COLOR.ok }} title={t('tip.best')}>★</span> : null}
-                        {p.finalized === true
+                        {p.finalized === true && p.channel !== 'replay'
                           ? <span style={{ flex: 'none', color: COLOR.warn }} title={t('tip.final')}>⚑ {t('table.final')}</span>
                           : null}
                         <span
@@ -1287,7 +1308,7 @@ export function ChatLoopButton(
     }
     refetch()
   }
-  const budgetValue = budgetDraft ?? String(control.loop.defaultBudget)
+  const budgetValue = budgetDraft ?? String(control.loop.budget > 0 ? control.loop.budget : control.loop.defaultBudget)
   const arm = async (): Promise<void> => {
     const budget = Number(budgetValue)
     await post('loop-arm', Number.isInteger(budget) && budget > 0 ? { budget } : {})
