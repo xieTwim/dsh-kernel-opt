@@ -13,7 +13,7 @@ import {
 import type { WireIteration, WireSeries } from '../src/wire.ts'
 
 function series(iterations: WireIteration[], bestIndex: number | null = null): WireSeries {
-  return { sessionId: 's', updatedAt: 0, iterations, plans: [], profileSeqs: [], rounds: [], bestIndex }
+  return { sessionId: 's', updatedAt: 0, iterations, plans: [], envs: [], profileSeqs: [], rounds: [], bestIndex }
 }
 function done(seq: number, latencyMs: number, correct = true): WireIteration {
   return { seq, tool: 'kernel_evaluate', latencyMs, correct, evaluationId: String(seq).padStart(4, '0') }
@@ -112,6 +112,26 @@ test('approval notes ride the OK line in every delivery kind', () => {
   assert.ok(finalAuditText(null, note).includes(`${REVIEW_OK_LINE} ${note}`))
   // Without a note the bare line still parses as an approval.
   assert.ok(finalAuditText(null).includes(REVIEW_OK_LINE))
+})
+
+test('continuation demands kernel_env while the machine is unknown', () => {
+  const demand = continuationText(2, 3, 20, null, false, 0, 'kernel_finalize', true, true, 3, null, false, false)
+  assert.ok(demand.includes('No kernel_env is on record'))
+  assert.ok(demand.includes('where these evaluations actually run'))
+  assert.ok(!continuationText(2, 3, 20, null, false, 0, 'kernel_finalize', true, true, 3, null, false, true)
+    .includes('No kernel_env is on record'))
+})
+
+test('supervisor digest states the environment, or that none was reported', () => {
+  const state = { ...initialLoopState(), armed: true, budget: 20, round: 2 }
+  assert.ok(supervisorDigest(series([done(1, 10)]), state).includes('Environment: not reported'))
+  const withEnv = {
+    ...series([done(1, 10)]),
+    envs: [{ seq: 5, location: 'kernel-box', device: 'H100 80GB x1', constraint: 'CUDA_VISIBLE_DEVICES=0' }],
+  }
+  const digest = supervisorDigest(withEnv, state)
+  assert.ok(digest.includes('H100 80GB x1 @ kernel-box'))
+  assert.ok(digest.includes('CUDA_VISIBLE_DEVICES=0'))
 })
 
 test('planStale: a full pace batch of evaluations since the last plan', () => {
@@ -219,7 +239,7 @@ test('finalAuditText: OK closes on the record; findings demand bounded correctio
 test('stagnationCount counts completed evals after best; continuation nudges from 3', () => {
   const mk = (latencyMs: number | undefined, correct = true) => ({ seq: 1, tool: 'bash', ...(latencyMs !== undefined ? { latencyMs } : {}), correct })
   const series = {
-    sessionId: 's', updatedAt: 0, plans: [], profileSeqs: [], rounds: [],
+    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], rounds: [],
     iterations: [mk(2.0), mk(1.0), mk(1.5), mk(1.4), mk(undefined, false)],
     bestIndex: 1,
   }
@@ -249,7 +269,7 @@ test('taskless continuation redirects to a workspace inventory, same anchor', ()
 
 test('supervisor digest carries provenance for self-reported rows', () => {
   const series = {
-    sessionId: 's', updatedAt: 0, plans: [], profileSeqs: [], rounds: [], bestIndex: 0,
+    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], rounds: [], bestIndex: 0,
     iterations: [
       { seq: 1, tool: 'bash', channel: 'shell' as const, command: 'bash scripts/bench.sh', latencyMs: 1.2, correct: true },
       { seq: 2, tool: 'kernel_evaluate', evaluationId: '0002', latencyMs: 1.5, correct: true },

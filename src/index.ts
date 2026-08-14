@@ -155,6 +155,7 @@ function resolveProjection(config: Config): ProjectionConfig {
     changeTools: config.changeTools ?? DEFAULT_PROJECTION.changeTools,
     shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
     planTool: DEFAULT_PROJECTION.planTool,
+    envTool: DEFAULT_PROJECTION.envTool,
   }
 }
 
@@ -350,6 +351,55 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
     execute: async (args) => {
       return `Plan recorded (${args.phase}): ${args.approach}`
+    },
+  }))
+
+  // kernel_env — the environment the MEASUREMENTS happen in, reported by the
+  // agent rather than probed here. The plugin runs where the panel is served,
+  // which is not necessarily where the benchmark executes (remote box, cloud
+  // runner, container), and even on one host the user may have ruled a device
+  // out; only the agent knows what it actually decided to run on.
+  ctx.tools.register(defineTool({
+    name: 'kernel_env',
+    description: 'Report the environment your EVALUATIONS run in, to the human evaluation panel. '
+      + 'Call once after inventory and BEFORE the first evaluation, and again whenever the '
+      + 'environment changes (you move to a remote host, switch device, or the user constrains it). '
+      + 'Report where the BENCHMARK executes, not where you are thinking: if the user pointed you at '
+      + 'a remote machine or a cloud runner, describe THAT machine. If the user ruled a device out '
+      + '("CPU only", a pinned CUDA_VISIBLE_DEVICES), state the device you are actually using and put '
+      + 'the instruction in constraint. Read the facts, never guess them, and name the commands you '
+      + 'read them from in probe.',
+    parameters: {
+      location: {
+        type: 'string',
+        required: true,
+        description: 'Where evaluations execute, e.g. "本机 (macOS)" / "kernel-box via rt" / "Modal B200 容器".',
+      },
+      device: {
+        type: 'string',
+        required: true,
+        description: 'The compute device the timed runs use, e.g. "NVIDIA H100 80GB ×1" / "Apple M5 CPU (10 核)".',
+      },
+      constraint: {
+        type: 'string',
+        description: 'User/task instruction that decided the device, e.g. "用户要求仅用 CPU" / "CUDA_VISIBLE_DEVICES=0".',
+      },
+      versions: {
+        type: 'object',
+        // Open map: the useful version keys differ per backend (cuda/driver on
+        // NVIDIA, none of them on a CPU-only run), so the schema fixes none.
+        additionalProperties: true,
+        description: 'Key toolchain versions as read, e.g. {"python":"3.11.9","torch":"2.6.0+cu124","cuda":"12.4","driver":"550.90"}.',
+      },
+      probe: { type: 'string', description: 'Command(s) these facts were read from, e.g. "nvidia-smi; python -c ...".' },
+      notes: { type: 'string', description: 'Anything qualifying the measurements (clocks not locked, shared host, …).' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    execute: async (args) => {
+      return `Environment recorded: ${args.device} @ ${args.location}`
     },
   }))
 
@@ -617,6 +667,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             state.round, decision.evalsDone, state.budget, advice,
             reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
             series.plans.length > 0, evalsPerTurn, note, planStale(series, evalsPerTurn),
+            series.envs.length > 0,
           ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },

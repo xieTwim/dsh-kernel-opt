@@ -1,7 +1,7 @@
 {
   "name": "@xietwim/dsh-kernel-opt",
   "description": "Kernel-optimization plugin for DeepSeek Harness: live latency curve + run controls + kernel loop with wrap-up + optional second-model supervision (works with any bench tool)",
-  "version": "0.10.5",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "license": "MIT",

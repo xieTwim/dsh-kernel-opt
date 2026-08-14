@@ -5,7 +5,7 @@
  * all agree by construction.
  * @module
  */
-import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
+import type { WireChange, WireEnv, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CHALLENGE_LINE, CONTINUE_TRAILER, EVAL_TRAILER_PREFIX,
   LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE,
@@ -29,6 +29,8 @@ export interface ProjectionConfig {
   readonly finalizeTools: readonly string[]
   /** Exact name of the plan tool. */
   readonly planTool: string
+  /** Tool the agent reports its evaluation environment with. */
+  readonly envTool: string
   /** Match list for structured file-change tools (write/edit shapes). */
   readonly changeTools: readonly string[]
   /**
@@ -46,6 +48,7 @@ export const DEFAULT_PROJECTION: ProjectionConfig = {
   profileTools: ['kernel_profile'],
   finalizeTools: ['run_finalize', 'kernel_finalize'],
   planTool: 'kernel_plan',
+  envTool: 'kernel_env',
   changeTools: ['write', 'edit'],
   shellTools: ['bash'],
 }
@@ -463,6 +466,7 @@ export function project(
 ): WireSeries {
   const iterations: WireIteration[] = []
   const plans: WirePlan[] = []
+  const envs: WireEnv[] = []
   const profileSeqs: number[] = []
   const rounds: WireRound[] = []
   const finalizedIds = new Set<string>()
@@ -492,6 +496,27 @@ export function project(
           if (typeof args['hypothesis'] === 'string' && args['hypothesis'].length > 0) plan.hypothesis = args['hypothesis']
           if (typeof args['next'] === 'string' && args['next'].length > 0) plan.next = args['next']
           plans.push(plan)
+        }
+        continue
+      }
+      if (call.name === config.envTool) {
+        const args = parseResultJson(call.argumentsJson)
+        if (args !== null && typeof args['location'] === 'string' && typeof args['device'] === 'string') {
+          const env: WireEnv = { seq: event.seq, location: args['location'], device: args['device'] }
+          for (const key of ['constraint', 'probe', 'notes'] as const) {
+            const value = args[key]
+            if (typeof value === 'string' && value.length > 0) env[key] = value
+          }
+          const versions = asRecord(args['versions'])
+          if (versions !== null) {
+            const pairs: Record<string, string> = {}
+            for (const [vName, value] of Object.entries(versions)) {
+              if (typeof value === 'string' && value.length > 0) pairs[vName] = value
+              else if (typeof value === 'number') pairs[vName] = String(value)
+            }
+            if (Object.keys(pairs).length > 0) env.versions = pairs
+          }
+          envs.push(env)
         }
         continue
       }
@@ -628,5 +653,5 @@ export function project(
     if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) bestIndex = i
   }
 
-  return { sessionId, updatedAt: Date.now(), iterations, plans, profileSeqs, rounds, bestIndex }
+  return { sessionId, updatedAt: Date.now(), iterations, plans, envs, profileSeqs, rounds, bestIndex }
 }
