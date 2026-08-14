@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WireChange, WireControl, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
-import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, latestRunStart, samePath } from '../wire.ts'
+import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, inWrapUpPhase, latestRunStart, samePath } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -37,17 +37,17 @@ const zh = {
   'chips.iterations': '{count} 次迭代',
   'chips.best': '最佳 {latency}',
   'chips.profiles': '{count} 次 profile',
-  'chips.hacks': '{count} 次 reward-hack 拦截',
+  'chips.hacks': '{count} 次作弊检出',
   'chips.pending': '评测中…',
   'plan.title': '当前方案',
-  'plan.none': '模型尚未调用 kernel_plan 汇报方案。',
+  'plan.none': 'Agent 尚未汇报优化方案。',
   'plan.next': '下一步',
   'plan.count': '第 {n} 次汇报',
   'table.title': '迭代记录',
   'status.pending': '评测中',
   'status.ok': '通过',
   'status.wrong': '未通过',
-  'status.hack': 'reward-hack',
+  'status.hack': '作弊检出',
   'status.error': '失败',
   'axis.best': '最佳',
   'loop.armed': '循环运行中 · 已迭代 {done}/{budget} 次',
@@ -70,7 +70,7 @@ const zh = {
   'advice.waiting': '监督已开启：循环每次驱动 Agent 继续之前，监督模型会先复审当前进展；结论与建议会自动转交 Agent 并记录在此。',
   'advice.round': '第 {n} 次复审',
   'advice.earlier': '（更早的 {n} 条复审记录未显示，完整历史保留在会话日志中）',
-  'reason.finalized': '已 finalize',
+  'reason.finalized': '已完成收尾',
   'reason.budget': '迭代次数已用完，已请求收尾',
   'reason.no-progress': '连续无进展，已请求收尾',
   'reason.stopped': '手动停止',
@@ -91,7 +91,17 @@ const zh = {
   'row.channelReplay': '复测',
   'row.command': '来源命令',
   'row.unverifiedFinal': '最终数字未复测（自报值）',
-  'table.final': '提交',
+  'table.final': '最终',
+  'row.wrapup': '收尾',
+  'advice.wrapup': '收尾复审',
+  'chips.wrapup': '收尾评测 {count} 次',
+  'tip.iters': '循环内完成的优化迭代（不含收尾评测）',
+  'tip.wrapup': '循环结束后的收尾评测（最终验证与复测），不计入迭代预算',
+  'tip.selfReported': '数值由 Agent 运行评测命令后自行报告，插件未独立复测；展开行可见来源命令',
+  'tip.replay': '插件重放评测命令独立测得',
+  'tip.final': '收尾时选定的最终版本',
+  'tip.best': '当前最优结果',
+  'tip.ok': '正确性校验通过',
 } satisfies Record<string, string>
 /** Panel locale key union. */
 type LocaleKey = keyof typeof zh
@@ -105,7 +115,7 @@ const en = {
   'chips.hacks': '{count} reward-hacks caught',
   'chips.pending': 'evaluating…',
   'plan.title': 'Current plan',
-  'plan.none': 'The model has not reported a plan via kernel_plan yet.',
+  'plan.none': 'The agent has not reported an optimization plan yet.',
   'plan.next': 'Next',
   'plan.count': 'report #{n}',
   'table.title': 'Iterations',
@@ -157,6 +167,16 @@ const en = {
   'row.command': 'Command',
   'row.unverifiedFinal': 'final number not replayed (self-reported)',
   'table.final': 'final',
+  'row.wrapup': 'wrap-up',
+  'advice.wrapup': 'wrap-up review',
+  'chips.wrapup': '{count} wrap-up checks',
+  'tip.iters': 'Optimization iterations completed in the loop (wrap-up checks excluded)',
+  'tip.wrapup': 'Wrap-up evaluation after the loop ended (final verification / replay); not counted against the iteration budget',
+  'tip.selfReported': 'Reported by the agent from its own command run, not independently re-measured; expand the row for the producing command',
+  'tip.replay': 'Measured by the plugin replaying the recorded evaluation command',
+  'tip.final': 'The final version selected at wrap-up',
+  'tip.best': 'Best result so far',
+  'tip.ok': 'Correctness check passed',
 } satisfies Record<string, string>
 
 /** Poll cadence — the panel is a dashboard, not a ticker. */
@@ -918,6 +938,10 @@ export function KernelOptTab(
   const runStart = latestRunStart(rounds)
   const reviewedRounds = rounds.slice(runStart).filter(r => r.review !== undefined)
   const earlierReviews = rounds.slice(0, runStart).filter(r => r.review !== undefined).length
+  // Wrap-up-phase evaluations (finalize verification + plugin replay) are not
+  // budgeted optimization work: the chips split them out so "N 次迭代" stays
+  // aligned with the armed budget, and their table rows carry a 收尾 badge.
+  const wrapUpChecks = iterations.filter(p => p.channel === 'replay' || inWrapUpPhase(rounds, p.seq)).length
   const reasonLabel = (reason: string): string =>
     reason === 'finalized' || reason === 'budget' || reason === 'no-progress' || reason === 'stopped'
       ? t(`reason.${reason}`)
@@ -1006,7 +1030,12 @@ export function KernelOptTab(
         {iterations.length > 0 || (series !== null && series.profileSeqs.length > 0)
           ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                <span style={chipStyle}>{t('chips.iterations', { count: iterations.length })}</span>
+                <span style={chipStyle} title={t('tip.iters')}>
+                  {t('chips.iterations', { count: iterations.length - wrapUpChecks })}
+                </span>
+                {wrapUpChecks > 0
+                  ? <span style={{ ...chipStyle, color: COLOR.caption }} title={t('tip.wrapup')}>{t('chips.wrapup', { count: wrapUpChecks })}</span>
+                  : null}
                 {best?.latencyMs !== undefined
                   ? (
                       <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok, fontWeight: 500 }}>
@@ -1104,7 +1133,7 @@ export function KernelOptTab(
                       {[...reviewedRounds].reverse().map(round => (
                         <div key={round.seq} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: '20px' }}>
                           <span style={{ flex: 'none', minWidth: 56, color: COLOR.caption }}>
-                            {t('advice.round', { n: round.round ?? '—' })}
+                            {round.wrapUp === true ? t('advice.wrapup') : t('advice.round', { n: round.round ?? '—' })}
                           </span>
                           {round.review === 'ok'
                             ? <span style={{ color: COLOR.ok }}>✓ OK</span>
@@ -1167,20 +1196,41 @@ export function KernelOptTab(
                           {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
                         </span>
                         <span style={{ flex: 1 }} />
+                        {inWrapUpPhase(rounds, p.seq)
+                          ? (
+                              <span
+                                title={t('tip.wrapup')}
+                                style={{
+                                  flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
+                                  borderRadius: 4, border: `1px solid ${COLOR.border}`, color: COLOR.warn,
+                                }}
+                              >
+                                {t('row.wrapup')}
+                              </span>
+                            )
+                          : null}
                         {p.channel !== undefined
                           ? (
-                              <span style={{
-                                flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
-                                borderRadius: 4, border: `1px solid ${COLOR.border}`,
-                                color: p.channel === 'replay' ? COLOR.ok : COLOR.caption,
-                              }}>
+                              <span
+                                title={t(p.channel === 'replay' ? 'tip.replay' : 'tip.selfReported')}
+                                style={{
+                                  flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
+                                  borderRadius: 4, border: `1px solid ${COLOR.border}`,
+                                  color: p.channel === 'replay' ? COLOR.ok : COLOR.caption,
+                                }}
+                              >
                                 {t(p.channel === 'replay' ? 'row.channelReplay' : 'row.channelShell')}
                               </span>
                             )
                           : null}
-                        {isBest ? <span style={{ flex: 'none', color: COLOR.ok }}>★</span> : null}
-                        {p.finalized === true ? <span style={{ flex: 'none', color: COLOR.warn }}>⚑ {t('table.final')}</span> : null}
-                        <span style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}>
+                        {isBest ? <span style={{ flex: 'none', color: COLOR.ok }} title={t('tip.best')}>★</span> : null}
+                        {p.finalized === true
+                          ? <span style={{ flex: 'none', color: COLOR.warn }} title={t('tip.final')}>⚑ {t('table.final')}</span>
+                          : null}
+                        <span
+                          style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}
+                          title={status === 'ok' ? t('tip.ok') : undefined}
+                        >
                           {t(`status.${status}`)}
                         </span>
                       </div>

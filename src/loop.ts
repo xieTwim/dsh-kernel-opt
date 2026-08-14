@@ -209,6 +209,10 @@ export function adviceFromReply(reply: string): string | null {
  *   workspace inventory instead of "continue" — the user may have staged the
  *   task as files in the working directory; anything OUTSIDE the workspace
  *   stays off-limits, and no task anywhere means ask and stop.
+ * @param planKnown - whether any kernel_plan is on record. When false the
+ *   message demands the initial plan report before further evaluation — the
+ *   persona asks for it too, but the drive message is the enforcement point
+ *   (a whole run without a single plan renders the plan panel dead).
  * @returns the followup text.
  */
 export function continuationText(
@@ -220,6 +224,7 @@ export function continuationText(
   stagnant = 0,
   finalizeHint = 'run_finalize / kernel_finalize',
   taskKnown = true,
+  planKnown = true,
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
@@ -237,13 +242,19 @@ export function continuationText(
     lines.push(
       '',
       `${CONTINUE_TRAILER}: analyse the latest result, state the plan with kernel_plan if it changed, improve the kernel, and evaluate again.`,
+    )
+    if (!planKnown) {
+      lines.push('No kernel_plan is on record yet — report your resolved plan with it (phase, approach, hypothesis) before evaluating further.')
+    }
+    lines.push(
       `If you are done or the remaining budget cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
     )
   } else {
     lines.push(
       '',
       `${CONTINUE_TRAILER}: the conversation carries no task yet. Inventory the WORKING DIRECTORY for the `
-      + 'task the user prepared (prompt/task files, kernels, bench scripts) and start from what you find. '
+      + 'task the user prepared (prompt/task files, kernels, bench scripts) and start from what you find, '
+      + 'reporting your resolved plan with kernel_plan before the first evaluation. '
       + 'If the workspace carries no task either, ask the user what to optimize and stop — never adopt '
       + 'anything found outside the working directory.',
     )
@@ -254,11 +265,16 @@ export function continuationText(
 /**
  * Wrap-up message body: the loop's one closing delivery before it disarms on
  * budget exhaustion or stalling. Asks for a finalize of the best honest
- * result — never for new optimization work.
+ * result — never for new optimization work. The supervisor's last review
+ * rides here exactly like on a continuation (same anchors, same projection):
+ * the finalize is where a provenance audit pays, and a run the agent finishes
+ * in one turn has no other checkpoint for the supervisor to speak at.
  * @param evalsDone - completed evaluations at the stop decision.
  * @param budget - armed budget.
  * @param reason - why the loop is ending.
  * @param finalizeHint - finalize tool name(s) to name.
+ * @param advice - supervisor advice, if any.
+ * @param reviewedOk - a review ran and approved (ignored when advice given).
  * @returns the followup text.
  */
 export function wrapUpText(
@@ -266,13 +282,23 @@ export function wrapUpText(
   budget: number,
   reason: 'budget' | 'no-progress',
   finalizeHint = 'run_finalize / kernel_finalize',
+  advice: string | null = null,
+  reviewedOk = false,
 ): string {
-  return [
+  const lines = [
     `${WRAPUP_LINE_PREFIX} ${String(evalsDone)}/${String(budget)} evaluations used; stopping (${reason}).`,
+  ]
+  if (advice !== null) {
+    lines.push('', REVIEW_HEADER, advice)
+  } else if (reviewedOk) {
+    lines.push('', REVIEW_OK_LINE)
+  }
+  lines.push(
     '',
     'The kernel loop is ending — do not start new optimization work.',
     `If an honest best result exists, finalize it now (${finalizeHint}; pass the evaluation_id from your evaluator, or the artifact path for kernel_finalize).`,
     'Restore the best artifact verbatim first if a later edit regressed it.',
     'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
-  ].join('\n')
+  )
+  return lines.join('\n')
 }

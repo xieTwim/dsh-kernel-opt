@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import {
   adviceFromReply, continuationText, decideContinuation, initialLoopState, reviewable, stagnationCount, supervisorDigest, wrapUpText,
 } from '../src/loop.ts'
-import { CONTINUE_TRAILER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
+import { CONTINUE_TRAILER, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
 import type { WireIteration, WireSeries } from '../src/wire.ts'
 
 function series(iterations: WireIteration[], bestIndex: number | null = null): WireSeries {
@@ -85,6 +85,28 @@ test('wrapUpText asks for finalize, never for new work', () => {
   assert.ok(text.includes('20/20'))
   assert.ok(text.includes('run_finalize'))
   assert.ok(text.includes('do not start new optimization work'))
+})
+
+test('wrapUpText carries the supervisor review block like a continuation', () => {
+  const advised = wrapUpText(5, 5, 'budget', 'kernel_finalize', 'Verify provenance of #4 before finalizing.')
+  assert.ok(advised.startsWith(WRAPUP_LINE_PREFIX))
+  assert.ok(advised.includes(REVIEW_HEADER))
+  assert.ok(advised.includes('Verify provenance of #4 before finalizing.'))
+  const approved = wrapUpText(5, 5, 'budget', 'kernel_finalize', null, true)
+  assert.ok(approved.includes(REVIEW_OK_LINE))
+  // No review ran: neither anchor appears; advice wins over the OK line.
+  const silent = wrapUpText(5, 5, 'budget')
+  assert.ok(!silent.includes(REVIEW_HEADER) && !silent.includes(REVIEW_OK_LINE))
+  assert.ok(!advised.includes(REVIEW_OK_LINE))
+})
+
+test('continuation demands the initial kernel_plan while none is on record', () => {
+  const demand = continuationText(2, 3, 20, null, false, 0, 'kernel_finalize', true, false)
+  assert.ok(demand.includes('No kernel_plan is on record yet'))
+  assert.ok(!continuationText(2, 3, 20, null, false, 0, 'kernel_finalize', true, true)
+    .includes('No kernel_plan is on record yet'))
+  // The taskless inventory branch demands the plan inline.
+  assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false).includes('kernel_plan'))
 })
 
 test('stagnationCount counts completed evals after best; continuation nudges from 3', () => {
