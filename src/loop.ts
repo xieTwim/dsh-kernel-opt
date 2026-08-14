@@ -358,6 +358,10 @@ export const HEADROOM_SYSTEM = [
  * verdict carries its own one-line observation (`OK: …` / `DONE: …`): a bare
  * "OK" recorded nothing the human could read, so the note is the record of
  * what that review actually saw.
+ *
+ * Callers MUST reject an empty reply before calling: "no advice" here means
+ * the reviewer looked and found nothing to say, and a silent reviewer that
+ * reached this function would be recorded as having approved the run.
  * @param reply - raw supervisor reply.
  * @returns `advice` when it objected (else null), and `note` on approval.
  */
