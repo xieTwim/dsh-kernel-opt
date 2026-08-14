@@ -94,6 +94,7 @@ const zh = {
   'table.final': '最终',
   'row.wrapup': '收尾',
   'advice.wrapup': '收尾复审',
+  'advice.audit': '终审',
   'chips.wrapup': '收尾评测 {count} 次',
   'tip.iters': '循环内完成的优化迭代（不含收尾评测）',
   'tip.wrapup': '循环结束后的收尾评测（最终验证与复测），不计入迭代预算',
@@ -169,6 +170,7 @@ const en = {
   'table.final': 'final',
   'row.wrapup': 'wrap-up',
   'advice.wrapup': 'wrap-up review',
+  'advice.audit': 'final review',
   'chips.wrapup': '{count} wrap-up checks',
   'tip.iters': 'Optimization iterations completed in the loop (wrap-up checks excluded)',
   'tip.wrapup': 'Wrap-up evaluation after the loop ended (final verification / replay); not counted against the iteration budget',
@@ -1133,7 +1135,9 @@ export function KernelOptTab(
                       {[...reviewedRounds].reverse().map(round => (
                         <div key={round.seq} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: '20px' }}>
                           <span style={{ flex: 'none', minWidth: 56, color: COLOR.caption }}>
-                            {round.wrapUp === true ? t('advice.wrapup') : t('advice.round', { n: round.round ?? '—' })}
+                            {round.audit === true
+                              ? t('advice.audit')
+                              : round.wrapUp === true ? t('advice.wrapup') : t('advice.round', { n: round.round ?? '—' })}
                           </span>
                           {round.review === 'ok'
                             ? <span style={{ color: COLOR.ok }}>✓ OK</span>
