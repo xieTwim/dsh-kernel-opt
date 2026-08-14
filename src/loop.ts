@@ -268,6 +268,14 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
     lines.push(`Provenance: ${String(shellCount)}/${String(series.iterations.length)} evaluations are self-reported `
       + '(parsed from agent-run shell output; cmd shown per row). A row whose cmd is not a benchmark invocation is fabricated.')
   }
+  // Whether it ever asked WHY the kernel is slow. Absence is a soft signal —
+  // only real profilers are recognised, not hand-written diagnostic scripts.
+  if (series.profileSeqs.length > 0) {
+    lines.push(`Profiling: ${String(series.profileSeqs.length)} profiler run(s) recorded.`)
+  } else if (evalsDone >= 3) {
+    lines.push('Profiling: no profiler invocation seen on the command lines — the run may be optimizing by '
+      + 'guesswork rather than measurement (hand-written diagnostic scripts would not be detected here).')
+  }
   const env = series.envs[series.envs.length - 1]
   if (env !== undefined) {
     lines.push(`Environment (agent-reported): ${env.device} @ ${env.location}`
@@ -306,6 +314,8 @@ export const SUPERVISOR_SYSTEM = [
   + '(a "tiling" plan whose diff only moves a constant) is a real miss — say so, and say what the edit would have to touch;',
   '- metrics: when the evaluator reports occupancy/bandwidth/cache numbers, read them. A kernel far from a stated '
   + 'roof has headroom the latency column alone does not show;',
+  '- diagnosis: several evaluations with no profiler run and no reported metrics is optimizing by guesswork — '
+  + 'ask for one profiled run before more variants;',
   '- plan hygiene: plans should exist and match what the table shows;',
   '- provenance: on [shell] rows the trajectory is self-reported — judge whether each cmd is a real benchmark invocation and whether the numbers move like real measurements;',
   '- pace: the drive caps evaluations per turn so the loop can steer mid-run; a turn that overran the cap is a discipline miss worth one line of advice;',
@@ -334,7 +344,9 @@ export const HEADROOM_SYSTEM = [
   '- untried families are evidence of headroom: different algorithm/layout, different tiling or blocking,',
   '  fusion or launch-overhead removal, precision/vectorization, library or compiler paths, tuning of exposed parameters;',
   '- stopping IS justified when the remaining ideas are argued to be dominated, when measurements sit at a stated',
-  '  hardware or semantic floor, or when several distinct families all failed to beat the current best.',
+  '  hardware or semantic floor, or when several distinct families all failed to beat the current best;',
+  '- a run that never profiled and reports no metrics cannot claim it sits at a floor — it never located the',
+  '  bottleneck, so "no headroom" is a guess. Send it to profile once before accepting the ending.',
   'If the run is genuinely converged, reply `DONE: ` followed by ONE short sentence stating WHY no headroom remains '
   + '(which families were tried and what floor the measurements sit at). That sentence is shown to the human as the '
   + 'justification for ending the run, so never reply with a bare DONE.',

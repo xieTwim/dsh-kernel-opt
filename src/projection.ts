@@ -25,6 +25,16 @@ export interface ProjectionConfig {
   readonly benchTools: readonly string[]
   /** Match list for profiler calls. */
   readonly profileTools: readonly string[]
+  /**
+   * Profiler executables recognised on a shell command line, also ▲ markers.
+   * {@link ProjectionConfig.profileTools} only fires for a registered profiler
+   * TOOL, which the open-source shape has none of — the agent assembles its
+   * own entry and profiles through the shell — so without this the mark could
+   * never appear. Known limit: it recognises real profilers, not the
+   * hand-written diagnostic scripts an agent falls back on where none exists
+   * (a CPU box, an unsupported accelerator), so absence is weak evidence.
+   */
+  readonly profileCommands: readonly string[]
   /** Match list for finalize calls (their `evaluation_id` marks a point ★). */
   readonly finalizeTools: readonly string[]
   /** Exact name of the plan tool. */
@@ -46,6 +56,13 @@ export interface ProjectionConfig {
 export const DEFAULT_PROJECTION: ProjectionConfig = {
   benchTools: ['kernel_evaluate'],
   profileTools: ['kernel_profile'],
+  // Profilers only: a correctness checker or a device monitor answers a
+  // different question than "why is this slow", and would dilute the mark.
+  profileCommands: [
+    'ncu', 'nv-nsight-cu-cli', 'nsys', 'nvprof',
+    'rocprof', 'rocprofv2', 'rocprofv3', 'omniperf',
+    'vtune', 'perf', 'xctrace', 'instruments',
+  ],
   finalizeTools: ['run_finalize', 'kernel_finalize'],
   planTool: 'kernel_plan',
   envTool: 'kernel_env',
@@ -67,6 +84,34 @@ export function matchesTool(name: string, patterns: readonly string[]): boolean 
     if (!name.endsWith(p)) return false
     const before = name.charAt(name.length - p.length - 1)
     return before === '_' || before === '-' || before === '.' || before === '/' || before === ':'
+  })
+}
+
+/** Characters that may bound an executable token on a command line. */
+const TOKEN_BOUND = /[\s;|&(){}<>"'`=]/
+
+/**
+ * Whether a shell command line invokes one of the configured profilers.
+ *
+ * Token-bounded on both sides, with `/` accepted only on the left so an
+ * absolute path (`/usr/local/cuda/bin/ncu`) matches while a directory of the
+ * same name (`/opt/ncu/run.sh`) does not. `.` is deliberately NOT a boundary:
+ * every bench script in this domain times with `time.perf_counter`, and a
+ * looser rule would mark all of them as profiling.
+ * @param command - the logged command line.
+ * @param names - configured profiler executables.
+ * @returns whether any name appears as an invoked command.
+ */
+export function matchesProfileCommand(command: string, names: readonly string[]): boolean {
+  return names.some((name) => {
+    for (let at = command.indexOf(name); at >= 0; at = command.indexOf(name, at + 1)) {
+      const before = at === 0 ? '' : command.charAt(at - 1)
+      const after = command.charAt(at + name.length)
+      const leftOk = before === '' || before === '/' || TOKEN_BOUND.test(before)
+      const rightOk = after === '' || TOKEN_BOUND.test(after)
+      if (leftOk && rightOk) return true
+    }
+    return false
   })
 }
 
@@ -561,6 +606,11 @@ export function project(
       } else if (matchesTool(call.name, config.shellTools)) {
         const args = parseResultJson(call.argumentsJson)
         const command = args?.['command']
+        if (typeof command === 'string' && matchesProfileCommand(command, config.profileCommands)) {
+          // A profiler run may also be an evaluation (`ncu … python bench.py`
+          // still prints its trailer); the mark is independent of the point.
+          profileSeqs.push(event.seq)
+        }
         pendingShell.set(call.callId, {
           name: call.name,
           ...(typeof command === 'string' && command.length > 0 ? { command: capCommand(command) } : {}),

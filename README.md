@@ -110,7 +110,8 @@ dsh --profile web --dump-config | grep kernel-opt   # 应出现 bundle 层
 |---|---|---|
 | `benchTools` | `['kernel_evaluate']` | 计入曲线的评测**工具**名（精确或分隔符后缀匹配，MCP 前缀自动覆盖） |
 | `shellTools` | `['bash']` | 扫描契约行的 shell 工具名（自报通道；后台 job 读取器不默认收——轮询重复读会复制契约行） |
-| `profileTools` | `['kernel_profile']` | 记为 ▲ 标记的 profiler 工具名 |
+| `profileTools` | `['kernel_profile']` | 记为 ▲ 标记的 profiler **工具**名（注册工具/MCP 评测器才有；自组装评测入口的形态下不会触发） |
+| `profileCommands` | `ncu`/`nsys`/`nvprof`/`rocprof*`/`omniperf`/`vtune`/`perf`/`xctrace` 等 | 记为 ▲ 标记的 profiler **命令**名，按 shell 命令行的可执行 token 匹配（路径前缀算，`time.perf_counter` 不算）。认得出真 profiler，认不出手写诊断脚本——所以"没有 ▲"是弱证据 |
 | `finalizeTools` | `['run_finalize', 'kernel_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标 ⚑，`artifact_path` 参数把该 artifact 最优诚实点标 ⚑ |
 | `changeTools` | `['write', 'edit']` | 计为"该轮改动"的结构化文件工具名，与评测的 artifact 匹配后挂到该行 |
 | `replay.enabled` | `true` | finalize 复测开关 |

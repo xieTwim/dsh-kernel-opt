@@ -261,6 +261,16 @@ test('supervisor digest carries the evaluator metrics and the edits behind the r
   assert.ok(!supervisorDigest(series([done(10, 5)]), state).includes('what was actually edited'))
 })
 
+test('supervisor digest flags a run that never profiled, and stays quiet early', () => {
+  const state = { ...initialLoopState(), armed: true, budget: 20, round: 2 }
+  const blind = series([done(10, 5), done(20, 4), done(30, 4)])
+  assert.ok(supervisorDigest(blind, state).includes('no profiler invocation seen'))
+  // Two evaluations in, not profiling yet is normal — no nagging.
+  assert.ok(!supervisorDigest(series([done(10, 5), done(20, 4)]), state).includes('Profiling:'))
+  const profiled = { ...blind, profileSeqs: [15, 25] }
+  assert.ok(supervisorDigest(profiled, state).includes('2 profiler run(s) recorded'))
+})
+
 test('unreviewedEvals: true when rows exist past the last delivered review', () => {
   const rows = [done(10, 5), done(20, 4)]
   const reviewed = { ...series(rows), rounds: [{ seq: 15, round: 1, review: 'ok' }] }
