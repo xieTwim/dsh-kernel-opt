@@ -233,6 +233,34 @@ test('supervisor digest reports the pace cap against what the last turn ran', ()
   assert.ok(!supervisorDigest(s, state, 10, 0).includes('Pace:'))
 })
 
+test('supervisor digest carries the evaluator metrics and the edits behind the rows', () => {
+  const state = { ...initialLoopState(), armed: true, budget: 20, round: 2 }
+  const s = series([
+    { ...done(10, 5), metrics: { speedup: 2, ref_runtime_ms: 9, occupancy: 0.31, dram_pct: 74 } },
+    {
+      ...done(20, 4),
+      changes: [
+        { seq: 18, tool: 'edit', kind: 'edit', oldText: 'BLOCK = 32', newText: 'BLOCK = 128' },
+        { seq: 19, tool: 'write', kind: 'write', content: '@triton.jit\ndef k(...):', truncated: true },
+      ],
+    },
+  ])
+  const digest = supervisorDigest(s, state)
+  // Profiler numbers reach the reviewer; `speedup` stays in its own column.
+  assert.ok(digest.includes('occupancy=0.31'))
+  assert.ok(digest.includes('dram_pct=74'))
+  assert.ok(!digest.includes('speedup=2'))
+  assert.ok(!digest.includes('ref_runtime_ms'))
+  // The change log is the independent record of what was tried.
+  assert.ok(digest.includes('what was actually edited'))
+  assert.ok(digest.includes('- BLOCK = 32'))
+  assert.ok(digest.includes('+ BLOCK = 128'))
+  assert.ok(digest.includes('#2 rewrote: @triton.jit def k(...):'))
+  assert.ok(digest.includes('[cut]'))
+  // Nothing captured, nothing claimed.
+  assert.ok(!supervisorDigest(series([done(10, 5)]), state).includes('what was actually edited'))
+})
+
 test('unreviewedEvals: true when rows exist past the last delivered review', () => {
   const rows = [done(10, 5), done(20, 4)]
   const reviewed = { ...series(rows), rounds: [{ seq: 15, round: 1, review: 'ok' }] }
