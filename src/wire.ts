@@ -225,6 +225,22 @@ export function latestRunStart(rounds: readonly WireRound[]): number {
 }
 
 /**
+ * Whether the iteration logged at `seq` belongs to a wrap-up phase: the loop
+ * message nearest above it is a wrap-up delivery, so the evaluation is
+ * finalize verification (agent self-check or plugin replay), not budgeted
+ * optimization work. Shared protocol helper: the panel splits its chips and
+ * badges rows with it, keeping "N iterations" aligned with the armed budget.
+ */
+export function inWrapUpPhase(rounds: readonly WireRound[], seq: number): boolean {
+  let phase = false
+  for (const round of rounds) {
+    if (round.seq > seq) break
+    phase = round.wrapUp === true
+  }
+  return phase
+}
+
+/**
  * Id of the bundled「算子优化模式」agent preset the Node half seeds into the
  * user preset root. Shared constant: sessions composed from this preset id
  * always show the evaluation tab (before any evaluation lands).

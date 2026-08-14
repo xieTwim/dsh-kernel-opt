@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { continuationText, wrapUpText } from '../src/loop.ts'
-import { latestRunStart } from '../src/wire.ts'
+import { inWrapUpPhase, latestRunStart } from '../src/wire.ts'
 import type { WireRound } from '../src/wire.ts'
 
 let seq = 0
@@ -355,4 +355,17 @@ test('latestRunStart: re-armed runs segment at the round-counter reset', () => {
   assert.equal(latestRunStart([r(1, 10), r(undefined, 20, true), r(1, 30), r(2, 40)]), 2)
   // Repeated single-round arms: only the last one is current.
   assert.equal(latestRunStart([r(1, 10), r(1, 20), r(1, 30)]), 2)
+})
+
+test('inWrapUpPhase: evaluations after the wrap-up delivery are wrap-up phase', () => {
+  const r = (round: number | undefined, at: number, wrapUp = false): WireRound =>
+    ({ seq: at, ...(round !== undefined ? { round } : {}), ...(wrapUp ? { wrapUp: true } : {}) })
+  const rounds = [r(1, 10), r(undefined, 50, true)]
+  assert.equal(inWrapUpPhase(rounds, 5), false) // before any loop message
+  assert.equal(inWrapUpPhase(rounds, 20), false) // budgeted work between drives
+  assert.equal(inWrapUpPhase(rounds, 60), true) // finalize verification after wrap-up
+  // A re-armed run's first continuation closes the wrap-up phase again.
+  const rearmed = [...rounds, r(1, 80)]
+  assert.equal(inWrapUpPhase(rearmed, 60), true)
+  assert.equal(inWrapUpPhase(rearmed, 90), false)
 })

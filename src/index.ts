@@ -485,13 +485,27 @@ export function apply(ctx: Context, config: Config = {}): void {
         return
       }
       if (decision.action === 'wrap-up') {
-        // Budget/stall endings finish clean: disarm, then one closing message
-        // asking the model to finalize its best honest result. No review —
-        // the budget is spent; the wrap-up instruction is fixed.
+        // Budget/stall endings finish clean: one closing message asking the
+        // model to finalize its best honest result. The supervisor reviews
+        // this drive like any continuation — the finalize is exactly where a
+        // provenance audit pays, and a run finished in a single turn has no
+        // other checkpoint where the supervisor could speak.
+        const { advice, reviewed } = reviewable(series)
+          ? await review(state, series)
+          : { advice: null, reviewed: false }
+        state.lastAdvice = advice ?? state.lastAdvice
+        // Re-check after the (possibly slow) review; a human message or stop
+        // that arrived meanwhile owns the session, and the next settle will
+        // re-decide the wrap-up from fresh state.
+        if (!state.armed || lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
         state.armed = false
         state.stopReason = decision.reason
         agent.followup(createUserMessage({
-          content: [{ type: 'text', text: wrapUpText(decision.evalsDone, state.budget, decision.reason, finalizeHint) }],
+          content: [{
+            type: 'text',
+            text: wrapUpText(decision.evalsDone, state.budget, decision.reason, finalizeHint,
+              advice, reviewed && advice === null),
+          }],
           source: { kind: 'plugin', plugin: PLUGIN_ID },
         }))
         return
@@ -522,6 +536,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           text: continuationText(
             state.round, decision.evalsDone, state.budget, advice,
             reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
+            series.plans.length > 0,
           ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },
