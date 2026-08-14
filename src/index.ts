@@ -143,7 +143,12 @@ export interface Config {
     /** Model id on that provider. */
     model: string
     temperature?: number
-    /** Advice budget per review (default 400). */
+    /**
+     * Output budget per review (default 4000). Sized for THINKING, not for
+     * the answer: the rubric asks for at most three sentences, but reviewers
+     * run with the deployment's reasoning default and reasoning spends this
+     * same budget, so a cap sized to the answer returns nothing at all.
+     */
     maxTokens?: number
   }
 }
@@ -536,11 +541,23 @@ export function apply(ctx: Context, config: Config = {}): void {
           // Sampling knobs stay config-owned: an override picks the route,
           // not the review discipline.
           ...(config.supervisor?.temperature !== undefined ? { temperature: config.supervisor.temperature } : {}),
-          maxTokens: config.supervisor?.maxTokens ?? 400,
-          signal: AbortSignal.timeout(60_000),
+          maxTokens: config.supervisor?.maxTokens ?? 4000,
+          signal: AbortSignal.timeout(90_000),
         })
+        let finish: string | undefined
         for await (const chunk of stream) {
           if (chunk.type === 'text-delta') reply += chunk.text
+          else if (chunk.type === 'finish') finish = chunk.reason.kind
+        }
+        if (reply.trim().length === 0) {
+          // Silence is NOT approval. Reviewers run with the deployment's
+          // thinking default, and reasoning spends the same output budget, so
+          // an undersized cap ends the call having emitted only thought — and
+          // an empty reply used to reach the human as "reviewed, no findings",
+          // including as the supervisor's blessing on an early finalize.
+          lctx.logger.warn(`kernel-opt: supervisor produced no answer (finish: ${finish ?? 'unknown'}); `
+            + 'the review is recorded as not run')
+          return { advice: null, note: null, reviewed: false }
         }
         return { ...adviceFromReply(reply), reviewed: true }
       } catch {
@@ -601,10 +618,11 @@ export function apply(ctx: Context, config: Config = {}): void {
             }))
             return
           }
-          // The ending stands. A challenged-and-approved run converged on the
-          // supervisor's own verdict; a plain audit keeps the finalize reason.
+          // The ending stands. Only a review that actually answered may be
+          // reported as convergence: an unanswered challenge leaves the
+          // agent's own finalize as the reason, never the supervisor's.
           state.armed = false
-          state.stopReason = challengeable ? 'converged' : decision.reason
+          state.stopReason = challengeable && reviewed ? 'converged' : decision.reason
           if (reviewed) {
             agent.followup(createUserMessage({
               content: [{ type: 'text', text: finalAuditText(advice, note) }],
