@@ -7,7 +7,7 @@
  */
 import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
 import {
-  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, EVAL_TRAILER_PREFIX,
+  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CHALLENGE_LINE, CONTINUE_TRAILER, EVAL_TRAILER_PREFIX,
   LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE,
   WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, samePath,
 } from './wire.ts'
@@ -417,6 +417,7 @@ function roundSlice(event: ProjectionEvent): WireRound | null {
   const round: WireRound = { seq: event.seq }
   if (wrapUp) round.wrapUp = true
   if (audit) round.audit = true
+  if (text.includes(CHALLENGE_LINE)) round.challenge = true
   const counters = /(\d+)\/(\d+) evaluations used/.exec(text)
   if (counters !== null) {
     round.evalsUsed = Number(counters[1])
