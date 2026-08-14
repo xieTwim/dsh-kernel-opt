@@ -112,6 +112,17 @@ test('continuation demands the initial kernel_plan while none is on record', () 
   assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false).includes('kernel_plan'))
 })
 
+test('continuation pace cap rides every drive without disturbing the anchors', () => {
+  const paced = continuationText(2, 3, 20, 'Switch families.', false, 0, 'kernel_finalize', true, true, 3)
+  assert.ok(paced.includes('at most 3 evaluations this turn'))
+  assert.ok(paced.includes(CONTINUE_TRAILER)) // parse anchor intact after the advice block
+  assert.ok(/3\/20 evaluations used/.test(paced))
+  // The inventory (taskless) drive is paced too; 0 disables the line.
+  assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false, true, 3)
+    .includes('at most 3 evaluations this turn'))
+  assert.ok(!continuationText(2, 3, 20, null).includes('evaluations this turn'))
+})
+
 test('unreviewedEvals: true when rows exist past the last delivered review', () => {
   const rows = [done(10, 5), done(20, 4)]
   const reviewed = { ...series(rows), rounds: [{ seq: 15, round: 1, review: 'ok' }] }

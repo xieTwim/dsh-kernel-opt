@@ -229,6 +229,11 @@ export function adviceFromReply(reply: string): string | null {
  *   message demands the initial plan report before further evaluation — the
  *   persona asks for it too, but the drive message is the enforcement point
  *   (a whole run without a single plan renders the plan panel dead).
+ * @param evalsPerTurn - pace cap carried by the drive: at most this many
+ *   evaluations per turn, then settle and report. Manufactures the turn
+ *   boundaries that give the supervisor periodic checkpoints and keep the
+ *   budget gate near-real-time when a capable model would otherwise finish
+ *   the whole run in one turn (0 = no pace line).
  * @returns the followup text.
  */
 export function continuationText(
@@ -241,6 +246,7 @@ export function continuationText(
   finalizeHint = 'run_finalize / kernel_finalize',
   taskKnown = true,
   planKnown = true,
+  evalsPerTurn = 0,
 ): string {
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
@@ -273,6 +279,12 @@ export function continuationText(
       + 'reporting your resolved plan with kernel_plan before the first evaluation. '
       + 'If the workspace carries no task either, ask the user what to optimize and stop — never adopt '
       + 'anything found outside the working directory.',
+    )
+  }
+  if (evalsPerTurn > 0) {
+    lines.push(
+      `Pace: complete at most ${String(evalsPerTurn)} evaluations this turn, then settle and report — `
+      + 'the loop reviews progress and drives you onward; do not finalize early just because the turn ends.',
     )
   }
   return lines.join('\n')

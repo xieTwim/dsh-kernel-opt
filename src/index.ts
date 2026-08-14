@@ -84,6 +84,14 @@ export interface Config {
     defaultBudget?: number
     /** Consecutive zero-progress continuations tolerated (default 2). */
     maxNoProgressRounds?: number
+    /**
+     * Pace instruction carried by every drive: complete at most this many
+     * evaluations per turn, then settle and report — it manufactures the
+     * turn boundaries that give the supervisor periodic checkpoints and
+     * keep the budget gate near-real-time even when a capable model could
+     * finish the whole run in one turn (default 3; 0 disables).
+     */
+    evalsPerTurn?: number
   }
   /**
    * 「算子优化模式」agent preset self-install. On by default: when the
@@ -249,6 +257,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const projection = resolveProjection(config)
   const maxNoProgress = config.loop?.maxNoProgressRounds ?? 2
   const defaultBudget = config.loop?.defaultBudget ?? 20
+  const evalsPerTurn = config.loop?.evalsPerTurn ?? 3
   const finalizeHint = projection.finalizeTools.join(' / ')
 
   /** Per-session loop state; sessions without an entry never looped. */
@@ -561,7 +570,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           text: continuationText(
             state.round, decision.evalsDone, state.budget, advice,
             reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
-            series.plans.length > 0,
+            series.plans.length > 0, evalsPerTurn,
           ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },
