@@ -288,6 +288,27 @@ export function inWrapUpPhase(rounds: readonly WireRound[], seq: number): boolea
 }
 
 /**
+ * Whether the log shows a loop run that never ended: the last loop message is
+ * a continuation (not a wrap-up or closing audit) and nothing was finalized
+ * after it. Loop state lives in memory, so a host restart takes an armed run
+ * with it — no drive, no wrap-up, no finalize, and the panel forgets it was
+ * ever armed. The log still remembers, and the human deserves to be told the
+ * run was cut off rather than silently handed an unfinished curve. A manual
+ * stop leaves the same trace, so the caption names both possibilities.
+ * @param rounds - loop messages in log order.
+ * @param iterations - evaluations in log order.
+ * @returns whether the newest run ended without any closing record.
+ */
+export function unfinishedRun(
+  rounds: readonly WireRound[],
+  iterations: readonly WireIteration[],
+): boolean {
+  const last = rounds[rounds.length - 1]
+  if (last === undefined || last.wrapUp === true || last.audit === true) return false
+  return !iterations.some(p => p.finalized === true && p.seq > last.seq)
+}
+
+/**
  * Id of the bundled「算子优化模式」agent preset the Node half seeds into the
  * user preset root. Shared constant: sessions composed from this preset id
  * always show the evaluation tab (before any evaluation lands).
