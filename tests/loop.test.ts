@@ -2,11 +2,12 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  adviceFromReply, continuationText, decideContinuation, finalAuditText, initialLoopState,
-  reviewable, stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
+  adviceFromReply, challengeText, continuationText, decideContinuation, finalAuditText,
+  initialLoopState, reviewable, stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
 } from '../src/loop.ts'
 import {
-  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
+  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
 } from '../src/wire.ts'
 import type { WireIteration, WireSeries } from '../src/wire.ts'
 
@@ -30,6 +31,34 @@ test('decideContinuation: finalize stops regardless of budget', () => {
   const s = series([done(1, 10), { ...done(2, 8), finalized: true }])
   assert.equal(decideContinuation(s, state, 2).action, 'stop')
   assert.equal((decideContinuation(s, state, 2) as { reason: string }).reason, 'finalized')
+})
+
+test('decideContinuation: a challenged finalize no longer ends the run', () => {
+  const s = series([done(1, 10), { ...done(2, 8), finalized: true }])
+  const fresh = { ...initialLoopState(), armed: true, budget: 20 }
+  assert.equal(decideContinuation(s, fresh, 2).action, 'stop')
+  // Once the supervisor overruled that finalize, the ordinary rules resume.
+  const challenged = { ...fresh, challengedFinalizeSeq: 2, round: 1, lastEvalCount: 2 }
+  assert.equal(decideContinuation(s, challenged, 2).action, 'continue')
+  // A NEWER finalize re-opens the stop decision.
+  const refinalized = series([done(1, 10), { ...done(2, 8), finalized: true }, { ...done(3, 7), finalized: true }])
+  assert.equal(decideContinuation(refinalized, challenged, 2).action, 'stop')
+})
+
+test('adviceFromReply: DONE approves like OK (headroom challenge)', () => {
+  assert.equal(adviceFromReply('DONE'), null)
+  assert.equal(adviceFromReply('done.'), null)
+  assert.equal(adviceFromReply('Try tiling the reduction.'), 'Try tiling the reduction.')
+})
+
+test('challengeText: keeps loop anchors, states the finalize is provisional', () => {
+  const text = challengeText(3, 6, 20, 'Try a fused epilogue.\nTry vectorized loads.', 'kernel_finalize', 3)
+  assert.ok(text.startsWith(`${LOOP_LINE_PREFIX}3]`))
+  assert.ok(/6\/20 evaluations used/.test(text))
+  assert.ok(text.includes(REVIEW_HEADER) && text.includes('Try a fused epilogue.'))
+  assert.ok(text.includes(CONTINUE_TRAILER) && text.includes('the run is NOT over'))
+  assert.ok(text.includes('Do not re-finalize the same artifact'))
+  assert.ok(text.includes('at most 3 evaluations this turn'))
 })
 
 test('decideContinuation: repeated no-progress rounds wrap the loop up', () => {

@@ -64,15 +64,28 @@
       (speedup or ref_runtime_ms feed the panel's speedup column) /
       reward_hack_detected. Never print that line from anything that is not a
       real evaluation: the panel shows the producing command line for every
-      point and a second model may audit them. (3) Iterate freely — no
-      per-iteration ceremony; git checkpoint commits at three moments: new
-      best, approach-family switch, finalize. Report plan changes with
-      kernel_plan; self_compact when switching families. (4) Finish: restore
-      the best artifact verbatim from git, run one full-fidelity verdict, then
+      point and a second model may audit them. (3) Iterate without
+      per-iteration ceremony, but settle in small batches: after a few
+      evaluations (about three), stop the turn and report progress — a
+      driving loop reviews and continues you, and short turns are what let
+      it and its supervisor steer mid-run. git checkpoint commits at three
+      moments: new best, approach-family switch, finalize. Report plan
+      changes with kernel_plan; self_compact when switching families.
+      (4) Finish: finalizing ENDS the run, so spend the budget you were
+      given — "the speedup is already large" and "the last few tries did
+      not improve" are not reasons to stop while whole approach families
+      sit untried (different algorithm or memory layout, tiling and
+      blocking, fusion or launch-overhead removal, precision and
+      vectorization, library and compiler paths, tuning exposed
+      parameters). Finalize when the remaining budget cannot plausibly beat
+      the current best, and say WHY it cannot. Then restore the best
+      artifact verbatim from git, run one full-fidelity verdict, and
       finalize — your evaluator's own finalize tool if it issues ids, else
       kernel_finalize with the artifact path (the plugin replays your
       recorded bench command once as the verified final number). Summarize
-      honestly.
+      honestly. If the loop hands back a supervisor's untried directions,
+      the run is not over: pursue them, and end it only with evidence they
+      are dominated.
 
       Honesty: measured numbers only; a fabricated trailer line is fabricated
       data; correct=false latency is not progress; treat reward-hack
