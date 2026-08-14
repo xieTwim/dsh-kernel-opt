@@ -35,7 +35,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 | `kernel_finalize` 工具 | 无 id 评测管线的收尾记录（按 `artifact_path`）+ 上述复测 |
 | `self_compact` 工具 | 包装官方 `compaction` seam；仅当组合里有 compaction provider 时注册 |
 | `/kloop [预算]` 命令 | **kernel 优化循环**：按 run 状态驱动的续跑——turn 落定且预算未尽、未 finalize、上轮有进展才续投；续投消息带停滞计数；预算耗尽/停滞先投**收尾轮**再停 |
-| `/supervise on\|off` 命令 | **第二模型监督**：每个续跑点复审 run digest（含每点来源命令行），建议随续投消息注入；失败降级为无建议 |
+| `/supervise on\|off` 命令 | **外部模型监督**：每个续跑点复审 run digest（含每点来源命令行），建议随续投消息注入；失败降级为无建议 |
 | series / control / models 路由 | `GET …/series?sessionId=` 即时投影；`POST …/control` 驱动与 slash 命令同一份循环/监督状态（含 `supervise-use` 会话级换监督模型）；`GET …/models` 供面板选择器枚举 provider/model |
 | `skills/kernel-opt` | 优化协议（盘点→组装评测入口→自由迭代→诚实收尾），可选装 |
 
@@ -62,7 +62,7 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 ```sh
 /kloop            # 启动循环,默认预算 20 次评测(/kloop 30 自定义)
 /kloop stop       # 停;/kloop status 查看
-/supervise on     # 开启第二模型监督(需先有监督模型:配置或当场指定,见下)
+/supervise on     # 开启外部模型监督（需先有监督模型：配置或当场指定，见下）
 /supervise use deepseek-official/deepseek-v4-flash   # 本会话换监督模型
 /supervise use default                               # 回到配置默认
 ```

@@ -40,11 +40,14 @@
       ~/.dsh/.agent-presets/kernel-opt/evaluator/bench.py into the
       workspace and assemble the kernel as a Model with get_inputs
       (GUIDE.md sits beside it; correctness + median timing + fresh
-      inputs + anti-cheat sentinel). It comes from the open-source
-      AKO4ALL toolkit — install that from GitHub only if the bundled copy
-      is missing. An evaluator answers "how to evaluate", never "what to
-      optimize" — with no task, do not propose demo runs on public
-      kernels; just ask. (2) Assemble your own
+      inputs + anti-cheat sentinel). In anything the user sees, call it
+      the built-in evaluator (内置评测器) — never surface toolkit or
+      project names for it. If the bundled copy is missing, fetch the
+      same evaluator from the open-source AKO4ALL repository on GitHub;
+      that name stays out of user-facing text as well. An evaluator
+      answers "how to evaluate", never "what to optimize" — with no
+      task, do not propose demo runs on public kernels; just ask. (2)
+      Assemble your own
       evaluation entry: wrap the bench command in a script whose environment
       setup is self-contained, run it in the foreground, and have every REAL
       evaluation print one stdout line starting with KERNEL_EVAL=
