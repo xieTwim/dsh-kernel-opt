@@ -8,8 +8,8 @@ import { test } from 'node:test'
 import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { challengeText, continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
-import { inWrapUpPhase, latestRunStart } from '../src/wire.ts'
-import type { WireRound } from '../src/wire.ts'
+import { inWrapUpPhase, latestRunStart, unfinishedRun } from '../src/wire.ts'
+import type { WireIteration, WireRound } from '../src/wire.ts'
 
 let seq = 0
 function call(name: string, callId: string, args: object): ProjectionEvent {
@@ -429,6 +429,24 @@ test('latestRunStart: re-armed runs segment at the round-counter reset', () => {
   assert.equal(latestRunStart([r(1, 10), r(undefined, 20, true), r(1, 30), r(2, 40)]), 2)
   // Repeated single-round arms: only the last one is current.
   assert.equal(latestRunStart([r(1, 10), r(1, 20), r(1, 30)]), 2)
+})
+
+test('unfinishedRun: a run whose last word is a drive, with no finalize after it', () => {
+  const r = (round: number | undefined, at: number, kind?: 'wrapUp' | 'audit'): WireRound =>
+    ({ seq: at, ...(round !== undefined ? { round } : {}), ...(kind !== undefined ? { [kind]: true } : {}) })
+  const it = (at: number, finalized = false): WireIteration =>
+    ({ seq: at, tool: 'bash', latencyMs: 1, correct: true, ...(finalized ? { finalized: true } : {}) })
+  // Cut off mid-run: drives, evaluations, nothing closing.
+  assert.equal(unfinishedRun([r(1, 10), r(2, 50)], [it(20), it(60)]), true)
+  // Closed properly: wrap-up or closing audit had the last word.
+  assert.equal(unfinishedRun([r(1, 10), r(undefined, 50, 'wrapUp')], [it(20)]), false)
+  assert.equal(unfinishedRun([r(1, 10), r(undefined, 50, 'audit')], [it(20)]), false)
+  // The agent finalized after the last drive: the run ended on its own terms.
+  assert.equal(unfinishedRun([r(1, 10)], [it(20), it(30, true)]), false)
+  // A finalize BEFORE the last drive does not close what came after it.
+  assert.equal(unfinishedRun([r(1, 10), r(2, 40)], [it(30, true), it(50)]), true)
+  // No loop messages at all: nothing was ever armed.
+  assert.equal(unfinishedRun([], [it(20)]), false)
 })
 
 test('inWrapUpPhase: evaluations after the wrap-up delivery are wrap-up phase', () => {

@@ -20,7 +20,10 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WireChange, WireControl, WireEnv, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
-import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, inWrapUpPhase, latestRunStart, samePath } from '../wire.ts'
+import {
+  CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH,
+  inWrapUpPhase, latestRunStart, samePath, unfinishedRun,
+} from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -63,6 +66,7 @@ const zh = {
   'axis.best': '最佳',
   'loop.armed': '循环运行中 · 已迭代 {done}/{budget} 次',
   'loop.stopped': '循环已停止：{reason}',
+  'loop.interrupted': '上一轮循环没有收尾记录：可能被手动停止，或被服务重启中断；重新启动循环会接着已有进度继续。',
   'pop.budget': '迭代次数',
   'pop.supervise': '外部监督',
   'pop.model': '监督模型',
@@ -167,6 +171,7 @@ const en = {
   'axis.best': 'best',
   'loop.armed': 'loop running · {done}/{budget} iterations',
   'loop.stopped': 'loop stopped: {reason}',
+  'loop.interrupted': 'The last loop run has no closing record: it was stopped, or a host restart cut it off. Starting again resumes from the progress already on record.',
   'pop.budget': 'Max iterations',
   'pop.supervise': 'External supervision',
   'pop.model': 'Supervisor model',
@@ -1248,6 +1253,17 @@ export function KernelOptTab(
                     ? t('ctl.supOff')
                     : control.loop.armed ? t('ctl.supOn') : t('ctl.supDep')}
                 </div>
+                {/* An armed run that lost its state (host restart) leaves the
+                    log's last word as a continuation and no finalize: say so,
+                    instead of handing back an unfinished curve in silence. */}
+                {control.loop.armed === false && control.loop.stopReason === undefined
+                  && unfinishedRun(rounds, iterations)
+                  ? (
+                      <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.warn }}>
+                        {t('loop.interrupted')}
+                      </div>
+                    )
+                  : null}
               </>
             )
           : null}
