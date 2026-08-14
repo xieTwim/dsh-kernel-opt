@@ -68,6 +68,7 @@ const zh = {
   'ctl.start': '启动循环',
   'ctl.stop': '停止循环',
   'ctl.budget': '迭代次数',
+  'ctl.title': '运行控制',
   'advice.title': '监督记录',
   'advice.waiting': '监督已开启：循环每次驱动 Agent 继续之前，监督模型会先复审当前进展；结论与建议会自动转交 Agent 并记录在此。',
   'advice.round': '第 {n} 次复审',
@@ -162,6 +163,7 @@ const en = {
   'ctl.start': 'Start loop',
   'ctl.stop': 'Stop loop',
   'ctl.budget': 'Max iterations',
+  'ctl.title': 'Run controls',
   'advice.title': 'Supervision log',
   'advice.waiting': 'Supervision on: before each continuation the supervisor reviews progress first; its conclusions and advice are handed to the agent and recorded here.',
   'advice.round': 'review {n}',
@@ -1095,11 +1097,13 @@ export function KernelOptTab(
       display: 'flex', flexDirection: 'column', gap: 20,
       fontFamily: 'system-ui', color: COLOR.text,
     }}>
-      {/* controls: one row for the loop, one for supervision, then data chips.
-          The group keeps a tighter internal rhythm than the gap that separates
-          it from the data below, so it reads as one band rather than four
-          loose rows. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Run controls live in a card like everything else: naked rows above a
+          column of cards gave the page two visual languages, and the reader
+          had no block boundary between "what I can change" and "what the run
+          produced". The result chips are data, so they head the chart card
+          below rather than trailing the controls here. */}
+      <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{t('ctl.title')}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {control?.loop.armed === true
             ? (
@@ -1180,9 +1184,28 @@ export function KernelOptTab(
               </>
             )
           : null}
-        {iterations.length > 0 || (series !== null && series.profileSeqs.length > 0)
-          ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 4 }}>
+      </div>
+
+      {/* empty-state guidance: the controls above stay usable before the
+          first evaluation; only the data area explains itself. */}
+      {empty
+        ? (
+            <div style={{ ...cardStyle, padding: '18px 16px', color: COLOR.dim }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
+              <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
+            </div>
+          )
+        : null}
+
+      {/* curve, headed by the run's result chips — they summarise what the
+          chart plots, so they belong to its block, not to the controls. */}
+      {iterations.length > 0
+        ? (
+            <div style={{ ...cardStyle, padding: '14px 10px 8px' }}>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+                padding: '0 6px', marginBottom: 10,
+              }}>
                 <span style={chipStyle} title={t('tip.iters')}>
                   {t('chips.iterations', { count: iterations.length - wrapUpChecks })}
                 </span>
@@ -1207,25 +1230,6 @@ export function KernelOptTab(
                   ? <span style={{ ...chipStyle, color: COLOR.caption }}>{t('chips.pending')}</span>
                   : null}
               </div>
-            )
-          : null}
-      </div>
-
-      {/* empty-state guidance: the controls above stay usable before the
-          first evaluation; only the data area explains itself. */}
-      {empty
-        ? (
-            <div style={{ padding: '18px 4px', color: COLOR.dim }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
-              <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
-            </div>
-          )
-        : null}
-
-      {/* curve */}
-      {iterations.length > 0
-        ? (
-            <div style={{ ...cardStyle, padding: '12px 10px 8px' }}>
               <Chart
                 series={series as WireSeries}
                 bestLabel={t('axis.best')}
