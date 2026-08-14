@@ -7,7 +7,7 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
-import { continuationText, wrapUpText } from '../src/loop.ts'
+import { continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
 import { inWrapUpPhase, latestRunStart } from '../src/wire.ts'
 import type { WireRound } from '../src/wire.ts'
 
@@ -215,6 +215,24 @@ test('project: kernel-loop messages parse back into rounds (advice / OK / wrap-u
   assert.equal(rounds[3]?.budget, 20)
 })
 
+test('project: closing-audit parses as audit round; review blocks cut at the closing anchors', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    loopMessage(wrapUpText(5, 5, 'budget', 'kernel_finalize', 'Verify provenance of #4.')),
+    loopMessage(finalAuditText(null)),
+    loopMessage(finalAuditText('Replay disagrees with the self-reported final; re-verify.')),
+  ]
+  const { rounds } = project('s', events)
+  assert.equal(rounds.length, 3)
+  // The wrap-up's advice stops at its closing instructions, never swallowing them.
+  assert.equal(rounds[0]?.wrapUp, true)
+  assert.equal(rounds[0]?.review, 'Verify provenance of #4.')
+  assert.equal(rounds[1]?.audit, true)
+  assert.equal(rounds[1]?.review, 'ok')
+  assert.equal(rounds[2]?.audit, true)
+  assert.equal(rounds[2]?.review, 'Replay disagrees with the self-reported final; re-verify.')
+})
+
 test('project: non-plugin user messages never become rounds', () => {
   seq = 0
   const events: ProjectionEvent[] = [
@@ -368,4 +386,9 @@ test('inWrapUpPhase: evaluations after the wrap-up delivery are wrap-up phase', 
   const rearmed = [...rounds, r(1, 80)]
   assert.equal(inWrapUpPhase(rearmed, 60), true)
   assert.equal(inWrapUpPhase(rearmed, 90), false)
+  // The closing audit enters (or keeps) the phase: post-audit corrections are
+  // closing work, not budgeted iterations.
+  const audited: WireRound[] = [r(1, 10), { seq: 70, audit: true }]
+  assert.equal(inWrapUpPhase(audited, 75), true)
+  assert.equal(inWrapUpPhase(audited, 60), false)
 })

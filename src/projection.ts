@@ -7,8 +7,9 @@
  */
 import type { WireChange, WireIteration, WirePlan, WireRound, WireSeries } from './wire.ts'
 import {
-  CONTINUE_TRAILER, EVAL_TRAILER_PREFIX, LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX,
-  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX, samePath,
+  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, EVAL_TRAILER_PREFIX,
+  LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE,
+  WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, samePath,
 } from './wire.ts'
 
 /** Structural slice of a logged session event the projection reads. */
@@ -397,8 +398,8 @@ export function hasUserTask(events: readonly ProjectionEvent[]): boolean {
 }
 
 /**
- * Parse a kernel-loop continuation/wrap-up message back out of a
- * `user/message` event. The message data is the logged UserMessage (a
+ * Parse a kernel-loop continuation/wrap-up/closing-audit message back out of
+ * a `user/message` event. The message data is the logged UserMessage (a
  * `message` wrapper is accepted against shape drift); only plugin-sourced
  * messages carrying the loop's first-line prefixes qualify.
  */
@@ -411,15 +412,17 @@ function roundSlice(event: ProjectionEvent): WireRound | null {
   if (source?.['kind'] !== 'plugin' || source['plugin'] !== LOOP_PLUGIN_ID) return null
   const text = collectResultText(message['content'])
   const wrapUp = text.startsWith(WRAPUP_LINE_PREFIX)
-  if (!wrapUp && !text.startsWith(LOOP_LINE_PREFIX)) return null
+  const audit = text.startsWith(AUDIT_LINE_PREFIX)
+  if (!wrapUp && !audit && !text.startsWith(LOOP_LINE_PREFIX)) return null
   const round: WireRound = { seq: event.seq }
   if (wrapUp) round.wrapUp = true
+  if (audit) round.audit = true
   const counters = /(\d+)\/(\d+) evaluations used/.exec(text)
   if (counters !== null) {
     round.evalsUsed = Number(counters[1])
     round.budget = Number(counters[2])
   }
-  if (!wrapUp) {
+  if (!wrapUp && !audit) {
     const num = /^\[kernel-loop round (\d+)\]/.exec(text)
     if (num !== null) round.round = Number(num[1])
   }
@@ -428,9 +431,13 @@ function roundSlice(event: ProjectionEvent): WireRound | null {
   } else {
     const headerAt = text.indexOf(REVIEW_HEADER)
     if (headerAt >= 0) {
+      // The advice block runs until the message's own closing instructions —
+      // each delivery kind has a fixed anchor line (continuation trailer,
+      // wrap-up close, audit close); the earliest one present ends the block.
       const rest = text.slice(headerAt + REVIEW_HEADER.length)
-      const trailerAt = rest.indexOf(CONTINUE_TRAILER)
-      const advice = (trailerAt >= 0 ? rest.slice(0, trailerAt) : rest).trim()
+      const ends = [CONTINUE_TRAILER, WRAPUP_CLOSE_LINE, AUDIT_CLOSE_LINE]
+        .map(anchor => rest.indexOf(anchor)).filter(at => at >= 0)
+      const advice = (ends.length > 0 ? rest.slice(0, Math.min(...ends)) : rest).trim()
       if (advice.length > 0) round.review = advice
     }
   }

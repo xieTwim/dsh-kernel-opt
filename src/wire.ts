@@ -120,6 +120,8 @@ export interface WireRound {
   review?: string
   /** This message was the wrap-up delivery (budget / no-progress ending). */
   wrapUp?: boolean
+  /** This message was the closing audit after a finalized run. */
+  audit?: boolean
 }
 
 /** Loop + supervisor control state for the panel. */
@@ -225,17 +227,19 @@ export function latestRunStart(rounds: readonly WireRound[]): number {
 }
 
 /**
- * Whether the iteration logged at `seq` belongs to a wrap-up phase: the loop
- * message nearest above it is a wrap-up delivery, so the evaluation is
- * finalize verification (agent self-check or plugin replay), not budgeted
- * optimization work. Shared protocol helper: the panel splits its chips and
+ * Whether the iteration logged at `seq` belongs to a wrap-up phase: the
+ * governing loop message above it is a wrap-up delivery or the closing audit,
+ * so the evaluation is finalize verification or audit correction, not
+ * budgeted optimization work. Only a numbered continuation (a new drive)
+ * exits the phase. Shared protocol helper: the panel splits its chips and
  * badges rows with it, keeping "N iterations" aligned with the armed budget.
  */
 export function inWrapUpPhase(rounds: readonly WireRound[], seq: number): boolean {
   let phase = false
   for (const round of rounds) {
     if (round.seq > seq) break
-    phase = round.wrapUp === true
+    if (round.wrapUp === true || round.audit === true) phase = true
+    else if (round.round !== undefined) phase = false
   }
   return phase
 }
@@ -290,6 +294,12 @@ export const REPLAY_LINE_PREFIX = '[replay] '
 export const LOOP_LINE_PREFIX = '[kernel-loop round '
 /** First-line prefix of the wrap-up message. */
 export const WRAPUP_LINE_PREFIX = '[kernel-loop wrap-up]'
+/** First-line prefix of the closing-audit message after a finalized run. */
+export const AUDIT_LINE_PREFIX = '[kernel-loop final review]'
+/** Line opening the wrap-up's closing instructions (ends a review block). */
+export const WRAPUP_CLOSE_LINE = 'The kernel loop is ending'
+/** Line opening the audit's closing instructions (ends a review block). */
+export const AUDIT_CLOSE_LINE = 'Address the findings'
 /** Header line introducing a supervisor advice block. */
 export const REVIEW_HEADER = 'Supervisor review (advisory, from the second model):'
 /** Whole line recording that the supervisor reviewed and approved. */

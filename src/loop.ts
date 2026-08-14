@@ -12,7 +12,8 @@
  */
 import type { WireIteration, WireSeries } from './wire.ts'
 import {
-  CONTINUE_TRAILER, LOOP_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
+  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX,
 } from './wire.ts'
 
 /** Per-session loop control state (in-memory; the loop is a live-run aid). */
@@ -55,6 +56,21 @@ export function completedEvals(series: WireSeries): number {
  */
 export function reviewable(series: WireSeries): boolean {
   return series.iterations.length > 0 || series.plans.length > 0
+}
+
+/**
+ * Whether evaluations exist that no delivered review has seen: rows logged
+ * after the last review-carrying loop message, or any rows when no review
+ * ever ran. The closing audit fires on this — a run the agent finishes in a
+ * single turn has its only checkpoint after the finalize, so without the
+ * audit the supervisor would never speak at all.
+ */
+export function unreviewedEvals(series: WireSeries): boolean {
+  let lastReviewSeq = -1
+  for (const round of series.rounds) {
+    if (round.review !== undefined) lastReviewSeq = round.seq
+  }
+  return series.iterations.some(p => p.seq > lastReviewSeq)
 }
 
 /**
@@ -295,10 +311,35 @@ export function wrapUpText(
   }
   lines.push(
     '',
-    'The kernel loop is ending — do not start new optimization work.',
+    `${WRAPUP_CLOSE_LINE} — do not start new optimization work.`,
     `If an honest best result exists, finalize it now (${finalizeHint}; pass the evaluation_id from your evaluator, or the artifact path for kernel_finalize).`,
     'Restore the best artifact verbatim first if a later edit regressed it.',
     'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
   )
+  return lines.join('\n')
+}
+
+/**
+ * Closing-audit message body: delivered once when a finalized run still
+ * carries evaluations the supervisor never reviewed (a single-turn run's only
+ * checkpoint lands after the finalize). An approving verdict just closes the
+ * run on the record; findings give the agent one bounded chance to verify or
+ * correct the finalized result — the loop stays disarmed either way, so the
+ * reply turn is never re-driven.
+ * @param advice - supervisor advice, or null when it approved.
+ * @returns the followup text.
+ */
+export function finalAuditText(advice: string | null): string {
+  const lines = [`${AUDIT_LINE_PREFIX} the run has finalized; the supervisor audited the final table.`]
+  if (advice !== null) {
+    lines.push(
+      '', REVIEW_HEADER, advice,
+      '',
+      `${AUDIT_CLOSE_LINE}: verify or correct the finalized result (re-finalize if the artifact changes), then close with a short note.`,
+      'Do not start new optimization work beyond what the findings require.',
+    )
+  } else {
+    lines.push('', REVIEW_OK_LINE, '', 'No action needed — this note closes the run.')
+  }
   return lines.join('\n')
 }

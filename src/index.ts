@@ -41,7 +41,8 @@ import { DEFAULT_PROJECTION, hasUserTask, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
   SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
-  decideContinuation, initialLoopState, reviewable, stagnationCount, supervisorDigest, wrapUpText,
+  decideContinuation, finalAuditText, initialLoopState, reviewable, stagnationCount,
+  supervisorDigest, unreviewedEvals, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
@@ -433,11 +434,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     const review = async (
       state: LoopState,
       series: WireSeries,
+      closing = false,
     ): Promise<{ advice: string | null; reviewed: boolean }> => {
       const supervisor = effectiveSupervisor(state)
       if (supervisor === undefined || !state.supervise) return { advice: null, reviewed: false }
       try {
-        const digest = supervisorDigest(series, state)
+        const digest = closing
+          ? `${supervisorDigest(series, state)}\nThe run has finalized — this is the closing audit: judge the final `
+            + 'table and its provenance (the finalize and its replay above all); continuation advice is moot.'
+          : supervisorDigest(series, state)
         let reply = ''
         const stream = lctx.llm.stream({
           provider: supervisor.provider,
@@ -480,6 +485,26 @@ export function apply(ctx: Context, config: Config = {}): void {
       const series = project(sessionId, session.events, projection)
       const decision = decideContinuation(series, state, maxNoProgress)
       if (decision.action === 'stop') {
+        // A finalized run can end with rows no review ever saw — a single-turn
+        // run's only checkpoint lands after the finalize. With supervision on,
+        // one closing audit covers them; its verdict goes to the agent, so
+        // findings can still be corrected before the run ends (user ruling
+        // 2026-08-14). The loop disarms first, so the reply turn's own settle
+        // exits at the top of this checkpoint and nothing re-drives.
+        if (state.supervise && decision.reason === 'finalized' && unreviewedEvals(series)) {
+          const { advice, reviewed } = await review(state, series, true)
+          state.lastAdvice = advice ?? state.lastAdvice
+          if (!state.armed || lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
+          state.armed = false
+          state.stopReason = decision.reason
+          if (reviewed) {
+            agent.followup(createUserMessage({
+              content: [{ type: 'text', text: finalAuditText(advice) }],
+              source: { kind: 'plugin', plugin: PLUGIN_ID },
+            }))
+          }
+          return
+        }
         state.armed = false
         state.stopReason = decision.reason
         return

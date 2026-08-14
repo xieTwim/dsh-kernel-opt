@@ -2,9 +2,12 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  adviceFromReply, continuationText, decideContinuation, initialLoopState, reviewable, stagnationCount, supervisorDigest, wrapUpText,
+  adviceFromReply, continuationText, decideContinuation, finalAuditText, initialLoopState,
+  reviewable, stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
 } from '../src/loop.ts'
-import { CONTINUE_TRAILER, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX } from '../src/wire.ts'
+import {
+  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_LINE_PREFIX,
+} from '../src/wire.ts'
 import type { WireIteration, WireSeries } from '../src/wire.ts'
 
 function series(iterations: WireIteration[], bestIndex: number | null = null): WireSeries {
@@ -107,6 +110,28 @@ test('continuation demands the initial kernel_plan while none is on record', () 
     .includes('No kernel_plan is on record yet'))
   // The taskless inventory branch demands the plan inline.
   assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false).includes('kernel_plan'))
+})
+
+test('unreviewedEvals: true when rows exist past the last delivered review', () => {
+  const rows = [done(10, 5), done(20, 4)]
+  const reviewed = { ...series(rows), rounds: [{ seq: 15, round: 1, review: 'ok' }] }
+  assert.equal(unreviewedEvals(reviewed), true) // seq 20 landed after the review
+  const covered = { ...series([done(10, 5)]), rounds: [{ seq: 15, round: 1, review: 'ok' }] }
+  assert.equal(unreviewedEvals(covered), false)
+  assert.equal(unreviewedEvals(series(rows)), true) // no review ever ran
+  assert.equal(unreviewedEvals(series([])), false)
+})
+
+test('finalAuditText: OK closes on the record; findings demand bounded correction', () => {
+  const ok = finalAuditText(null)
+  assert.ok(ok.startsWith(AUDIT_LINE_PREFIX))
+  assert.ok(ok.includes(REVIEW_OK_LINE))
+  const findings = finalAuditText('Replay disagrees with the self-reported final; re-verify.')
+  assert.ok(findings.startsWith(AUDIT_LINE_PREFIX))
+  assert.ok(findings.includes(REVIEW_HEADER))
+  assert.ok(findings.includes('Replay disagrees with the self-reported final; re-verify.'))
+  assert.ok(findings.includes(AUDIT_CLOSE_LINE))
+  assert.ok(!findings.includes(REVIEW_OK_LINE))
 })
 
 test('stagnationCount counts completed evals after best; continuation nudges from 3', () => {
