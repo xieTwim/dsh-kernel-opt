@@ -5,7 +5,10 @@
  */
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
+import {
+  DEFAULT_PROJECTION, collectResultText, hasUserTask, matchesProfileCommand, matchesTool,
+  parseResultJson, project,
+} from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { challengeText, continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
 import { inWrapUpPhase, latestRunStart, unfinishedRun } from '../src/wire.ts'
@@ -51,6 +54,33 @@ test('matchesTool: exact and separator-suffixed names', () => {
   assert.equal(matchesTool('mcp.ako:kernel_evaluate', ['kernel_evaluate']), true)
   assert.equal(matchesTool('rekernel_evaluate', ['kernel_evaluate']), false)
   assert.equal(matchesTool('kernel_evaluate_v2', ['kernel_evaluate']), false)
+})
+
+test('matchesProfileCommand: invoked profilers only, never a bench script timing itself', () => {
+  const names = DEFAULT_PROJECTION.profileCommands
+  assert.equal(matchesProfileCommand('ncu --set full python bench.py', names), true)
+  assert.equal(matchesProfileCommand('/usr/local/cuda/bin/ncu -o rep python bench.py', names), true)
+  assert.equal(matchesProfileCommand('cd run && nsys profile ./bench.sh', names), true)
+  assert.equal(matchesProfileCommand('perf stat -e cycles ./a.out', names), true)
+  // The trap this rule exists for: every bench script in this domain times
+  // with time.perf_counter, and `perf` is a configured profiler.
+  assert.equal(matchesProfileCommand('python -c "import time; time.perf_counter()"', names), false)
+  assert.equal(matchesProfileCommand('python /opt/ncu/harness/bench.py', names), false)
+  assert.equal(matchesProfileCommand('./ncu-ui report.ncu-rep', names), false)
+  assert.equal(matchesProfileCommand('python diag3.py', names), false) // hand-written diagnostics stay invisible
+})
+
+test('project: a profiler run through the shell earns the mark', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    call('bash', 'b1', { command: 'ncu --set full .venv/bin/python bench.py' }),
+    result('b1', 'Section: SpeedOfLight'),
+    call('bash', 'b2', { command: '.venv/bin/python bench.py --solution s1.py' }),
+    result('b2', `${'KERNEL_EVAL='}{"artifact":"s1.py","correct":true,"latency_ms":3.0}`),
+  ]
+  const series = project('s', events)
+  assert.equal(series.profileSeqs.length, 1)
+  assert.equal(series.iterations.length, 1) // the profiler run is a mark, not a point
 })
 
 test('collectResultText walks text blocks; parseResultJson tolerates prose wrapping', () => {

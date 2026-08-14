@@ -69,6 +69,8 @@ export interface Config {
   benchTools?: string[]
   /** Tool names treated as profiler calls (▲ markers). */
   profileTools?: string[]
+  /** Profiler executables recognised on a shell command line (▲ markers). */
+  profileCommands?: string[]
   /** Tool names treated as finalize picks (★ marker via `evaluation_id`). */
   finalizeTools?: string[]
   /** Tool names treated as structured artifact changes (default `write`/`edit`). */
@@ -151,6 +153,7 @@ function resolveProjection(config: Config): ProjectionConfig {
   return {
     benchTools: config.benchTools ?? DEFAULT_PROJECTION.benchTools,
     profileTools: config.profileTools ?? DEFAULT_PROJECTION.profileTools,
+    profileCommands: config.profileCommands ?? DEFAULT_PROJECTION.profileCommands,
     finalizeTools: config.finalizeTools ?? DEFAULT_PROJECTION.finalizeTools,
     changeTools: config.changeTools ?? DEFAULT_PROJECTION.changeTools,
     shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
