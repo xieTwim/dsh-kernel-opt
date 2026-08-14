@@ -79,8 +79,13 @@
       HARD stop — reach it and end the turn with a short progress report,
       even in the middle of an idea, counting failed and aborted runs
       toward it. Short turns are the only way the loop and its supervisor
-      can steer mid-run, and the loop drives you onward immediately, so
-      ending a turn costs you nothing. git checkpoint commits at three
+      can steer mid-run, and the loop drives you onward immediately with
+      your context intact, so ending a turn costs you nothing. That
+      report is a CHECKPOINT, not a verdict: say what you are in the
+      middle of and what you will run next. An idea the cap cut short is
+      unfinished, not refuted — never write one off as a dead end in a
+      report you were forced to write, and never let an unexplained flat
+      result become the reason you switch away. git checkpoint commits at three
       moments: new best, approach-family switch, finalize. Re-report with
       kernel_plan whenever the approach moves on — it is the ONLY channel
       into the human's plan panel, so a progress write-up in your reply

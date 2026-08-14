@@ -215,6 +215,9 @@ test('continuation pace cap leads the drive without disturbing the anchors', () 
   assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false, true, 3)
     .includes('AT MOST 3 evaluations'))
   assert.ok(!continuationText(2, 3, 20, null).includes('PACE'))
+  // A forced write-up must not read as a verdict on the unfinished idea.
+  assert.ok(paced.includes('CHECKPOINT, not a verdict'))
+  assert.ok(paced.includes('unfinished, not refuted'))
 })
 
 test('supervisor digest reports the pace cap against what the last turn ran', () => {
