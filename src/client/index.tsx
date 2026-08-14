@@ -98,8 +98,10 @@ const zh = {
   'chips.wrapup': '收尾评测 {count} 次',
   'tip.iters': '循环内完成的优化迭代（不含收尾评测）',
   'tip.wrapup': '循环结束后的收尾评测（最终验证与复测），不计入迭代预算',
-  'tip.selfReported': '数值由 Agent 运行评测命令后自行报告，插件未独立复测；展开行可见来源命令',
   'tip.replay': '插件重放评测命令独立测得',
+  'row.channelTool': '工具',
+  'tip.tool': '由注册评测工具直接返回，非 Agent 转述',
+  'table.legend': '未标注的数值为 Agent 自报；「复测」为插件独立重放测得',
   'tip.final': '收尾时选定的最终版本',
   'tip.best': '当前最优结果',
   'tip.ok': '正确性校验通过',
@@ -174,8 +176,10 @@ const en = {
   'chips.wrapup': '{count} wrap-up checks',
   'tip.iters': 'Optimization iterations completed in the loop (wrap-up checks excluded)',
   'tip.wrapup': 'Wrap-up evaluation after the loop ended (final verification / replay); not counted against the iteration budget',
-  'tip.selfReported': 'Reported by the agent from its own command run, not independently re-measured; expand the row for the producing command',
   'tip.replay': 'Measured by the plugin replaying the recorded evaluation command',
+  'row.channelTool': 'tool',
+  'tip.tool': 'Returned directly by a registered evaluator tool, not agent-relayed',
+  'table.legend': 'Unbadged values are agent self-reported; "replayed" rows were re-measured by the plugin',
   'tip.final': 'The final version selected at wrap-up',
   'tip.best': 'Best result so far',
   'tip.ok': 'Correctness check passed',
@@ -1161,8 +1165,12 @@ export function KernelOptTab(
       {iterations.length > 0
         ? (
             <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '8px 14px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
-                {t('table.title')}
+              <div style={{
+                padding: '8px 14px', borderBottom: `1px solid ${COLOR.border}`,
+                display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 10,
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{t('table.title')}</span>
+                <span style={{ fontSize: 12, color: COLOR.caption }}>{t('table.legend')}</span>
               </div>
               <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                 {[...iterations].reverse().map((p) => {
@@ -1213,17 +1221,20 @@ export function KernelOptTab(
                               </span>
                             )
                           : null}
-                        {p.channel !== undefined
+                        {/* Self-reported (shell) is the default working mode and stays
+                            unbadged — the table legend states it once; badges mark the
+                            deviations: the plugin's replay and registered-tool results. */}
+                        {p.channel !== 'shell'
                           ? (
                               <span
-                                title={t(p.channel === 'replay' ? 'tip.replay' : 'tip.selfReported')}
+                                title={t(p.channel === 'replay' ? 'tip.replay' : 'tip.tool')}
                                 style={{
                                   flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
                                   borderRadius: 4, border: `1px solid ${COLOR.border}`,
                                   color: p.channel === 'replay' ? COLOR.ok : COLOR.caption,
                                 }}
                               >
-                                {t(p.channel === 'replay' ? 'row.channelReplay' : 'row.channelShell')}
+                                {t(p.channel === 'replay' ? 'row.channelReplay' : 'row.channelTool')}
                               </span>
                             )
                           : null}
