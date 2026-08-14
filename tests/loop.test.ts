@@ -203,15 +203,31 @@ test('continuation demands the initial kernel_plan while none is on record', () 
   assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false).includes('kernel_plan'))
 })
 
-test('continuation pace cap rides every drive without disturbing the anchors', () => {
+test('continuation pace cap leads the drive without disturbing the anchors', () => {
   const paced = continuationText(2, 3, 20, 'Switch families.', false, 0, 'kernel_finalize', true, true, 3)
-  assert.ok(paced.includes('at most 3 evaluations this turn'))
+  assert.ok(paced.includes('AT MOST 3 evaluations'))
+  assert.ok(paced.includes('Failed and aborted runs count'))
+  // Leading, not trailing: a footnote is what the model drifted past.
+  assert.ok(paced.indexOf('PACE') < paced.indexOf(REVIEW_HEADER))
   assert.ok(paced.includes(CONTINUE_TRAILER)) // parse anchor intact after the advice block
   assert.ok(/3\/20 evaluations used/.test(paced))
   // The inventory (taskless) drive is paced too; 0 disables the line.
   assert.ok(continuationText(1, 0, 20, null, false, 0, 'kernel_finalize', false, true, 3)
-    .includes('at most 3 evaluations this turn'))
-  assert.ok(!continuationText(2, 3, 20, null).includes('evaluations this turn'))
+    .includes('AT MOST 3 evaluations'))
+  assert.ok(!continuationText(2, 3, 20, null).includes('PACE'))
+})
+
+test('supervisor digest reports the pace cap against what the last turn ran', () => {
+  const state = { ...initialLoopState(), armed: true, budget: 20, round: 3 }
+  const s = {
+    ...series([done(20, 5), done(30, 4), done(40, 4), done(50, 4)]),
+    rounds: [{ seq: 10, round: 3 }],
+  }
+  const digest = supervisorDigest(s, state, 10, 3)
+  assert.ok(digest.includes('at most 3 evaluations per turn'))
+  assert.ok(digest.includes('the last turn ran 4'))
+  // Without a cap configured the digest stays silent about pace.
+  assert.ok(!supervisorDigest(s, state, 10, 0).includes('Pace:'))
 })
 
 test('unreviewedEvals: true when rows exist past the last delivered review', () => {

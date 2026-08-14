@@ -181,11 +181,17 @@ function digestRow(point: WireIteration, index: number, bestIndex: number | null
  * @param tail - iterations included from the end.
  * @returns the digest text.
  */
-export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10): string {
+export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10, evalsPerTurn = 0): string {
   const evalsDone = completedEvals(series)
   const lines: string[] = [
     `Budget: ${String(evalsDone)}/${String(state.budget)} evaluations used; continuation round ${String(state.round)}.`,
   ]
+  if (evalsPerTurn > 0 && series.rounds.length > 0) {
+    const lastDriveSeq = series.rounds[series.rounds.length - 1]?.seq ?? -1
+    const lastTurn = series.iterations.filter(p => p.seq > lastDriveSeq).length
+    lines.push(`Pace: the drive asks for at most ${String(evalsPerTurn)} evaluations per turn; `
+      + `the last turn ran ${String(lastTurn)}.`)
+  }
   const stagnant = stagnationCount(series)
   if (stagnant >= 3) lines.push(`Stagnation: ${String(stagnant)} evaluations since the last improvement.`)
   const shellCount = series.iterations.filter(p => p.channel === 'shell').length
@@ -227,6 +233,7 @@ export const SUPERVISOR_SYSTEM = [
   '- approach diversity: several consecutive failures of one family should trigger a family switch;',
   '- plan hygiene: plans should exist and match what the table shows;',
   '- provenance: on [shell] rows the trajectory is self-reported — judge whether each cmd is a real benchmark invocation and whether the numbers move like real measurements;',
+  '- pace: the drive caps evaluations per turn so the loop can steer mid-run; a turn that overran the cap is a discipline miss worth one line of advice;',
   '- finishing: near budget exhaustion the agent should finalize its best honest result.',
   'If the run looks healthy, reply `OK: ` followed by ONE short sentence naming what you checked and the strongest '
   + 'signal you saw (e.g. "OK: four families tried, best is replay-consistent, budget on track"). The sentence is '
@@ -331,6 +338,15 @@ export function continuationText(
   const lines = [
     `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
   ]
+  // The pace instruction leads the message: at the bottom it read as a
+  // footnote and the model drifted to double the cap by the second turn.
+  if (evalsPerTurn > 0) {
+    lines.push(
+      `PACE — hard stop for this turn: run AT MOST ${String(evalsPerTurn)} evaluations, then end the turn and `
+      + 'report, even mid-idea. Failed and aborted runs count toward that number. The loop reviews your progress '
+      + 'and drives you straight onward, so ending the turn costs you nothing and is not a reason to finalize early.',
+    )
+  }
   if (stagnant >= 3) {
     lines.push(`Note: ${String(stagnant)} evaluations since the last improvement — consider re-profiling or `
       + 'switching approach family before spending more budget on the current line.')
@@ -368,12 +384,6 @@ export function continuationText(
       + 'reporting your resolved plan with kernel_plan before the first evaluation. '
       + 'If the workspace carries no task either, ask the user what to optimize and stop — never adopt '
       + 'anything found outside the working directory.',
-    )
-  }
-  if (evalsPerTurn > 0) {
-    lines.push(
-      `Pace: complete at most ${String(evalsPerTurn)} evaluations this turn, then settle and report — `
-      + 'the loop reviews progress and drives you onward; do not finalize early just because the turn ends.',
     )
   }
   return lines.join('\n')

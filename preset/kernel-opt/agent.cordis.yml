@@ -74,10 +74,13 @@
       reward_hack_detected. Never print that line from anything that is not a
       real evaluation: the panel shows the producing command line for every
       point and a second model may audit them. (3) Iterate without
-      per-iteration ceremony, but settle in small batches: after a few
-      evaluations (about three), stop the turn and report progress — a
-      driving loop reviews and continues you, and short turns are what let
-      it and its supervisor steer mid-run. git checkpoint commits at three
+      per-iteration ceremony, but settle in small batches: when a loop
+      drives you it states a per-turn evaluation cap, and that cap is a
+      HARD stop — reach it and end the turn with a short progress report,
+      even in the middle of an idea, counting failed and aborted runs
+      toward it. Short turns are the only way the loop and its supervisor
+      can steer mid-run, and the loop drives you onward immediately, so
+      ending a turn costs you nothing. git checkpoint commits at three
       moments: new best, approach-family switch, finalize. Re-report with
       kernel_plan whenever the approach moves on — it is the ONLY channel
       into the human's plan panel, so a progress write-up in your reply
