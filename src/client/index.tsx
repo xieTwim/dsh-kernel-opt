@@ -55,7 +55,7 @@ const zh = {
   'pop.budget': '迭代次数',
   'pop.supervise': '外部监督',
   'pop.model': '监督模型',
-  'pop.supNote': '已开启：循环每次驱动 Agent 继续之前，监督模型会先复审当前进展，建议自动转交 Agent。',
+  'pop.supNote': '已开启：循环每次驱动 Agent 继续之前，监督模型会先复审当前进展，建议自动转交 Agent；Agent 在预算未用完时宣布完成，也由监督裁定是否还有优化空间。',
   'pop.footer': '启动后 Agent 立即开始工作；每当一段工作结束而任务尚未完成，循环会自动驱动它继续，直到迭代次数达到上限。输入框中的草稿不会被自动发送；优化曲线与完整记录见「评测」页。',
   'sup.on': 'on',
   'sup.off': 'off',
@@ -96,6 +96,20 @@ const zh = {
   'row.wrapup': '收尾',
   'advice.wrapup': '收尾复审',
   'advice.audit': '终审',
+  'advice.challenge': '早停质询',
+  'advice.ok': '无异议',
+  'advice.scopeRound': '审查循环纪律：预算使用是否合理、方案与实测是否一致、连续失败是否该换方向、数据来源是否可信。',
+  'advice.scopeWrapup': '收尾前的最后一次复审：确认收尾时机与最终结果的数据来源。',
+  'advice.scopeAudit': '收尾后的终审：核对最终表格与最终数字的来源（含插件复测）。',
+  'advice.scopeChallenge': 'Agent 在预算未用完时宣布完成，监督裁定是否还有优化空间；给出未尝试方向即推翻收尾，run 继续。',
+  'advice.progress': '复审时进度',
+  'advice.covers': '覆盖迭代',
+  'advice.coversNone': '本次复审后暂无新迭代',
+  'advice.verdict': '结论',
+  'advice.expandHint': '点击展开查看该次复审的范围与结论',
+  'ctl.supDep': '监督只在循环的检查点运行，启动循环后才会触发。',
+  'ctl.supOff': '未开启监督：Agent 自行判断何时收尾，循环仅保留预算与停滞兜底。',
+  'ctl.supOn': '每次驱动前先复审；Agent 提前收尾时，由监督裁定是否还有优化空间。',
   'chips.wrapup': '收尾评测 {count} 次',
   'tip.iters': '循环内完成的优化迭代（不含收尾评测）',
   'tip.wrapup': '循环结束后的收尾评测（最终验证与复测），不计入迭代预算',
@@ -133,7 +147,7 @@ const en = {
   'pop.budget': 'Max iterations',
   'pop.supervise': 'External supervision',
   'pop.model': 'Supervisor model',
-  'pop.supNote': 'On: before the loop drives the agent onward, the supervisor reviews progress first; its advice is handed to the agent automatically.',
+  'pop.supNote': 'On: before the loop drives the agent onward, the supervisor reviews progress first and its advice is handed to the agent; when the agent declares itself finished with budget left, the supervisor rules on whether headroom remains.',
   'pop.footer': 'Starting puts the agent to work immediately; whenever it stops with the task unfinished, the loop drives it onward until the iteration limit is reached. Composer drafts are never auto-sent; the curve and full record live on the Evaluations tab.',
   'sup.on': 'on',
   'sup.off': 'off',
@@ -174,6 +188,20 @@ const en = {
   'row.wrapup': 'wrap-up',
   'advice.wrapup': 'wrap-up review',
   'advice.audit': 'final review',
+  'advice.challenge': 'early-stop challenge',
+  'advice.ok': 'no objection',
+  'advice.scopeRound': 'Audits loop discipline: budget spend, plans vs measurements, family switches after repeated failure, and provenance.',
+  'advice.scopeWrapup': 'The last review before wrap-up: whether it is time to finish, and where the final numbers came from.',
+  'advice.scopeAudit': 'Post-finalize audit: the final table and the provenance of the final number (including the plugin replay).',
+  'advice.scopeChallenge': 'The agent declared it finished with budget left; the supervisor ruled on remaining headroom — naming untried directions overrules the finalize and the run continues.',
+  'advice.progress': 'Progress at review',
+  'advice.covers': 'Covers iterations',
+  'advice.coversNone': 'No new iterations since this review',
+  'advice.verdict': 'Verdict',
+  'advice.expandHint': 'Click a row to see what that review covered and concluded',
+  'ctl.supDep': 'Supervision runs at the loop\'s checkpoints — it only fires once the loop is started.',
+  'ctl.supOff': 'Off: the agent decides when to wrap up; the loop keeps only its budget and stall guards.',
+  'ctl.supOn': 'Reviews before each continuation, and rules on remaining headroom when the agent wraps up early.',
   'chips.wrapup': '{count} wrap-up checks',
   'tip.iters': 'Optimization iterations completed in the loop (wrap-up checks excluded)',
   'tip.wrapup': 'Wrap-up evaluation after the loop ended (final verification / replay); not counted against the iteration budget',
@@ -684,6 +712,61 @@ function reviewBefore(rounds: readonly WireRound[], seq: number): WireRound | un
   return found
 }
 
+/** Which kind of review a round carries, for its label and scope note. */
+function reviewKind(round: WireRound): 'audit' | 'challenge' | 'wrapup' | 'round' {
+  if (round.audit === true) return 'audit'
+  if (round.challenge === true) return 'challenge'
+  if (round.wrapUp === true) return 'wrapup'
+  return 'round'
+}
+
+/**
+ * Expanded detail of one supervision record. A verdict alone ("OK") tells the
+ * reader nothing, so the row opens into what that review actually was: which
+ * question the supervisor was answering, the iterations it covered (the log
+ * span since the previous review), the progress at the time, and the verdict
+ * in full.
+ */
+function ReviewDetail(props: {
+  round: WireRound
+  rounds: readonly WireRound[]
+  iterations: readonly WireIteration[]
+  t: PropsLocale<'kernel-opt'>['t']
+}): ReactNode {
+  const { round, rounds, iterations, t } = props
+  const kind = reviewKind(round)
+  const scope = { audit: 'advice.scopeAudit', challenge: 'advice.scopeChallenge', wrapup: 'advice.scopeWrapup', round: 'advice.scopeRound' } as const
+  // The review saw everything logged since the previous review-carrying round.
+  const priorSeq = rounds
+    .filter(r => r.review !== undefined && r.seq < round.seq)
+    .reduce((seq, r) => Math.max(seq, r.seq), -1)
+  const covered = iterations
+    .map((p, i) => ({ p, n: i + 1 }))
+    .filter(({ p }) => p.seq > priorSeq && p.seq < round.seq)
+  const first = covered[0]?.n
+  const last = covered[covered.length - 1]?.n
+  return (
+    <div style={{
+      padding: '6px 4px 10px 66px',
+      display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: COLOR.dim,
+    }}>
+      <div style={{ color: COLOR.caption }}>{t(scope[kind])}</div>
+      <div>
+        {t('advice.covers')}：
+        {first === undefined
+          ? t('advice.coversNone')
+          : first === last ? `#${String(first)}` : `#${String(first)} – #${String(last)}`}
+        {round.evalsUsed !== undefined && round.budget !== undefined
+          ? ` · ${t('advice.progress')} ${String(round.evalsUsed)}/${String(round.budget)}`
+          : ''}
+      </div>
+      <div style={{ color: COLOR.text, whiteSpace: 'pre-wrap' }}>
+        {t('advice.verdict')}：{round.review === 'ok' ? `✓ ${t('advice.ok')}` : round.review}
+      </div>
+    </div>
+  )
+}
+
 /** One structured artifact change, rendered as labeled monospace blocks. */
 function ChangeBlock(props: { change: WireChange; t: PropsLocale<'kernel-opt'>['t'] }): ReactNode {
   const { change, t } = props
@@ -931,6 +1014,7 @@ export function KernelOptTab(
   const models = useModels()
   const [budgetDraft, setBudgetDraft] = useState<string | null>(null)
   const [expandedSeq, setExpandedSeq] = useState<number | null>(null)
+  const [expandedReview, setExpandedReview] = useState<number | null>(null)
 
   /** Drive the control route, then re-pull so the panel reflects it now. */
   const post = async (action: string, extra?: Record<string, unknown>): Promise<void> => {
@@ -1038,21 +1122,31 @@ export function KernelOptTab(
         </div>
         {control !== undefined
           ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                <span style={rowLabelStyle}>{t('pop.supervise')}</span>
-                <SuperviseToggle
-                  control={control}
-                  t={t}
-                  onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
-                />
-                <span style={{ ...rowLabelStyle, marginLeft: 6 }}>{t('pop.model')}</span>
-                <SupervisorSelect
-                  control={control}
-                  models={models}
-                  t={t}
-                  onUse={(provider, model) => { void post('supervise-use', { provider, model }) }}
-                />
-              </div>
+              <>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  <span style={rowLabelStyle}>{t('pop.supervise')}</span>
+                  <SuperviseToggle
+                    control={control}
+                    t={t}
+                    onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
+                  />
+                  <span style={{ ...rowLabelStyle, marginLeft: 6 }}>{t('pop.model')}</span>
+                  <SupervisorSelect
+                    control={control}
+                    models={models}
+                    t={t}
+                    onUse={(provider, model) => { void post('supervise-use', { provider, model }) }}
+                  />
+                </div>
+                {/* Supervision is a setting OF the loop, not a peer feature: it
+                    only ever runs at the loop's checkpoints. The caption states
+                    which half of that relationship currently applies. */}
+                <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                  {!control.supervisor.enabled
+                    ? t('ctl.supOff')
+                    : control.loop.armed ? t('ctl.supOn') : t('ctl.supDep')}
+                </div>
+              </>
             )
           : null}
         {iterations.length > 0 || (series !== null && series.profileSeqs.length > 0)
@@ -1157,19 +1251,42 @@ export function KernelOptTab(
               {reviewedRounds.length === 0
                 ? <div style={{ fontSize: 13, color: COLOR.caption }}>{t('advice.waiting')}</div>
                 : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
-                      {[...reviewedRounds].reverse().map(round => (
-                        <div key={round.seq} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: '20px' }}>
-                          <span style={{ flex: 'none', minWidth: 56, color: COLOR.caption }}>
-                            {round.audit === true
-                              ? t('advice.audit')
-                              : round.wrapUp === true ? t('advice.wrapup') : t('advice.round', { n: round.round ?? '—' })}
-                          </span>
-                          {round.review === 'ok'
-                            ? <span style={{ color: COLOR.ok }}>✓ OK</span>
-                            : <span style={{ color: COLOR.dim, whiteSpace: 'pre-wrap' }}>{round.review}</span>}
-                        </div>
-                      ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
+                      {[...reviewedRounds].reverse().map((round) => {
+                        const kind = reviewKind(round)
+                        const open = expandedReview === round.seq
+                        return (
+                          <div key={round.seq}>
+                            <div
+                              style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: '22px', cursor: 'pointer' }}
+                              title={t('advice.expandHint')}
+                              onClick={() => { setExpandedReview(open ? null : round.seq) }}
+                            >
+                              <span style={{ flex: 'none', width: 12, color: COLOR.caption }}>{open ? '▾' : '▸'}</span>
+                              <span style={{ flex: 'none', minWidth: 56, color: COLOR.caption }}>
+                                {kind === 'audit'
+                                  ? t('advice.audit')
+                                  : kind === 'challenge'
+                                    ? t('advice.challenge')
+                                    : kind === 'wrapup' ? t('advice.wrapup') : t('advice.round', { n: round.round ?? '—' })}
+                              </span>
+                              {round.review === 'ok'
+                                ? <span style={{ color: COLOR.ok }}>✓ {t('advice.ok')}</span>
+                                : (
+                                    <span style={{
+                                      color: COLOR.dim, whiteSpace: 'nowrap',
+                                      overflow: 'hidden', textOverflow: 'ellipsis',
+                                    }}>
+                                      {round.review}
+                                    </span>
+                                  )}
+                            </div>
+                            {open
+                              ? <ReviewDetail round={round} rounds={rounds} iterations={iterations} t={t} />
+                              : null}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
               {earlierReviews > 0
@@ -1352,9 +1469,12 @@ export function ChatLoopButton(
                     onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
                   />
                 </div>
-                {control.supervisor.enabled
-                  ? <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>{t('pop.supNote')}</div>
-                  : null}
+                {/* Both states get a note: supervision is what gives the loop
+                    authority over an early finalize, so its absence is a
+                    meaningful choice the user should see stated. */}
+                <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                  {control.supervisor.enabled ? t('pop.supNote') : t('ctl.supOff')}
+                </div>
                 <div style={popoverRowStyle}>
                   <span>{t('pop.model')}</span>
                   <SupervisorSelect

@@ -122,6 +122,12 @@ export interface WireRound {
   wrapUp?: boolean
   /** This message was the closing audit after a finalized run. */
   audit?: boolean
+  /**
+   * This round overruled an early finalize: the agent declared the run
+   * finished, the supervisor found headroom, and `review` carries the untried
+   * directions it named.
+   */
+  challenge?: boolean
 }
 
 /** Loop + supervisor control state for the panel. */
@@ -300,6 +306,12 @@ export const AUDIT_LINE_PREFIX = '[kernel-loop final review]'
 export const WRAPUP_CLOSE_LINE = 'The kernel loop is ending'
 /** Line opening the audit's closing instructions (ends a review block). */
 export const AUDIT_CLOSE_LINE = 'Address the findings'
+/**
+ * Sentence marking a continuation as an overruled finalize (the run was
+ * declared finished and the supervisor found headroom). Sits inside the
+ * challenge's trailer, so the projection flags the round from the text alone.
+ */
+export const CHALLENGE_LINE = 'the run is NOT over'
 /** Header line introducing a supervisor advice block. */
 export const REVIEW_HEADER = 'Supervisor review (advisory, from the second model):'
 /** Whole line recording that the supervisor reviewed and approved. */

@@ -243,6 +243,11 @@ test('project: a finalize challenge lands as that round\'s review, advice intact
   assert.equal(rounds[0]?.round, 2)
   assert.equal(rounds[0]?.review, 'Try a fused epilogue.')
   assert.equal(rounds[0]?.evalsUsed, 6)
+  assert.equal(rounds[0]?.challenge, true)
+  // An ordinary continuation carrying advice is NOT a challenge.
+  seq = 0
+  const plain = project('s', [loopMessage(continuationText(2, 6, 20, 'Try a fused epilogue.'))]).rounds
+  assert.equal(plain[0]?.challenge, undefined)
 })
 
 test('project: non-plugin user messages never become rounds', () => {

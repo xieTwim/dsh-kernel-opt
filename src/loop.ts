@@ -12,7 +12,7 @@
  */
 import type { WireIteration, WireSeries } from './wire.ts'
 import {
-  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
+  AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CHALLENGE_LINE, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
   REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX,
 } from './wire.ts'
 
@@ -391,7 +391,7 @@ export function challengeText(
     REVIEW_HEADER,
     advice,
     '',
-    `${CONTINUE_TRAILER}: the run is NOT over. You declared it finished, but budget remains and the supervisor `
+    `${CONTINUE_TRAILER}: ${CHALLENGE_LINE}. You declared it finished, but budget remains and the supervisor `
     + 'identified headroom above — treat your finalize as provisional and pursue those directions now.',
     'Do not re-finalize the same artifact to end the run: either produce a measurement that beats the current best, '
     + 'or come back with EVIDENCE that a direction is dominated (what you tried, what it measured, why it cannot win).',
