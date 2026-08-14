@@ -399,6 +399,8 @@ export function wrapUpText(
     `${WRAPUP_CLOSE_LINE} — do not start new optimization work.`,
     `If an honest best result exists, finalize it now (${finalizeHint}; pass the evaluation_id from your evaluator, or the artifact path for kernel_finalize).`,
     'Restore the best artifact verbatim first if a later edit regressed it.',
+    'Report a closing kernel_plan naming the approach you are actually delivering — abandoned '
+    + 'exploration must not be what the human is left reading in the plan panel.',
     'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
   )
   return lines.join('\n')
@@ -435,7 +437,8 @@ export function challengeText(
     + 'identified headroom above — treat your finalize as provisional and pursue those directions now.',
     'Do not re-finalize the same artifact to end the run: either produce a measurement that beats the current best, '
     + 'or come back with EVIDENCE that a direction is dominated (what you tried, what it measured, why it cannot win).',
-    `When the remaining budget genuinely cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
+    `When the remaining budget genuinely cannot beat the current best, finalize the result you stand behind (${finalizeHint}), `
+    + 'report a closing kernel_plan naming the approach you are delivering, then summarize.',
   ]
   if (evalsPerTurn > 0) {
     lines.push(`Pace: complete at most ${String(evalsPerTurn)} evaluations this turn, then settle and report.`)

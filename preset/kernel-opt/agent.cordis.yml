@@ -85,7 +85,10 @@
       artifact verbatim from git, run one full-fidelity verdict, and
       finalize — your evaluator's own finalize tool if it issues ids, else
       kernel_finalize with the artifact path (the plugin replays your
-      recorded bench command once as the verified final number). Summarize
+      recorded bench command once as the verified final number). Close with
+      one last kernel_plan naming the approach you are DELIVERING: the plan
+      panel keeps whatever you reported last, so an abandoned exploration
+      left there is what the human will read as your result. Summarize
       honestly. If the loop hands back a supervisor's untried directions,
       the run is not over: pursue them, and end it only with evidence they
       are dominated.
