@@ -71,6 +71,7 @@ const zh = {
   'advice.round': '第 {n} 次复审',
   'advice.earlier': '（此前循环的 {n} 条复审记录未显示，完整历史保留在会话日志中）',
   'reason.finalized': '已完成收尾',
+  'reason.converged': '监督确认无进一步优化空间，已收尾',
   'reason.budget': '迭代次数已用完，已请求收尾',
   'reason.no-progress': '连续无进展，已请求收尾',
   'reason.stopped': '手动停止',
@@ -148,6 +149,7 @@ const en = {
   'advice.round': 'review {n}',
   'advice.earlier': '({n} review records from earlier loop runs hidden; the full history stays in the session log)',
   'reason.finalized': 'finalized',
+  'reason.converged': 'supervisor confirmed no further headroom; wrapped up',
   'reason.budget': 'iteration limit reached, wrap-up requested',
   'reason.no-progress': 'stalled, wrap-up requested',
   'reason.stopped': 'stopped manually',
@@ -968,7 +970,8 @@ export function KernelOptTab(
   // aligned with the armed budget, and their table rows carry a 收尾 badge.
   const wrapUpChecks = iterations.filter(p => p.channel === 'replay' || inWrapUpPhase(rounds, p.seq)).length
   const reasonLabel = (reason: string): string =>
-    reason === 'finalized' || reason === 'budget' || reason === 'no-progress' || reason === 'stopped'
+    reason === 'finalized' || reason === 'converged' || reason === 'budget'
+    || reason === 'no-progress' || reason === 'stopped'
       ? t(`reason.${reason}`)
       : reason
 

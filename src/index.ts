@@ -40,9 +40,9 @@ import type {} from '@deepseek-ai/dsh-commands'
 import { DEFAULT_PROJECTION, hasUserTask, project } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import {
-  SUPERVISOR_SYSTEM, adviceFromReply, completedEvals, continuationText,
-  decideContinuation, finalAuditText, initialLoopState, reviewable, stagnationCount,
-  supervisorDigest, unreviewedEvals, wrapUpText,
+  HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, completedEvals,
+  continuationText, decideContinuation, finalAuditText, initialLoopState, reviewable,
+  stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
@@ -92,6 +92,13 @@ export interface Config {
      * finish the whole run in one turn (default 3; 0 disables).
      */
     evalsPerTurn?: number
+    /**
+     * Whether an early finalize is put to the supervisor before it ends the
+     * run: with budget left, "finished" becomes a proposal the supervisor can
+     * overrule by naming untried directions (default true; needs supervision
+     * on — without a supervisor the agent's finalize stands as before).
+     */
+    challengeFinalize?: boolean
   }
   /**
    * 「算子优化模式」agent preset self-install. On by default: when the
@@ -258,6 +265,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const maxNoProgress = config.loop?.maxNoProgressRounds ?? 2
   const defaultBudget = config.loop?.defaultBudget ?? 20
   const evalsPerTurn = config.loop?.evalsPerTurn ?? 3
+  const challengeFinalize = config.loop?.challengeFinalize ?? true
   const finalizeHint = projection.finalizeTools.join(' / ')
 
   /** Per-session loop state; sessions without an entry never looped. */
@@ -439,24 +447,35 @@ export function apply(ctx: Context, config: Config = {}): void {
       timers.clear()
     }, 'kernel-opt: loop timers')
 
-    /** One supervisor review; any failure degrades to unreviewed/no advice. */
+    /**
+     * One supervisor review; any failure degrades to unreviewed/no advice.
+     * `mode` picks the question: `round` audits loop discipline mid-run,
+     * `closing` audits the finished table, `headroom` decides whether an
+     * early finalize stands (its own rubric, since "looks fine" must not end
+     * a run with budget left).
+     */
     const review = async (
       state: LoopState,
       series: WireSeries,
-      closing = false,
+      mode: 'round' | 'closing' | 'headroom' = 'round',
     ): Promise<{ advice: string | null; reviewed: boolean }> => {
       const supervisor = effectiveSupervisor(state)
       if (supervisor === undefined || !state.supervise) return { advice: null, reviewed: false }
       try {
-        const digest = closing
-          ? `${supervisorDigest(series, state)}\nThe run has finalized — this is the closing audit: judge the final `
+        const base = supervisorDigest(series, state)
+        const digest = mode === 'closing'
+          ? `${base}\nThe run has finalized — this is the closing audit: judge the final `
             + 'table and its provenance (the finalize and its replay above all); continuation advice is moot.'
-          : supervisorDigest(series, state)
+          : mode === 'headroom'
+            ? `${base}\nThe agent has just declared the run FINISHED with `
+              + `${String(state.budget - completedEvals(series))} evaluations of budget still unspent. `
+              + 'Decide whether that ending stands.'
+            : base
         let reply = ''
         const stream = lctx.llm.stream({
           provider: supervisor.provider,
           model: supervisor.model,
-          system: SUPERVISOR_SYSTEM,
+          system: mode === 'headroom' ? HEADROOM_SYSTEM : SUPERVISOR_SYSTEM,
           messages: [createUserMessage({
             content: [{ type: 'text', text: digest }],
             source: { kind: 'plugin', plugin: PLUGIN_ID },
@@ -494,18 +513,45 @@ export function apply(ctx: Context, config: Config = {}): void {
       const series = project(sessionId, session.events, projection)
       const decision = decideContinuation(series, state, maxNoProgress)
       if (decision.action === 'stop') {
-        // A finalized run can end with rows no review ever saw — a single-turn
-        // run's only checkpoint lands after the finalize. With supervision on,
-        // one closing audit covers them; its verdict goes to the agent, so
-        // findings can still be corrected before the run ends (user ruling
-        // 2026-08-14). The loop disarms first, so the reply turn's own settle
-        // exits at the top of this checkpoint and nothing re-drives.
-        if (state.supervise && decision.reason === 'finalized' && unreviewedEvals(series)) {
-          const { advice, reviewed } = await review(state, series, true)
+        // The agent finalized. Who gets to end the run depends on whether
+        // budget is left: with supervision on and budget unspent, the
+        // supervisor is asked whether the ending stands (user ruling
+        // 2026-08-14 — an agent calling "good enough" at 6/20 wastes the
+        // budget the human set). Headroom found → the finalize is overruled
+        // and the run continues; DONE → it stands, and the same call doubles
+        // as the closing audit.
+        const budgetLeft = state.budget - decision.evalsDone
+        const lastFinalizeSeq = series.iterations
+          .filter(p => p.finalized === true)
+          .reduce((seq, p) => Math.max(seq, p.seq), -1)
+        const challengeable = challengeFinalize && state.supervise && budgetLeft > 0
+          && lastFinalizeSeq > (state.challengedFinalizeSeq ?? -1)
+        if (challengeable || (state.supervise && unreviewedEvals(series))) {
+          const { advice, reviewed } = await review(state, series, challengeable ? 'headroom' : 'closing')
           state.lastAdvice = advice ?? state.lastAdvice
+          // Re-check after the (possibly slow) review: a human message or a
+          // stop that arrived meanwhile owns the session.
           if (!state.armed || lctx.agents.get(SessionId(sessionId)) !== agent || agent.status !== 'idle') return
+          if (challengeable && advice !== null) {
+            // Overruled: stay armed, spend a round, hand the agent the
+            // untried directions. Recording the challenged finalize keeps the
+            // next checkpoint from re-deciding on the same one.
+            state.challengedFinalizeSeq = lastFinalizeSeq
+            state.round += 1
+            state.lastEvalCount = decision.evalsDone
+            agent.followup(createUserMessage({
+              content: [{
+                type: 'text',
+                text: challengeText(state.round, decision.evalsDone, state.budget, advice, finalizeHint, evalsPerTurn),
+              }],
+              source: { kind: 'plugin', plugin: PLUGIN_ID },
+            }))
+            return
+          }
+          // The ending stands. A challenged-and-approved run converged on the
+          // supervisor's own verdict; a plain audit keeps the finalize reason.
           state.armed = false
-          state.stopReason = decision.reason
+          state.stopReason = challengeable ? 'converged' : decision.reason
           if (reviewed) {
             agent.followup(createUserMessage({
               content: [{ type: 'text', text: finalAuditText(advice) }],
@@ -594,6 +640,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       state.lastEvalCount = 0
       state.noProgressRounds = 0
       delete state.stopReason
+      // A re-arm re-opens the question: an earlier run's finalize may be
+      // challenged again under the new budget.
+      delete state.challengedFinalizeSeq
       scheduleCheckpoint(sessionId, 10)
     }
     bridge.arm = armLoop

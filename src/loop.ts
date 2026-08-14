@@ -29,13 +29,20 @@ export interface LoopState {
   /** Consecutive continuations that produced no new completed evaluation. */
   noProgressRounds: number
   /** Why the loop disarmed, for the panel (undefined while armed/never armed). */
-  stopReason?: 'finalized' | 'budget' | 'no-progress' | 'stopped'
+  stopReason?: 'finalized' | 'converged' | 'budget' | 'no-progress' | 'stopped'
   /** Whether the supervisor reviews at continuation points. */
   supervise: boolean
   /** Session-level supervisor route override (wins over plugin config). */
   supervisorOverride?: { provider: string; model: string }
   /** Last supervisor advice delivered (panel display). */
   lastAdvice?: string
+  /**
+   * seq of the finalize the supervisor already challenged and overruled. A
+   * finalize at or below it no longer ends the run — the agent declared done,
+   * the supervisor found headroom, and the run continues; only a NEWER
+   * finalize opens a fresh stop decision.
+   */
+  challengedFinalizeSeq?: number
 }
 
 /** A fresh disarmed state. */
@@ -112,7 +119,12 @@ export function decideContinuation(
   maxNoProgressRounds: number,
 ): LoopDecision {
   const evalsDone = completedEvals(series)
-  if (series.iterations.some(p => p.finalized === true)) {
+  // A finalize the supervisor already overruled is spent: the run continues
+  // on the ordinary budget/progress rules until the agent finalizes AGAIN.
+  const lastFinalizeSeq = series.iterations
+    .filter(p => p.finalized === true)
+    .reduce((seq, p) => Math.max(seq, p.seq), -1)
+  if (lastFinalizeSeq > (state.challengedFinalizeSeq ?? -1)) {
     return { action: 'stop', reason: 'finalized', evalsDone }
   }
   if (evalsDone >= state.budget) {
@@ -197,11 +209,32 @@ export const SUPERVISOR_SYSTEM = [
   'Otherwise reply with at most 3 short imperative sentences of advice. No preamble, no code.',
 ].join('\n')
 
+/**
+ * Rubric for the finalize challenge: the agent declared the run finished
+ * while budget remained, and the supervisor decides whether that stands. The
+ * bar is deliberately asymmetric — "the current result looks fine" is not a
+ * reason to stop; only an argued absence of headroom is.
+ */
+export const HEADROOM_SYSTEM = [
+  'You supervise a kernel-optimization agent that just declared its run FINISHED while evaluation budget remained.',
+  'You decide whether that ending stands. Judge from the digest: the plans it stated, the evaluation table, and its provenance.',
+  'The bar is asymmetric — an agent stopping early wastes the budget the human paid for:',
+  '- "the result is good enough" or "the improvement is large already" is NOT a reason to stop;',
+  '- a plateau over the last few evaluations is not convergence if whole approach families are untried;',
+  '- untried families are evidence of headroom: different algorithm/layout, different tiling or blocking,',
+  '  fusion or launch-overhead removal, precision/vectorization, library or compiler paths, tuning of exposed parameters;',
+  '- stopping IS justified when the remaining ideas are argued to be dominated, when measurements sit at a stated',
+  '  hardware or semantic floor, or when several distinct families all failed to beat the current best.',
+  'If the run is genuinely converged, reply exactly DONE.',
+  'Otherwise reply with at most 3 short imperative sentences, each naming a CONCRETE untried direction worth one evaluation. No preamble, no code.',
+].join('\n')
+
 /** Strip a supervisor reply to advice, or null when it approves or is empty. */
 export function adviceFromReply(reply: string): string | null {
   const text = reply.trim()
   if (text.length === 0) return null
   if (/^ok[.!]?$/i.test(text)) return null
+  if (/^done[.!]?$/i.test(text)) return null
   return text.length > 600 ? `${text.slice(0, 600)}…` : text
 }
 
@@ -328,6 +361,45 @@ export function wrapUpText(
     'Restore the best artifact verbatim first if a later edit regressed it.',
     'Then summarize the run: best result, what worked, what failed, and what a future attempt should try first.',
   )
+  return lines.join('\n')
+}
+
+/**
+ * Challenge message: the agent finalized with budget left and the supervisor
+ * found headroom, so the run continues and the finalize is provisional. Rides
+ * the ordinary round anchors — the panel records it as that round's review
+ * like any other, and the counters stay parseable.
+ * @param round - continuation round being delivered (1-based).
+ * @param evalsDone - completed evaluations so far.
+ * @param budget - armed budget.
+ * @param advice - the supervisor's concrete untried directions.
+ * @param finalizeHint - finalize tool name(s) to name in the closing line.
+ * @param evalsPerTurn - per-turn pace cap (0 = no pace line).
+ * @returns the followup text.
+ */
+export function challengeText(
+  round: number,
+  evalsDone: number,
+  budget: number,
+  advice: string,
+  finalizeHint = 'run_finalize / kernel_finalize',
+  evalsPerTurn = 0,
+): string {
+  const lines = [
+    `${LOOP_LINE_PREFIX}${String(round)}] ${String(evalsDone)}/${String(budget)} evaluations used.`,
+    '',
+    REVIEW_HEADER,
+    advice,
+    '',
+    `${CONTINUE_TRAILER}: the run is NOT over. You declared it finished, but budget remains and the supervisor `
+    + 'identified headroom above — treat your finalize as provisional and pursue those directions now.',
+    'Do not re-finalize the same artifact to end the run: either produce a measurement that beats the current best, '
+    + 'or come back with EVIDENCE that a direction is dominated (what you tried, what it measured, why it cannot win).',
+    `When the remaining budget genuinely cannot beat the current best, finalize the result you stand behind (${finalizeHint}), then summarize.`,
+  ]
+  if (evalsPerTurn > 0) {
+    lines.push(`Pace: complete at most ${String(evalsPerTurn)} evaluations this turn, then settle and report.`)
+  }
   return lines.join('\n')
 }
 

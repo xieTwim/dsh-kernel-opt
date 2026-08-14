@@ -7,7 +7,7 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { collectResultText, hasUserTask, matchesTool, parseResultJson, project } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
-import { continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
+import { challengeText, continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
 import { inWrapUpPhase, latestRunStart } from '../src/wire.ts'
 import type { WireRound } from '../src/wire.ts'
 
@@ -231,6 +231,18 @@ test('project: closing-audit parses as audit round; review blocks cut at the clo
   assert.equal(rounds[1]?.review, 'ok')
   assert.equal(rounds[2]?.audit, true)
   assert.equal(rounds[2]?.review, 'Replay disagrees with the self-reported final; re-verify.')
+})
+
+test('project: a finalize challenge lands as that round\'s review, advice intact', () => {
+  seq = 0
+  const events: ProjectionEvent[] = [
+    loopMessage(challengeText(2, 6, 20, 'Try a fused epilogue.', 'kernel_finalize', 3)),
+  ]
+  const { rounds } = project('s', events)
+  assert.equal(rounds.length, 1)
+  assert.equal(rounds[0]?.round, 2)
+  assert.equal(rounds[0]?.review, 'Try a fused epilogue.')
+  assert.equal(rounds[0]?.evalsUsed, 6)
 })
 
 test('project: non-plugin user messages never become rounds', () => {
