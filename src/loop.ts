@@ -340,11 +340,17 @@ export function continuationText(
   ]
   // The pace instruction leads the message: at the bottom it read as a
   // footnote and the model drifted to double the cap by the second turn.
+  // The checkpoint framing is load-bearing: a forced write-up mid-idea
+  // otherwise crystallises an unfinished line into a negative verdict, and
+  // the model then abandons a direction it was one evaluation away from.
   if (evalsPerTurn > 0) {
     lines.push(
       `PACE — hard stop for this turn: run AT MOST ${String(evalsPerTurn)} evaluations, then end the turn and `
       + 'report, even mid-idea. Failed and aborted runs count toward that number. The loop reviews your progress '
       + 'and drives you straight onward, so ending the turn costs you nothing and is not a reason to finalize early.',
+      'That report is a CHECKPOINT, not a verdict: say what you are in the middle of and what you will run next. '
+      + 'An idea you had to cut short is unfinished, not refuted — do not write it off as a dead end, and do not '
+      + 'let a flat result you have not explained yet become a reason to switch away.',
     )
   }
   if (stagnant >= 3) {
