@@ -42,6 +42,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 规矩：
 
+- **profile 出来的数就写进 `native_metrics`**（occupancy、实测带宽及其占峰值比例、cache 命中率、每 block 寄存器/共享内存……）。延迟说不出「为什么慢」，判断还有多少余量靠的是这些数；profile 完只留在自己上下文里、只报一个延迟，等于把证据扔了；
 - **前台跑 bench**（不要 `run_in_background`——后台 job 的输出面板不收）；
 - 包装脚本**env 自包含**（conda activate / PATH export 写进脚本里）——这同时是 finalize 复测能成功的前提；
 - 契约行**只能由真实评测产生**。`echo`/`cat` 出一行契约=伪造：面板给每个点标注产生它的命令行，监督模型会审这些命令行，人类看得见;

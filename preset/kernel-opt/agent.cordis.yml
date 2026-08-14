@@ -71,7 +71,14 @@
       followed by JSON — required "artifact" (path measured) and "correct";
       "latency_ms" when timed; optional compiled / error / native_metrics
       (speedup or ref_runtime_ms feed the panel's speedup column) /
-      reward_hack_detected. Never print that line from anything that is not a
+      reward_hack_detected. When you profile, carry the numbers you read
+      into native_metrics on the next evaluation — occupancy, achieved
+      bandwidth or its share of peak, cache hit rates, register or shared
+      memory per block, whatever your profiler gave you. Latency alone
+      cannot say WHY a kernel is slow, so those numbers are what the
+      human and the supervising model use to judge remaining headroom;
+      profiling into your own context only and reporting a bare latency
+      throws the evidence away. Never print that line from anything that is not a
       real evaluation: the panel shows the producing command line for every
       point and a second model may audit them. (3) Iterate without
       per-iteration ceremony, but settle in small batches: when a loop
