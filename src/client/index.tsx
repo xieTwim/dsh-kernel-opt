@@ -87,10 +87,10 @@ const zh = {
   'row.write': '整文件写入',
   'row.edit': '替换',
   'row.truncated': '（已截断）',
-  'row.channelShell': '自报',
+  'row.channelShell': 'Agent 测得',
   'row.channelReplay': '复测',
   'row.command': '来源命令',
-  'row.unverifiedFinal': '最终数字未复测（自报值）',
+  'row.unverifiedFinal': '最终数字未复测',
   'table.final': '最终',
   'row.wrapup': '收尾',
   'advice.wrapup': '收尾复审',
@@ -101,7 +101,6 @@ const zh = {
   'tip.replay': '插件重放评测命令独立测得',
   'row.channelTool': '工具',
   'tip.tool': '由注册评测工具直接返回，非 Agent 转述',
-  'table.legend': '未标注的数值为 Agent 自报；「复测」为插件独立重放测得',
   'tip.final': '收尾时选定的最终版本',
   'tip.best': '当前最优结果',
   'tip.ok': '正确性校验通过',
@@ -165,10 +164,10 @@ const en = {
   'row.write': 'full write',
   'row.edit': 'edit',
   'row.truncated': '(truncated)',
-  'row.channelShell': 'self-reported',
+  'row.channelShell': 'agent-measured',
   'row.channelReplay': 'replayed',
   'row.command': 'Command',
-  'row.unverifiedFinal': 'final number not replayed (self-reported)',
+  'row.unverifiedFinal': 'final number not replayed',
   'table.final': 'final',
   'row.wrapup': 'wrap-up',
   'advice.wrapup': 'wrap-up review',
@@ -179,7 +178,6 @@ const en = {
   'tip.replay': 'Measured by the plugin replaying the recorded evaluation command',
   'row.channelTool': 'tool',
   'tip.tool': 'Returned directly by a registered evaluator tool, not agent-relayed',
-  'table.legend': 'Unbadged values are agent self-reported; "replayed" rows were re-measured by the plugin',
   'tip.final': 'The final version selected at wrap-up',
   'tip.best': 'Best result so far',
   'tip.ok': 'Correctness check passed',
@@ -1165,12 +1163,8 @@ export function KernelOptTab(
       {iterations.length > 0
         ? (
             <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-              <div style={{
-                padding: '8px 14px', borderBottom: `1px solid ${COLOR.border}`,
-                display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 10,
-              }}>
-                <span style={{ fontSize: 14, fontWeight: 600 }}>{t('table.title')}</span>
-                <span style={{ fontSize: 12, color: COLOR.caption }}>{t('table.legend')}</span>
+              <div style={{ padding: '8px 14px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
+                {t('table.title')}
               </div>
               <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                 {[...iterations].reverse().map((p) => {
