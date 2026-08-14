@@ -519,6 +519,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     ): Promise<{ advice: string | null; note: string | null; reviewed: boolean }> => {
       const supervisor = effectiveSupervisor(state)
       if (supervisor === undefined || !state.supervise) return { advice: null, note: null, reviewed: false }
+      // Degrading silently is what hid the empty-answer bug for four
+      // sessions: every reviewer failure looked identical to a clean
+      // approval. Console, not `ctx.logger`, because the operator reads the
+      // server log the host was started with, and that is where this belongs.
+      const warn = (message: string): void => {
+        console.warn(`[kernel-opt] supervisor: ${message}`)
+      }
       try {
         const base = supervisorDigest(series, state, 10, evalsPerTurn)
         const digest = mode === 'closing'
@@ -555,13 +562,14 @@ export function apply(ctx: Context, config: Config = {}): void {
           // an undersized cap ends the call having emitted only thought — and
           // an empty reply used to reach the human as "reviewed, no findings",
           // including as the supervisor's blessing on an early finalize.
-          lctx.logger.warn(`kernel-opt: supervisor produced no answer (finish: ${finish ?? 'unknown'}); `
-            + 'the review is recorded as not run')
+          warn(`${supervisor.provider}/${supervisor.model} produced no answer `
+            + `(finish: ${finish ?? 'unknown'}); the review is recorded as not run`)
           return { advice: null, note: null, reviewed: false }
         }
         return { ...adviceFromReply(reply), reviewed: true }
-      } catch {
+      } catch (error) {
         // A broken or slow reviewer must never stall the primary loop.
+        warn(`${supervisor.provider}/${supervisor.model} failed: ${String(error)}`)
         return { advice: null, note: null, reviewed: false }
       }
     }
