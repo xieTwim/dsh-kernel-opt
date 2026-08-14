@@ -33,7 +33,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-commands'
@@ -144,10 +144,12 @@ export interface Config {
     model: string
     temperature?: number
     /**
-     * Output budget per review (default 4000). Sized for THINKING, not for
+     * Output budget per review (default 16000). Sized for THINKING, not for
      * the answer: the rubric asks for at most three sentences, but reviewers
      * run with the deployment's reasoning default and reasoning spends this
-     * same budget, so a cap sized to the answer returns nothing at all.
+     * same budget — measured on this plugin, V4-Flash burned 4000 tokens of
+     * reasoning on a 15-row digest and never answered. A cap raised alone
+     * only moves that cliff, so an exhausted review retries without thinking.
      */
     maxTokens?: number
   }
@@ -536,32 +538,46 @@ export function apply(ctx: Context, config: Config = {}): void {
               + `${String(state.budget - completedEvals(series))} evaluations of budget still unspent. `
               + 'Decide whether that ending stands.'
             : base
-        let reply = ''
-        const stream = lctx.llm.stream({
-          provider: supervisor.provider,
-          model: supervisor.model,
-          system: mode === 'headroom' ? HEADROOM_SYSTEM : SUPERVISOR_SYSTEM,
-          messages: [createUserMessage({
-            content: [{ type: 'text', text: digest }],
-            source: { kind: 'plugin', plugin: PLUGIN_ID },
-          })],
-          // Sampling knobs stay config-owned: an override picks the route,
-          // not the review discipline.
-          ...(config.supervisor?.temperature !== undefined ? { temperature: config.supervisor.temperature } : {}),
-          maxTokens: config.supervisor?.maxTokens ?? 4000,
-          signal: AbortSignal.timeout(90_000),
-        })
-        let finish: string | undefined
-        for await (const chunk of stream) {
-          if (chunk.type === 'text-delta') reply += chunk.text
-          else if (chunk.type === 'finish') finish = chunk.reason.kind
+        /** One review call; `thinking` false spends the budget on the answer. */
+        const ask = async (thinking: boolean): Promise<{ reply: string; finish?: string }> => {
+          let reply = ''
+          let finish: string | undefined
+          const stream = lctx.llm.stream({
+            provider: supervisor.provider,
+            model: supervisor.model,
+            system: mode === 'headroom' ? HEADROOM_SYSTEM : SUPERVISOR_SYSTEM,
+            messages: [createUserMessage({
+              content: [{ type: 'text', text: digest }],
+              source: { kind: 'plugin', plugin: PLUGIN_ID },
+            })],
+            // Sampling knobs stay config-owned: an override picks the route,
+            // not the review discipline.
+            ...(config.supervisor?.temperature !== undefined ? { temperature: config.supervisor.temperature } : {}),
+            ...(thinking ? {} : { reasoningEffort: ReasoningEffortId('off') }),
+            maxTokens: config.supervisor?.maxTokens ?? 16_000,
+            signal: AbortSignal.timeout(thinking ? 120_000 : 45_000),
+          })
+          for await (const chunk of stream) {
+            if (chunk.type === 'text-delta') reply += chunk.text
+            else if (chunk.type === 'finish') finish = chunk.reason.kind
+          }
+          return { reply, ...(finish !== undefined ? { finish } : {}) }
+        }
+        let { reply, finish } = await ask(true)
+        if (reply.trim().length === 0 && finish === 'max-tokens') {
+          // Reasoning spends the same output budget as the answer, so a
+          // reviewer can think until the cap and never speak — measured at
+          // 4000 tokens on a 15-row digest. Raising the cap alone only moves
+          // the cliff, so the retry drops thinking instead: a shallower
+          // review beats none, and none used to read as approval.
+          warn(`${supervisor.provider}/${supervisor.model} spent its whole budget thinking; `
+            + 'retrying the review without reasoning')
+          ;({ reply, finish } = await ask(false))
         }
         if (reply.trim().length === 0) {
-          // Silence is NOT approval. Reviewers run with the deployment's
-          // thinking default, and reasoning spends the same output budget, so
-          // an undersized cap ends the call having emitted only thought — and
-          // an empty reply used to reach the human as "reviewed, no findings",
-          // including as the supervisor's blessing on an early finalize.
+          // Silence is NOT approval: an empty reply used to reach the human
+          // as "reviewed, no findings", including as the supervisor's
+          // blessing on an early finalize.
           warn(`${supervisor.provider}/${supervisor.model} produced no answer `
             + `(finish: ${finish ?? 'unknown'}); the review is recorded as not run`)
           return { advice: null, note: null, reviewed: false }
