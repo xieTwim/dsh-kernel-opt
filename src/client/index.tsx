@@ -237,6 +237,8 @@ const COLOR = {
   menuBg: 'var(--dsw-specific-menu, #fff)',
   menuBorder: 'var(--dsw-alias-border-inverted, rgba(0,0,0,.08))',
   tip: 'var(--dsw-specific-tip, rgba(77,107,254,.06))',
+  /** Halo painted behind in-plot chart text so the curve cannot cut through it. */
+  halo: 'var(--dsw-alias-bg-layer-1, #fff)',
   curve: 'var(--dsw-specific-primary, #4d6bfe)',
   ok: '#1f8f5f',
   bad: '#d93a3f',
@@ -349,6 +351,8 @@ const STATUS_COLOR: Record<ReturnType<typeof statusOf>, string> = {
 
 /** Chart geometry constants (viewBox units). */
 const CHART = { w: 640, h: 200, l: 56, r: 16, t: 16, b: 26 }
+/** Minimum vertical clearance between two axis-gutter labels (viewBox units). */
+const AXIS_GAP = 13
 
 interface ChartModel {
   /** x in viewBox units per iteration index. */
@@ -437,6 +441,9 @@ function Chart(props: {
   )
 
   const best = bestIndex !== null ? iterations[bestIndex] : undefined
+  // Axis position of the best line: sibling axis labels within AXIS_GAP of it
+  // are suppressed so the gutter never stacks two numbers on one row.
+  const bestY = best?.latencyMs !== undefined ? model.y(best.latencyMs) : Number.NEGATIVE_INFINITY
   const linePoints = iterations
     .map((p, i) => (p.latencyMs !== undefined ? `${model.x(i).toFixed(1)},${model.y(p.latencyMs).toFixed(1)}` : null))
     .filter((s): s is string => s !== null)
@@ -460,11 +467,16 @@ function Chart(props: {
       style={{ width: '100%', height: 'auto', display: 'block' }}
       role="img"
     >
-      {/* frame + y domain bounds */}
+      {/* frame + y domain bounds. Axis labels are suppressed when the best
+          line's own axis label would collide with them — see below. */}
       <line x1={CHART.l} y1={CHART.t} x2={CHART.l} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       <line x1={CHART.l} y1={CHART.h - CHART.b} x2={CHART.w - CHART.r} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
-      <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.hi)}</text>
-      <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.lo)}</text>
+      {Math.abs(CHART.t - bestY) >= AXIS_GAP
+        ? <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.hi)}</text>
+        : null}
+      {Math.abs(CHART.h - CHART.b - bestY) >= AXIS_GAP
+        ? <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.lo)}</text>
+        : null}
       {model.log
         ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2 + 14} textAnchor="end" fontSize={11} fill={COLOR.caption}>log</text>
         : null}
@@ -476,33 +488,35 @@ function Chart(props: {
         return (
           <g key={`g${String(f)}`}>
             <line x1={CHART.l} x2={CHART.w - CHART.r} y1={gy} y2={gy} stroke={COLOR.border} strokeWidth={1} strokeDasharray="2 5" opacity={0.55} />
-            {f === 0.5
+            {f === 0.5 && Math.abs(gy - bestY) >= AXIS_GAP
               ? <text x={CHART.l - 6} y={gy + 4} textAnchor="end" fontSize={10} fill={COLOR.caption}>{formatLatency(value)}</text>
               : null}
           </g>
         )
       })}
 
-      {/* best dashed line — labeled at the LEFT end, away from the newest
-          points clustering at the right edge; the label flips below the line
-          when the line hugs the top frame. */}
+      {/* Best dashed line, labeled in the AXIS GUTTER rather than inside the
+          plot. In-plot labels have to dodge whatever the data happens to do —
+          and the best line is exactly where points cluster, so every in-plot
+          position collides for some run shape. Outside the plot area the
+          collision is structurally impossible; only sibling AXIS labels can
+          clash, and those yield above (the best value is the one worth
+          reading). Colour ties it to the line; the chip above the chart
+          carries the word. */}
       {best?.latencyMs !== undefined
-        ? (() => {
-            const bestY = model.y(best.latencyMs)
-            const below = bestY - CHART.t < 16
-            return (
-              <g>
-                <line
-                  x1={CHART.l} x2={CHART.w - CHART.r}
-                  y1={bestY} y2={bestY}
-                  stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
-                />
-                <text x={CHART.l + 8} y={below ? bestY + 15 : bestY - 5} textAnchor="start" fontSize={11} fill={COLOR.ok}>
-                  {bestLabel} {formatLatency(best.latencyMs)}
-                </text>
-              </g>
-            )
-          })()
+        ? (
+            <g>
+              <title>{`${bestLabel} ${formatLatency(best.latencyMs)}`}</title>
+              <line
+                x1={CHART.l} x2={CHART.w - CHART.r}
+                y1={bestY} y2={bestY}
+                stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
+              />
+              <text x={CHART.l - 6} y={bestY + 4} textAnchor="end" fontSize={12} fontWeight={500} fill={COLOR.ok}>
+                {formatLatency(best.latencyMs)}
+              </text>
+            </g>
+          )
         : null}
 
       {/* curve through measured points */}
@@ -548,6 +562,9 @@ function Chart(props: {
             {clamped
               ? <text x={cx} y={CHART.t - 4} textAnchor="middle" fontSize={9} fill={COLOR.caption}>↑</text>
               : null}
+            {/* The one label that must stay inside the plot (the clamped
+                maximum sits at its own point). A painted halo keeps it
+                readable wherever the curve runs beneath it. */}
             {clamped && i === maxClampedIndex
               ? (
                   <text
@@ -556,6 +573,9 @@ function Chart(props: {
                     textAnchor={cx < CHART.w / 2 ? 'start' : 'end'}
                     fontSize={11}
                     fill={COLOR.dim}
+                    stroke={COLOR.halo}
+                    strokeWidth={3}
+                    paintOrder="stroke"
                   >
                     {formatLatency(model.max)}↑
                   </text>

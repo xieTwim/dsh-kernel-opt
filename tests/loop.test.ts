@@ -155,6 +155,10 @@ test('wrapUpText asks for finalize, never for new work', () => {
   assert.ok(text.includes('20/20'))
   assert.ok(text.includes('run_finalize'))
   assert.ok(text.includes('do not start new optimization work'))
+  // The closing plan: without it the panel keeps whatever exploration the
+  // agent reported last, which is not what it delivered.
+  assert.ok(text.includes('closing kernel_plan'))
+  assert.ok(challengeText(3, 6, 20, 'Try tiling.').includes('closing kernel_plan'))
 })
 
 test('wrapUpText carries the supervisor review block like a continuation', () => {
