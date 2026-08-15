@@ -81,6 +81,24 @@ test('matchesProfileCommand: invoked profilers only, never a bench script timing
   assert.equal(matchesProfileCommand('ncu', names), false) // no workload = usage print
 })
 
+test('matchesProfileCommand: a remote GPU is profiled through an executor', () => {
+  const names = DEFAULT_PROJECTION.profileCommands
+  // The shape this exists for: DSH runs here, the card is over there.
+  assert.equal(matchesProfileCommand("ssh box 'ncu --set full python bench.py'", names), true)
+  assert.equal(matchesProfileCommand('ssh -p 16820 root@1.2.3.4 "cd /w && ncu -o r python b.py"', names), true)
+  assert.equal(matchesProfileCommand('ssh -p 16820 root@1.2.3.4 ncu -o rep python bench.py', names), true)
+  assert.equal(matchesProfileCommand('ssh -tt box nsys profile ./bench.sh', names), true)
+  assert.equal(matchesProfileCommand('bash -c "ncu --set full python bench.py"', names), true)
+  assert.equal(matchesProfileCommand('ssh a "ssh b \'ncu --set full python b.py\'"', names), true)
+  // …without giving quoted PROSE a command position back.
+  assert.equal(matchesProfileCommand("git commit -m 'ncu profiling added to bench'", names), false)
+  assert.equal(matchesProfileCommand("echo 'ncu -o rep python bench.py' >> NOTES.md", names), false)
+  assert.equal(matchesProfileCommand("ssh box 'ls /usr/local/cuda/bin | grep -E \"ncu|nsys\"'", names), false)
+  assert.equal(matchesProfileCommand("ssh box 'ncu --version'", names), false)
+  assert.equal(matchesProfileCommand('ssh -p 16820 root@1.2.3.4', names), false)
+  assert.equal(matchesProfileCommand('rsync -az ./ box:/root/w/', names), false)
+})
+
 test('project: a profiler run through the shell earns the mark', () => {
   seq = 0
   const events: ProjectionEvent[] = [
