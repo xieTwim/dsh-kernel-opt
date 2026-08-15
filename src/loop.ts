@@ -162,6 +162,31 @@ const DIGEST_CHANGES_PER_ITERATION = 3
 /** Chars kept per change text field. */
 const DIGEST_CHANGE_TEXT = 220
 
+/** Command fragment budget in the digest: opening context, then the tail. */
+const CMD_HEAD = 80
+const CMD_TAIL = 170
+
+/**
+ * A command line as the reviewer sees it. Two things the obvious version got
+ * wrong, both measured on a real run:
+ *
+ * Long commands are elided in the MIDDLE, never at the tail. An agent edits
+ * and then measures in one `&&` chain, so the benchmark invocation sits at the
+ * END — a head-only cut hides exactly what the rubric asks the reviewer to
+ * judge. On the kopt-gpu2 run, four rows opened with a patch heredoc or a
+ * `git checkout` and ran `./eval.sh` past character 400; the reviewer, shown
+ * the first 60 characters, called two of them non-benchmark rows in the
+ * closing audit. They were real, and one of them tied the best result.
+ *
+ * Whitespace collapses first: a heredoc's newlines would otherwise break one
+ * table row into several, and the digest's rows are its structure.
+ */
+function shownCommand(command: string): string {
+  const flat = command.replace(/\s+/g, ' ').trim()
+  if (flat.length <= CMD_HEAD + CMD_TAIL + 3) return flat
+  return `${flat.slice(0, CMD_HEAD)} … ${flat.slice(-CMD_TAIL)}`
+}
+
 /** One line of the digest table handed to the supervisor. */
 function digestRow(point: WireIteration, index: number, bestIndex: number | null): string {
   const status = point.pending === true
@@ -175,9 +200,7 @@ function digestRow(point: WireIteration, index: number, bestIndex: number | null
   const star = point.finalized === true ? ' ★finalized' : ''
   const best = bestIndex === index ? ' ←best' : ''
   const channel = point.channel !== undefined ? ` [${point.channel}]` : ''
-  const command = point.command !== undefined
-    ? ` cmd:"${point.command.length > 60 ? `${point.command.slice(0, 60)}…` : point.command}"`
-    : ''
+  const command = point.command !== undefined ? ` cmd:"${shownCommand(point.command)}"` : ''
   // The evaluator's own numeric extras. Latency alone cannot say WHY a kernel
   // is slow; occupancy, bandwidth and cache numbers are what a headroom
   // judgement is actually made of, and they already ride the eval contract.
@@ -326,7 +349,12 @@ export const SUPERVISOR_SYSTEM = [
   '- diagnosis: several evaluations with no profiler run and no reported metrics is optimizing by guesswork — '
   + 'ask for one profiled run before more variants;',
   '- plan hygiene: plans should exist and match what the table shows;',
-  '- provenance: on [shell] rows the trajectory is self-reported — judge whether each cmd is a real benchmark invocation and whether the numbers move like real measurements;',
+  '- provenance: on [shell] rows the trajectory is self-reported — judge whether each cmd is a real benchmark '
+  + 'invocation and whether the numbers move like real measurements. Long commands are shown ELIDED IN THE MIDDLE '
+  + '(`head … tail`), and an agent commonly edits and measures in one chain: a cmd opening with a patch or a git '
+  + 'checkout may well have run the bench in the part you were not shown. When the fragment does not settle it, '
+  + 'say the evidence is inconclusive and ask for the invocation — never call a row fabricated on the strength of '
+  + 'a fragment;',
   '- pace: the drive caps evaluations per turn so the loop can steer mid-run; a turn that overran the cap is a discipline miss worth one line of advice;',
   '- finishing: near budget exhaustion the agent should finalize its best honest result.',
   'If the run looks healthy, reply `OK: ` followed by ONE short sentence naming what you checked and the strongest '

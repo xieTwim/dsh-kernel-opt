@@ -382,3 +382,26 @@ test('config can set the review language and add house rules, never remove the r
   // Empty / whitespace-only config values are not a directive.
   assert.equal(supervisorSystem(SUPERVISOR_SYSTEM, { language: '   ', instructions: '  ' }), plain)
 })
+
+test('the digest shows the END of a command, where the benchmark actually is', () => {
+  // Verbatim shape from the kopt-gpu2 run: patch the file, then measure, in
+  // one chain. A head-only cut showed the reviewer the heredoc and nothing
+  // else, and it called two such rows non-benchmark rows in the closing audit.
+  const command = `cd /Users/x/Work/Data/kopt-gpu2 && python3 - <<'EOF'\np = 'solution/kernel.py'\n`
+    + `${'src = src.replace(old, new)\n'.repeat(20)}open(p, 'w').write(src)\nprint('ok')\nEOF\n`
+    + './eval.sh --ref ref.py --solution solution/kernel.py --num-perf-trials 20 2>&1 '
+    + '| grep -v "WARNING\\|vulnerable" | tail -8'
+  const series = {
+    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], rounds: [], bestIndex: 0,
+    iterations: [{ seq: 1, tool: 'bash', channel: 'shell' as const, command, latencyMs: 0.0819, correct: true }],
+  }
+  const digest = supervisorDigest(series, { armed: true, budget: 20, round: 1, lastEvalCount: 0, noProgressRounds: 0, supervise: true })
+  assert.ok(digest.includes('./eval.sh'), 'the invocation the reviewer is asked to judge must be visible')
+  assert.ok(digest.includes('cd /Users/x/Work/Data/kopt-gpu2'), 'and so must the opening context')
+  assert.ok(digest.includes(' … '), 'the middle is what gets dropped')
+  // A heredoc's newlines would otherwise split one table row into twenty.
+  const row = digest.split('\n').find(l => l.includes('./eval.sh'))
+  assert.ok(row !== undefined && row.includes('cd /Users/x/Work'), 'the row stays one line')
+  // Short commands pass through untouched.
+  assert.ok(digest.length > 0)
+})
