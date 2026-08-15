@@ -129,8 +129,10 @@ const EXECUTOR_DEPTH = 3
  * usually not quoted: `kubectl exec pod -- ncu … a.py` and `srun -N1 -- nsys …`
  * are the standard cluster shapes. Following the marker rather than the program
  * in front of it also covers a scheduler that is not on any list here, which is
- * what a site's own lease/queue wrapper always is. Programs whose `--` separates
- * operands instead (`git log -- perf src/`) are excluded by name.
+ * what a site's own lease/queue wrapper always is. Where `--` separates operands
+ * instead, what crosses it must carry two arguments to count, which is what a
+ * path named `perf` next to one sibling path cannot do; the handful of programs
+ * that pass paths in pairs (`git log -- perf src/ tests/`) are named as well.
  * @param command - the logged command line.
  * @param names - configured profiler executables.
  * @returns whether any segment invokes a profiler on a workload.
@@ -150,6 +152,7 @@ export function matchesProfileCommand(command: string, names: readonly string[])
  * @param quoted - bodies of the stashed quoted spans, by index.
  * @param names - configured profiler executables.
  * @param depth - remaining executor hops to follow.
+ * @param minArgs - how many arguments the profiler must carry to count.
  * @returns whether any segment invokes a profiler on a workload.
  */
 function scanSegments(
@@ -157,6 +160,7 @@ function scanSegments(
   quoted: readonly string[],
   names: readonly string[],
   depth: number,
+  minArgs = 1,
 ): boolean {
   for (const segment of shell.split(SEGMENT_SPLIT)) {
     const tokens = segment.trim().split(/\s+/).filter(token => token.length > 0)
@@ -177,10 +181,21 @@ function scanSegments(
     // for `ssh` alone. It also reaches a scheduler this file has never heard of
     // (`gpuq exec L0324 --node w6 -- bash -c 'ncu … a.py'`), which is the point:
     // the marker is a convention, so it does not need the wrapper enumerated.
+    //
+    // Crossing the marker is a GUESS that the owner meant a command and not
+    // operands, so it costs more evidence than the head position does: two
+    // arguments, not one. A profiler on a workload carries a flag or a
+    // subcommand plus the thing it runs (`ncu --set full python b.py`,
+    // `nsys profile ./bench.sh`); an operand list after `--` is a path named
+    // like a profiler plus a sibling path (`head -n5 -- perf notes.txt`), and
+    // `perf` being both a configured name and an ordinary word is what makes
+    // that bite. The floor closes that shape without enumerating its programs;
+    // HANDOFF_OPERANDS still covers the multi-path cases it cannot see
+    // (`git log -- perf src/ tests/`).
     if (depth > 0 && !HANDOFF_OPERANDS.has(program)) {
       const marker = args.indexOf(HANDOFF)
       const rest = marker === -1 ? [] : args.slice(marker + 1)
-      if (rest.length > 0 && scanSegments(rest.join(' '), quoted, names, depth - 1)) return true
+      if (rest.length > 0 && scanSegments(rest.join(' '), quoted, names, depth - 1, 2)) return true
     }
     if (COMMAND_EXECUTORS.has(program)) {
       if (depth > 0 && followsExecutor(program, args, quoted, names, depth)) return true
@@ -188,7 +203,7 @@ function scanSegments(
     }
     if (!names.includes(program)) continue
     // A profiler with nothing to profile prints its usage.
-    if (args.length === 0) continue
+    if (args.length < minArgs) continue
     if (args.some(token => INSPECTION_ARGS.has(token))) continue
     return true
   }

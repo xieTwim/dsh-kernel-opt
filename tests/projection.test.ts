@@ -122,6 +122,26 @@ test('matchesProfileCommand: a bare `--` hands the command across', () => {
   assert.equal(matchesProfileCommand('grep -rn pattern -- ncu notes.txt', names), false)
 })
 
+test('matchesProfileCommand: crossing `--` costs two arguments, not one', () => {
+  const names = DEFAULT_PROJECTION.profileCommands
+  // Every one of these marked a profile run while the operand programs were
+  // enumerated instead: the list only ever holds the ones someone thought of.
+  assert.equal(matchesProfileCommand('head -n 5 -- perf notes.txt', names), false)
+  assert.equal(matchesProfileCommand('tail -f -- perf run.log', names), false)
+  assert.equal(matchesProfileCommand('wc -l -- perf out.txt', names), false)
+  assert.equal(matchesProfileCommand('cat -- perf summary.txt', names), false)
+  assert.equal(matchesProfileCommand('tar -cf out.tar -- perf src/', names), false)
+  assert.equal(matchesProfileCommand('chmod +x -- perf run.sh', names), false)
+  assert.equal(matchesProfileCommand('sort -u -- perf ids.txt', names), false)
+  // A real invocation clears the floor: a flag or a subcommand, then the workload.
+  assert.equal(matchesProfileCommand('xargs -- ncu --set full python b.py', names), true)
+  assert.equal(matchesProfileCommand('uv run -- nsys profile ./bench.sh', names), true)
+  // The floor applies to the guess, not to the head position, where one
+  // argument has always been enough.
+  assert.equal(matchesProfileCommand('perf stat ./a.out', names), true)
+  assert.equal(matchesProfileCommand('ncu --set full -- python bench.py', names), true)
+})
+
 test('project: a profiler run through the shell earns the mark', () => {
   seq = 0
   const events: ProjectionEvent[] = [
