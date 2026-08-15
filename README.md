@@ -50,11 +50,12 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 
 ## 算子优化模式（agent preset 自动落盘）
 
-装上插件后（部署组合了 `agentPresets` 时），Node 半会把一个「算子优化模式」preset 写进用户 preset 根（`~/.dsh/.agent-presets/kernel-opt/`，**仅当不存在时**；想重置就删掉该目录再重启）。新建会话选这个模式：
+装上插件后（部署组合了 `agentPresets` 时），Node 半会把一个「算子优化模式」preset 写进用户 preset 根（`~/.dsh/.agent-presets/kernel-opt/`），并在之后的每次启动**让它跟上插件版本**。新建会话选这个模式：
 
 - persona 就是任务书的通用半：盘点材料 → `kernel_plan` 报 resolved plan → 组装评测入口（契约行）→ 自由迭代 → 诚实收尾。你只需要在第一条消息里给三样：**kernel 在哪、怎么评测（或让它用 AKO4ALL 内置评测器）、预算/卡信息**；
 - 该模式的会话「评测」Tab **常显示**（不等第一次评测）；
-- preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），并附带 `evaluator/`（内置评测器 bench.py + GUIDE.md）。落盘按**逐文件补种**：已存在的文件永不覆盖（想改就直接改），插件新版新增的文件会在启动时补进来；删掉某个文件（或整个目录）即从插件副本重新播种；
+- preset 是 rc.6 standard 的衍生（全套编码工具，只换 persona），并附带 `evaluator/`（内置评测器 bench.py + GUIDE.md）。落盘按**所有权跟踪**逐文件同步：不存在的补种；**插件写下、你没动过的会跟着插件更新**；你改过的原样保留（并在宿主日志里点名，删掉它即可换回插件版本）。清单记在该目录下的 `.dsh-kernel-opt-files.json` 里，记的始终是「插件上次写下的哈希」，所以你改过的文件此后一直算你的。
+  早于该机制的目录（清单还不存在）分不清「你改过的」和「旧版残留」：那次同步会把差异文件备份成 `*.bak-<时间戳>` 再更新，什么都不丢，此后走上面的干净规则。**这条是必须的**——此前「已存在的文件永不覆盖」意味着插件升级后磁盘上的 `bench.py` 永远停在首次安装那版，而实时读取的 SKILL.md 已经在描述新版行为，工具和自己的文档静默地各说各话；
 - 关闭自动落盘：config `preset.install: false`；换 id：`preset.id`（Tab 常显示判定只认默认 id，改 id 后回退到信号检测）。
 
 ## 循环与监督
@@ -147,7 +148,9 @@ pnpm run check        # typecheck(host+client)+ 单测 + 双 half 构建
 
 ## 兼容基线
 
-`@deepseek-ai/dsh` **0.1.0-rc.6**（2026-08-13 公开发布构建，npm dist-tag `latest`）。使用 `ctx.webServer` / `ctx.compaction` / `sessionId` 标准 prop，不兼容 2026-08-11 改名（`httpServer→webServer`、`compact→compaction`）之前的版本；peer 范围声明为 `>=0.1.0-rc.2 <0.2`。
+`@deepseek-ai/dsh` **0.1.0-rc.6**（2026-08-13 公开发布，npm dist-tag `latest`；源码 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)）。使用 `ctx.webServer` / `ctx.compaction` / `sessionId` 标准 prop，不兼容 2026-08-11 改名（`httpServer→webServer`、`compact→compaction`）之前的版本。
+
+peer 范围写作 `>=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2`，因为**宿主有两条版本线**：npm 上的 `0.1.0-rc.N`，以及从源码树跑起来的 `0.0.1-rc.N`（本机源码树自报 `0.0.1-rc.2`，是改名之后的构建）。这里必须写成两段——semver 对预发布版本的规则是「只有当某个比较符与它 major/minor/patch 完全相同且自身带预发布标记时才被接纳」，所以把范围直接放宽成 `>=0.0.1-rc.2 <0.2` 反而会把**所有** `0.1.0-rc.x` 排除在外（实测确认）。两段式同时收下两条线，并排除改名之前的 `0.0.1-rc.1` 与将来的 `0.2.x`。
 
 ## 已知边界
 

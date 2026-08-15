@@ -1,7 +1,7 @@
 {
   "name": "@xietwim/dsh-kernel-opt",
   "description": "Kernel-optimization plugin for DeepSeek Harness: live latency curve + run controls + kernel loop with wrap-up + optional second-model supervision (works with any bench tool)",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -37,18 +37,18 @@
   "scripts": {
     "build": "tsdown --config ./tsdown.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "test": "node --experimental-strip-types --test tests/projection.test.ts tests/loop.test.ts tests/chart.test.ts",
+    "test": "node --experimental-strip-types --test tests/projection.test.ts tests/loop.test.ts tests/chart.test.ts tests/preset.test.ts",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0 <5",
-    "@deepseek-ai/dsh-agent-presets": ">=0.1.0-rc.2 <0.2",
-    "@deepseek-ai/dsh-commands": ">=0.1.0-rc.2 <0.2",
-    "@deepseek-ai/dsh-compaction": ">=0.1.0-rc.2 <0.2",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.0-rc.2 <0.2",
-    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.2 <0.2",
-    "@deepseek-ai/dsh-session": ">=0.1.0-rc.2 <0.2",
-    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.2 <0.2"
+    "@deepseek-ai/dsh-agent-presets": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2",
+    "@deepseek-ai/dsh-commands": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2",
+    "@deepseek-ai/dsh-compaction": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2",
+    "@deepseek-ai/dsh-host-webserver": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2",
+    "@deepseek-ai/dsh-llm": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2",
+    "@deepseek-ai/dsh-session": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent-presets": {

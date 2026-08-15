@@ -25,7 +25,6 @@
 import type { IncomingMessage } from 'node:http'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { cp } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,6 +44,7 @@ import {
   reviewable, stagnationCount, supervisorDigest, supervisorSystem, unreviewedEvals, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
+import { syncPreset } from './preset.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
 import type { WireControl, WireIteration, WireModels, WireSeries } from './wire.ts'
 
@@ -105,9 +105,11 @@ export interface Config {
   /**
    * 「算子优化模式」agent preset self-install. On by default: when the
    * deployment composes `agentPresets`, the bundled preset directory
-   * (persona + the built-in evaluator under `evaluator/`) is seeded
-   * per-file into the user preset root (`~/.dsh/.agent-presets/<id>/`) —
-   * existing files are never overwritten; missing ones top up on boot. The
+   * (persona + the built-in evaluator under `evaluator/`) is synced into
+   * the user preset root (`~/.dsh/.agent-presets/<id>/`) on boot: missing
+   * files are seeded, files the plugin wrote and nobody edited are UPDATED
+   * to the shipped version, and files the user changed are kept and named
+   * in the log (see `syncPreset`). The
    * evaluation tab always shows for sessions composed from the DEFAULT id
    * — an overridden `id` keeps the preset but falls back to signal-based
    * tab detection.
@@ -874,13 +876,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   // Agent-preset self-install: composing this plugin makes an「算子优化模式」
-  // preset appear in the picker. Per-FILE top-up into the user preset root:
-  // files that already exist there (possibly user-edited) are never
-  // overwritten, while bundled files the copy does not have yet (e.g. the
-  // evaluator/ directory added after an older install) are seeded in. Delete
-  // a file or the directory to re-seed it. Host discovery is unmemoized, so
-  // it shows up without a restart. Best-effort: any failure leaves the
-  // plugin fully functional.
+  // preset appear in the picker, and keeps that copy in step with the plugin
+  // it came from — see syncPreset. Host discovery is unmemoized, so it shows
+  // up without a restart. Best-effort: any failure leaves the plugin fully
+  // functional.
   ctx.inject(['agentPresets'], (pctx) => {
     if (config.preset?.install === false) return
     const id = config.preset?.id ?? PRESET_ID
@@ -891,7 +890,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         const source = bundledPresetDir()
         if (!existsSync(join(source, 'agent.cordis.yml'))) return
         const target = join(expandHome(userRoot.path), id)
-        await cp(source, target, { recursive: true, force: false })
+        for (const line of await syncPreset(source, target)) console.warn(`[kernel-opt] ${line}`)
       } catch {
         // Preset install is a convenience; the plugin works without it.
       }
