@@ -68,6 +68,17 @@ test('matchesProfileCommand: invoked profilers only, never a bench script timing
   assert.equal(matchesProfileCommand('python /opt/ncu/harness/bench.py', names), false)
   assert.equal(matchesProfileCommand('./ncu-ui report.ncu-rep', names), false)
   assert.equal(matchesProfileCommand('python diag3.py', names), false) // hand-written diagnostics stay invisible
+  // Wrappers are stepped over; env assignments too.
+  assert.equal(matchesProfileCommand('xcrun xctrace record --template "Time Profiler" --launch ./b', names), true)
+  assert.equal(matchesProfileCommand('OMP_NUM_THREADS=8 perf stat ./a.out', names), true)
+  // Asking the profiler about ITSELF is not profiling — both of these were
+  // marked as profile runs on a real session that never profiled at all.
+  assert.equal(matchesProfileCommand("xcrun xctrace list templates | grep -i cpu; xcrun xctrace record --help", names), false)
+  assert.equal(matchesProfileCommand('ls /Applications/Xcode.app/.../xctrace; ls /usr/bin | grep xctrace', names), false)
+  assert.equal(matchesProfileCommand('ncu --help', names), false)
+  // The `|` inside a quoted regex must not open a command position.
+  assert.equal(matchesProfileCommand("ls /usr/bin | grep -E 'xctrace|instruments|sample'; which instruments", names), false)
+  assert.equal(matchesProfileCommand('ncu', names), false) // no workload = usage print
 })
 
 test('project: a profiler run through the shell earns the mark', () => {
