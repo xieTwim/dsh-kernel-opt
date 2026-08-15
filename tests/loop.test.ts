@@ -100,8 +100,11 @@ test('adviceFromReply: approval carries its note; advice truncates', () => {
     { advice: null, note: 'NEON path sits at the 1-exp/element floor.' },
   )
   assert.deepEqual(adviceFromReply('Switch families.'), { advice: 'Switch families.', note: null })
-  const long = adviceFromReply('x'.repeat(700))
-  assert.ok(long.advice !== null && long.advice.length <= 601)
+  // Three sentences of kernel advice run long; only runaway replies are cut.
+  const kept = adviceFromReply('x'.repeat(700))
+  assert.equal(kept.advice, 'x'.repeat(700))
+  const long = adviceFromReply('x'.repeat(2000))
+  assert.ok(long.advice !== null && long.advice.length <= 1501)
 })
 
 test('approval notes ride the OK line in every delivery kind', () => {
