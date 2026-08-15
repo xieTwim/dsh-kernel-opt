@@ -270,8 +270,17 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
   }
   // Whether it ever asked WHY the kernel is slow. Absence is a soft signal —
   // only real profilers are recognised, not hand-written diagnostic scripts.
+  // Presence is a soft signal too: the run that motivated this line narrated
+  // "profiler-backed analysis" with IPC figures no row ever reported, and a
+  // bare count of profiler invocations let that pass as established.
+  const metricRows = series.iterations.filter(p => Object.keys(p.metrics ?? {})
+    .some(key => key !== 'speedup' && key !== 'ref_runtime_ms')).length
   if (series.profileSeqs.length > 0) {
-    lines.push(`Profiling: ${String(series.profileSeqs.length)} profiler run(s) recorded.`)
+    lines.push(`Profiling: ${String(series.profileSeqs.length)} command(s) invoked a profiler`
+      + (metricRows > 0
+        ? `, and ${String(metricRows)} evaluation(s) carried metrics.`
+        : ', but NO evaluation carried a single metric — profiler findings that appear only in '
+          + 'the agent\'s prose are unverified here, so treat them as claims, not evidence.'))
   } else if (evalsDone >= 3) {
     lines.push('Profiling: no profiler invocation seen on the command lines — the run may be optimizing by '
       + 'guesswork rather than measurement (hand-written diagnostic scripts would not be detected here).')
@@ -346,7 +355,9 @@ export const HEADROOM_SYSTEM = [
   '- stopping IS justified when the remaining ideas are argued to be dominated, when measurements sit at a stated',
   '  hardware or semantic floor, or when several distinct families all failed to beat the current best;',
   '- a run that never profiled and reports no metrics cannot claim it sits at a floor — it never located the',
-  '  bottleneck, so "no headroom" is a guess. Send it to profile once before accepting the ending.',
+  '  bottleneck, so "no headroom" is a guess. Send it to profile once before accepting the ending;',
+  '- counters quoted only in the agent\'s prose (an IPC, a bandwidth, a saturation claim) with no metric on any',
+  '  row are the agent\'s own account, not evidence. Ask for the number on a row before letting it close the run.',
   'If the run is genuinely converged, reply `DONE: ` followed by ONE short sentence stating WHY no headroom remains '
   + '(which families were tried and what floor the measurements sit at). That sentence is shown to the human as the '
   + 'justification for ending the run, so never reply with a bare DONE.',
@@ -373,7 +384,10 @@ export function adviceFromReply(reply: string): { advice: string | null; note: s
     const note = text.slice(approved[0].length).trim().split('\n')[0]?.trim() ?? ''
     return { advice: null, note: note.length > 0 ? (note.length > 300 ? `${note.slice(0, 300)}…` : note) : null }
   }
-  return { advice: text.length > 600 ? `${text.slice(0, 600)}…` : text, note: null }
+  // 600 chars cut a real direction mid-sentence ("Test a norm-only parallel
+  // pass with…"): three sentences of kernel advice carry tool names, counters
+  // and instruction counts, and a half-sentence direction cannot be pursued.
+  return { advice: text.length > 1500 ? `${text.slice(0, 1500)}…` : text, note: null }
 }
 
 /**

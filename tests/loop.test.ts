@@ -267,8 +267,19 @@ test('supervisor digest flags a run that never profiled, and stays quiet early',
   assert.ok(supervisorDigest(blind, state).includes('no profiler invocation seen'))
   // Two evaluations in, not profiling yet is normal — no nagging.
   assert.ok(!supervisorDigest(series([done(10, 5), done(20, 4)]), state).includes('Profiling:'))
+  // Profiler runs with no metric on any row: a count alone let the reviewer
+  // accept "profiler-backed analysis" that no row could support.
   const profiled = { ...blind, profileSeqs: [15, 25] }
-  assert.ok(supervisorDigest(profiled, state).includes('2 profiler run(s) recorded'))
+  const bare = supervisorDigest(profiled, state)
+  assert.ok(bare.includes('2 command(s) invoked a profiler'))
+  assert.ok(bare.includes('NO evaluation carried a single metric'))
+  const withMetrics = {
+    ...profiled,
+    iterations: [...blind.iterations.slice(0, 2), { ...done(30, 4), metrics: { occupancy: 0.5 } }],
+  }
+  const backed = supervisorDigest(withMetrics, state)
+  assert.ok(backed.includes('1 evaluation(s) carried metrics'))
+  assert.ok(!backed.includes('NO evaluation'))
 })
 
 test('unreviewedEvals: true when rows exist past the last delivered review', () => {

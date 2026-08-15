@@ -87,32 +87,52 @@ export function matchesTool(name: string, patterns: readonly string[]): boolean 
   })
 }
 
-/** Characters that may bound an executable token on a command line. */
-const TOKEN_BOUND = /[\s;|&(){}<>"'`=]/
+/** Shell operators that open a new command position. */
+const SEGMENT_SPLIT = /[;|&\n]+|\$\(|`/
+/** Programs that run another program: the profiler may follow one of these. */
+const COMMAND_WRAPPERS = new Set(['xcrun', 'sudo', 'env', 'nohup', 'time', 'command', 'stdbuf', 'exec'])
+/** Arguments that turn a profiler invocation into a question ABOUT the profiler. */
+const INSPECTION_ARGS = new Set(['--help', '-h', 'help', '--version', '-V', '--list', 'list'])
+/** Leading `FOO=bar` environment assignments. */
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 
 /**
- * Whether a shell command line invokes one of the configured profilers.
+ * Whether a shell command line actually RUNS one of the configured profilers.
  *
- * Token-bounded on both sides, with `/` accepted only on the left so an
- * absolute path (`/usr/local/cuda/bin/ncu`) matches while a directory of the
- * same name (`/opt/ncu/run.sh`) does not. `.` is deliberately NOT a boundary:
- * every bench script in this domain times with `time.perf_counter`, and a
- * looser rule would mark all of them as profiling.
+ * Position, not substring: the name must be the program a command segment
+ * invokes (after env assignments and wrappers like `xcrun`/`sudo`), so
+ * `ls /opt/xctrace` and `python /opt/ncu/bench.py` do not qualify. An
+ * invocation whose arguments only interrogate the tool (`xctrace list
+ * templates`, `ncu --help`) does not qualify either — measured on a real
+ * run, where availability probes were the only matches and the panel then
+ * claimed the agent had profiled.
  * @param command - the logged command line.
  * @param names - configured profiler executables.
- * @returns whether any name appears as an invoked command.
+ * @returns whether any segment invokes a profiler on a workload.
  */
 export function matchesProfileCommand(command: string, names: readonly string[]): boolean {
-  return names.some((name) => {
-    for (let at = command.indexOf(name); at >= 0; at = command.indexOf(name, at + 1)) {
-      const before = at === 0 ? '' : command.charAt(at - 1)
-      const after = command.charAt(at + name.length)
-      const leftOk = before === '' || before === '/' || TOKEN_BOUND.test(before)
-      const rightOk = after === '' || TOKEN_BOUND.test(after)
-      if (leftOk && rightOk) return true
+  // Quoted text is data, not shell syntax. Without this, the `|` inside
+  // `grep -E 'xctrace|instruments'` opens a command position and the profiler
+  // name it is SEARCHING for reads as the profiler being run.
+  const shell = command.replace(/'[^']*'/g, ' ').replace(/"[^"]*"/g, ' ')
+  for (const segment of shell.split(SEGMENT_SPLIT)) {
+    const tokens = segment.trim().split(/\s+/).filter(token => token.length > 0)
+    let at = 0
+    while (at < tokens.length) {
+      const token = tokens[at] ?? ''
+      if (!ENV_ASSIGNMENT.test(token) && !COMMAND_WRAPPERS.has(token)) break
+      at += 1
     }
-    return false
-  })
+    const head = tokens[at]
+    if (head === undefined) continue
+    if (!names.includes(head.slice(head.lastIndexOf('/') + 1))) continue
+    const args = tokens.slice(at + 1)
+    // A profiler with nothing to profile prints its usage.
+    if (args.length === 0) continue
+    if (args.some(token => INSPECTION_ARGS.has(token))) continue
+    return true
+  }
+  return false
 }
 
 /** Narrow an unknown to a plain record. */
