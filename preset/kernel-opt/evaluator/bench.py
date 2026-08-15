@@ -26,6 +26,14 @@ Measurement protocol (2026-08 upgrade):
   distinguishable from the structured output alone. Emitted only on failure —
   a margin printed on success would navigate an agent toward the tolerance
   edge.
+- The reference's runtime is measured once and FROZEN in a baseline file
+  (--baseline, default .bench-baseline.json), then reused by every later run
+  whose reference / machine / backend / precision / input regime / trial count
+  is unchanged. That is what makes every evaluation report a speedup at no
+  per-iteration cost, and what makes the speedup order the same way the
+  solution's own latency does — a denominator re-timed inside each evaluation
+  carries its own noise, enough to invert the ranking of two kernels a
+  microsecond apart. REF_SOURCE names the regime on every run.
 
 Usage:
     python bench/kernelbench/bench.py --ref <ref-path> --solution solution/<kernel> [options]
@@ -36,7 +44,9 @@ Output (structured, one per line):
     RUNTIME: <ms>
     REF_RUNTIME: <ms>
     SPEEDUP: <x>
+    REF_SOURCE: frozen baseline (measured <when>) | measured this run
     DEVIATION: <how wrong>   (only present when CORRECT is False)
+    KERNEL_EVAL={...}        (the kernel-opt panel's contract line)
 
 Portions of this file are derived from KernelBench
 (https://github.com/ScalingIntelligence/KernelBench).
@@ -63,8 +73,10 @@ SOFTWARE.
 """
 
 import argparse
+import hashlib
 import importlib
 import importlib.util
+import json
 import os
 import re
 import statistics
@@ -72,6 +84,7 @@ import sys
 import tempfile
 import time
 import traceback
+from datetime import datetime, timezone
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from io import StringIO
@@ -551,6 +564,118 @@ def run_and_check_correctness(
         return KernelExecResult(compiled=True, correctness=False, metadata=metadata)
 
 
+# ---------------------------------------------------------------------------
+# Reference baseline cache
+# ---------------------------------------------------------------------------
+#
+# The reference is invariant across solution edits, so its runtime is measured
+# ONCE per (reference, machine, measurement regime) and then frozen for the
+# rest of the optimization run. Two things follow, and the second is why this
+# is a comparability device and not merely a cache:
+#
+#   * the reference's timing phase stops costing anything per iteration — the
+#     entire saving the old --no-ref switch bought, except SPEEDUP survives,
+#     so there is no longer a reason to run without a speedup at all; and
+#   * SPEEDUP becomes monotone in the solution's own latency. A denominator
+#     re-timed inside every evaluation carries its own noise on top of the
+#     solution's, which is how a 453µs solution comes back x3.60 while a
+#     454µs one comes back x3.61 — the ranking inverts on reference jitter.
+#
+# Every iteration of one run therefore divides by the same number. The key
+# below is what keeps that honest: a different reference, machine, backend,
+# precision, input regime or trial count is a different measurement and
+# re-measures instead of reusing. The one risk a frozen denominator carries is
+# machine drift within a run (thermal throttling, a noisy neighbour): the
+# ratio no longer cancels it out. `--refresh-baseline` is the answer when that
+# is suspected, and REF_SOURCE states on every run which regime produced the
+# number.
+
+BASELINE_SCHEMA = 1
+DEFAULT_BASELINE_PATH = ".bench-baseline.json"
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _baseline_key(
+    ref_src: str,
+    inputs_src: Optional[str],
+    hardware: str,
+    backend: str,
+    precision: torch.dtype,
+    fresh_inputs: bool,
+    num_perf_trials: int,
+    timing_method: str,
+    seed_num: int,
+) -> dict:
+    """Everything a cached reference runtime is only valid under."""
+    return {
+        "schema": BASELINE_SCHEMA,
+        "ref_sha256": _sha256(ref_src),
+        "inputs_sha256": _sha256(inputs_src) if inputs_src else None,
+        "hardware": hardware,
+        "backend": backend,
+        "precision": str(precision),
+        "fresh_inputs": bool(fresh_inputs),
+        "num_perf_trials": int(num_perf_trials),
+        "timing_method": timing_method,
+        "seed": int(seed_num),
+    }
+
+
+def _load_baseline(path: str, key: dict) -> Optional[dict]:
+    """The cached reference runtime, or None with the reason printed.
+
+    A mismatch is never silent: an agent that sees its speedup move needs to
+    know whether the kernel changed or the denominator did.
+    """
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            entry = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"[Baseline] {path} unreadable ({e}); re-measuring the reference.")
+        return None
+    cached_key = entry.get("key", {})
+    for field_name, want in key.items():
+        got = cached_key.get(field_name)
+        if got != want:
+            shown = "ref source" if field_name == "ref_sha256" else field_name
+            if field_name.endswith("_sha256"):
+                print(f"[Baseline] {shown} changed; re-measuring the reference.")
+            else:
+                print(f"[Baseline] {shown} changed ({got} -> {want}); re-measuring the reference.")
+            return None
+    if not isinstance(entry.get("ref_runtime_ms"), (int, float)) or entry["ref_runtime_ms"] <= 0:
+        print(f"[Baseline] {path} holds no usable reference runtime; re-measuring.")
+        return None
+    return entry
+
+
+def _save_baseline(path: str, key: dict, ref_runtime_ms: float, stats: dict) -> None:
+    """Write the frozen denominator via tmp+rename, so a crash never truncates it."""
+    if not path:
+        return
+    entry = {
+        "key": key,
+        "ref_runtime_ms": ref_runtime_ms,
+        "ref_runtime_stats": stats,
+        "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(entry, f, indent=2)
+        os.replace(tmp, path)
+        print(f"[Baseline] reference timed and frozen in {path} "
+              f"({ref_runtime_ms:.4f} ms) — later runs reuse it.")
+    except OSError as e:
+        print(f"[Baseline] could not write {path} ({e}); the reference will be "
+              f"re-timed every run.")
+
+
 def eval_kernel_against_ref(
     original_model_src: str,
     custom_model_src: str,
@@ -566,12 +691,14 @@ def eval_kernel_against_ref(
     precision: torch.dtype = torch.float32,
     check_for_excessive_speedup: bool = True,
     excessive_speedup_threshold: float = 10,
-    measure_reference: bool = True,
     get_inputs_override: Optional[callable] = None,
     get_init_inputs_override: Optional[callable] = None,
     ref_path: Optional[str] = None,
     sol_path: Optional[str] = None,
     fresh_inputs: bool = False,
+    baseline_path: Optional[str] = DEFAULT_BASELINE_PATH,
+    refresh_baseline: bool = False,
+    inputs_src: Optional[str] = None,
 ) -> KernelExecResult:
     """
     Evaluate a custom kernel against the reference model.
@@ -579,14 +706,13 @@ def eval_kernel_against_ref(
     Compiles and loads both models, checks correctness, and optionally
     measures performance (timing + speedup).
 
-    `measure_reference=False` skips reference timing (and the >threshold
-    reward-hack flag, which needs the ref/solution ratio): COMPILED / CORRECT /
-    RUNTIME are still produced, but REF_RUNTIME / SPEEDUP are left unset (-1).
-    Use it for fast "signal" iteration — rank candidates by the solution's own
-    RUNTIME, since the reference is invariant across solution edits and re-timing
-    it every iteration is wasted work for an expensive reference. Run with
-    measure_reference=True (the default) for the "verdict" before committing a
-    winner. Note correctness still runs the reference num_correct_trials times.
+    The reference's runtime is measured once and frozen in `baseline_path`
+    (see the baseline-cache section above): every iteration gets a REF_RUNTIME
+    and a SPEEDUP without paying to re-time the reference, and the speedup
+    orders the same way the solution's own latency does. `refresh_baseline`
+    forces a fresh measurement — use it when the machine may have drifted.
+    Correctness still runs the reference num_correct_trials times; only the
+    timing phase is cached.
 
     If `get_inputs_override` / `get_init_inputs_override` are provided, they
     take precedence over any definitions found inside `original_model_src`.
@@ -873,57 +999,84 @@ def eval_kernel_against_ref(
                 print(f"[Eval] Error in Measuring Performance: {e}")
             kernel_exec_result.metadata["error_during_performance"] = str(e)
 
-    # Reference timing (for speedup) + the excessive-speedup reward-hack flag,
-    # which needs the ref/solution ratio. Skipped when measure_reference=False:
-    # the reference is invariant across solution edits, so re-timing it every
-    # iteration is wasted work for an expensive reference. Fast "signal" runs
-    # rank by the solution's own RUNTIME; the default "verdict" run restores
-    # REF_RUNTIME, SPEEDUP, and the reward-hack flag.
-    if measure_performance and check_for_excessive_speedup and measure_reference:
-        if verbose:
-            print("[Eval] Additional checks to flag excessive speedup")
-
-        torch.cuda.synchronize(device=device)
-        set_seed(seed_num)
-        inputs = get_inputs()
-        inputs = [
-            _process_input_tensor(x, device, backend, precision) for x in inputs
-        ]
-
-        torch.cuda.synchronize(device=device)
-
-        # Same regime for the denominator as for the numerator: a speedup
-        # whose two sides ran under different input policies would not be a
-        # ratio of like things.
-        reference_factory = None
-        if fresh_inputs:
-            def reference_factory():
-                fresh = get_inputs()
-                return [
-                    _process_input_tensor(x, device, backend, precision)
-                    for x in fresh
-                ]
-
-        timing_fn = get_timing_function(timing_method)
-        reference_elapsed_times = timing_fn(
-            original_model,
-            inputs,
-            num_trials=num_perf_trials,
-            verbose=verbose,
-            device=device,
-            inputs_factory=reference_factory,
+    # Reference timing (the speedup denominator) + the excessive-speedup
+    # reward-hack flag, which needs the ref/solution ratio. The reference is
+    # invariant across solution edits, so it is timed once and frozen — see
+    # the baseline-cache section. Nothing here is optional any more: an
+    # evaluation that measured a kernel always reports what it beat.
+    if measure_performance and check_for_excessive_speedup:
+        baseline_key = _baseline_key(
+            ref_src=original_model_src,
+            inputs_src=inputs_src,
+            hardware=metadata["hardware"],
+            backend=backend,
+            precision=precision,
+            fresh_inputs=fresh_inputs,
+            num_perf_trials=num_perf_trials,
+            timing_method=timing_method,
+            seed_num=seed_num,
         )
-        reference_runtime_stats = get_timing_stats(
-            reference_elapsed_times, device=device
-        )
-        kernel_exec_result.ref_runtime = reference_runtime_stats["median"]
-        kernel_exec_result.ref_runtime_stats = reference_runtime_stats
+        cached = None if refresh_baseline else _load_baseline(baseline_path, baseline_key)
 
+        if cached is not None:
+            kernel_exec_result.ref_runtime = cached["ref_runtime_ms"]
+            kernel_exec_result.ref_runtime_stats = cached.get("ref_runtime_stats", {})
+            kernel_exec_result.metadata["baseline_source"] = "cached"
+            kernel_exec_result.metadata["baseline_measured_at"] = cached.get("measured_at", "")
+        else:
+            if verbose:
+                print("[Eval] Timing the reference to establish the baseline")
+
+            torch.cuda.synchronize(device=device)
+            set_seed(seed_num)
+            inputs = get_inputs()
+            inputs = [
+                _process_input_tensor(x, device, backend, precision) for x in inputs
+            ]
+
+            torch.cuda.synchronize(device=device)
+
+            # Same regime for the denominator as for the numerator: a speedup
+            # whose two sides ran under different input policies would not be a
+            # ratio of like things.
+            reference_factory = None
+            if fresh_inputs:
+                def reference_factory():
+                    fresh = get_inputs()
+                    return [
+                        _process_input_tensor(x, device, backend, precision)
+                        for x in fresh
+                    ]
+
+            timing_fn = get_timing_function(timing_method)
+            reference_elapsed_times = timing_fn(
+                original_model,
+                inputs,
+                num_trials=num_perf_trials,
+                verbose=verbose,
+                device=device,
+                inputs_factory=reference_factory,
+            )
+            reference_runtime_stats = get_timing_stats(
+                reference_elapsed_times, device=device
+            )
+            kernel_exec_result.ref_runtime = reference_runtime_stats["median"]
+            kernel_exec_result.ref_runtime_stats = reference_runtime_stats
+            kernel_exec_result.metadata["baseline_source"] = "measured"
+            _save_baseline(
+                baseline_path, baseline_key,
+                reference_runtime_stats["median"], reference_runtime_stats,
+            )
+
+        # A failed or unmeasured solution has no ratio to check — the
+        # denominator is still valid and stays recorded.
         effective_speedup = (
             kernel_exec_result.ref_runtime / kernel_exec_result.runtime
+            if kernel_exec_result.runtime and kernel_exec_result.runtime > 0
+            else -1
         )
 
-        if verbose:
+        if verbose and effective_speedup > 0:
             print(
                 f"[Eval] Effective Speedup is {effective_speedup:.2f}x "
                 f"using timing method {timing_method}"
@@ -931,6 +1084,7 @@ def eval_kernel_against_ref(
 
         if effective_speedup > excessive_speedup_threshold:
             kernel_exec_result.metadata["excessive_speedup"] = True
+            kernel_exec_result.metadata["excessive_speedup_threshold"] = excessive_speedup_threshold
             print(
                 f"[WARNING] Excessive speedup {effective_speedup:.2f}x "
                 f"over {excessive_speedup_threshold}x threshold detected"
@@ -1240,13 +1394,28 @@ def main():
         help="Number of performance trials (default: 50)",
     )
     parser.add_argument(
+        "--baseline",
+        default=DEFAULT_BASELINE_PATH,
+        help=f"Where the reference's frozen runtime lives (default: "
+             f"{DEFAULT_BASELINE_PATH}). Measured on the first run and reused "
+             f"after, so every later evaluation reports a SPEEDUP without "
+             f"paying to re-time the reference — and the speedup orders the "
+             f"same way the solution's own latency does. Re-measures by itself "
+             f"when the reference, machine, backend, precision, input regime or "
+             f"trial count changes.",
+    )
+    parser.add_argument(
+        "--refresh-baseline",
+        action="store_true",
+        help="Re-time the reference and overwrite the frozen baseline. For when "
+             "the machine itself may have drifted (thermal throttling, a noisy "
+             "neighbour) — that is the one thing a frozen denominator cannot "
+             "cancel out.",
+    )
+    parser.add_argument(
         "--no-ref",
         action="store_true",
-        help="Skip reference timing: still emit COMPILED/CORRECT/RUNTIME but set "
-             "REF_RUNTIME/SPEEDUP to -1 (and skip the >threshold reward-hack flag, "
-             "which needs the reference ratio). For fast iteration on an expensive "
-             "reference — rank candidates by the solution's own RUNTIME. Omit it "
-             "for the full verdict run before committing a winner.",
+        help=argparse.SUPPRESS,  # removed; accepted so older scripts keep running
     )
     parser.add_argument(
         "--fresh-inputs",
@@ -1286,8 +1455,18 @@ def main():
     }
     precision = precision_map[args.precision]
 
+    if args.no_ref:
+        print(
+            "[Warning] --no-ref no longer does anything and will be dropped. It "
+            "existed to skip the reference's timing phase; the frozen baseline "
+            "(--baseline) skips exactly that, for every run after the first, "
+            "and still reports a SPEEDUP.",
+            file=sys.stderr,
+        )
+
     ref_src = read_file(args.ref)
     sol_src = read_file(args.solution)
+    inputs_src = read_file(args.inputs) if args.inputs else None
 
     if args.backend is None:
         args.backend = _auto_detect_backend(sol_src)
@@ -1324,7 +1503,6 @@ def main():
         num_correct_trials=args.num_correct_trials,
         num_perf_trials=args.num_perf_trials,
         measure_performance=True,
-        measure_reference=not args.no_ref,
         timing_method=args.timing_method,
         verbose=args.verbose,
         backend=args.backend,
@@ -1334,6 +1512,9 @@ def main():
         ref_path=args.ref,
         sol_path=args.solution,
         fresh_inputs=args.fresh_inputs,
+        baseline_path=args.baseline,
+        refresh_baseline=args.refresh_baseline,
+        inputs_src=inputs_src,
     )
 
     if result is None:
@@ -1378,6 +1559,54 @@ def main():
         f"REF_RUNTIME: {ref_runtime_ms:.4f}" if ref_runtime_ms > 0 else "REF_RUNTIME: -1"
     )
     print(f"SPEEDUP: {speedup:.4f}x" if speedup > 0 else "SPEEDUP: -1")
+    # Where the denominator came from. Printed on every run, because a speedup
+    # that moved is either the kernel or the baseline and the reader cannot
+    # tell which from the ratio alone.
+    baseline_source = result.metadata.get("baseline_source")
+    if baseline_source == "cached":
+        when = result.metadata.get("baseline_measured_at") or "earlier"
+        print(f"REF_SOURCE: frozen baseline (measured {when})")
+    elif baseline_source == "measured":
+        print("REF_SOURCE: measured this run (baseline established)")
+
+    # Contract trailer for the kernel-opt panel: this evaluator speaks the
+    # contract itself, so the numbers on the curve are the ones the evaluator
+    # printed rather than an agent's transcription of them. An agent driving
+    # THIS bench must not add a trailer of its own — that would double-count
+    # the evaluation.
+    trailer = {
+        "artifact": args.solution,
+        "compiled": bool(result.compiled),
+        "correct": bool(result.correctness),
+    }
+    if runtime_ms > 0:
+        trailer["latency_ms"] = runtime_ms
+    native_metrics = {}
+    if speedup > 0:
+        native_metrics["speedup"] = round(speedup, 6)
+    if ref_runtime_ms > 0:
+        native_metrics["ref_runtime_ms"] = ref_runtime_ms
+    if native_metrics:
+        trailer["native_metrics"] = native_metrics
+    # A replayed output caught by the mutation sentinel is a proven hack. An
+    # over-threshold speedup is NOT — it is a number worth an independent look,
+    # and real kernels do clear 10x — so it rides the advisory channel.
+    if result.metadata.get("mutation_sentinel") == "fail":
+        trailer["reward_hack_detected"] = True
+    if result.metadata.get("excessive_speedup"):
+        threshold = result.metadata.get("excessive_speedup_threshold", 10)
+        trailer["advisory"] = [
+            f"speedup {speedup:.2f}x is over the {threshold:g}x flag threshold "
+            f"— worth checking independently before it is believed"
+        ]
+    error_text = (
+        result.metadata.get("compilation_error")
+        or result.metadata.get("runtime_error")
+        or result.metadata.get("error_message")
+    )
+    if not result.correctness and error_text:
+        trailer["error"] = str(error_text)[:400]
+    print("KERNEL_EVAL=" + json.dumps(trailer, ensure_ascii=False))
 
     if args.verbose:
         print()

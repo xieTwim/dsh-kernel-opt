@@ -14,7 +14,7 @@ description: Protocol for long kernel-optimization runs under the kernel-opt plu
 > **红线**：任务可以来自对话，也可以是用户放进**工作目录**的文件（prompt/任务说明就算任务）。两者都没有时，停下来问，等用户回答。工作目录**之外**的东西——邻居目录里的旧 run、别的会话留下的文件——**不是你的任务**，永远不要从那里"考古"出一个任务自行开工。
 
 - **kernel**（必需）——要优化的代码，文件或目录，语言不限；
-- **reference**（可选）——正确性金标准；没有就以原始 kernel 为金标准；
+- **reference**（可选）——正确性金标准 + 加速比分母；**用户没给就以拿到手的原始 kernel 为准**：动手之前先把它原样复制到 `solution/` 之外的一个固定位置（比如 `baseline/kernel.py`），`--ref` 指那份冻结的副本。永远不要把 `--ref` 指向你正在改的文件。「比起点快 2.4 倍」是能核的说法，光一个裸延迟不是；
 - **输入数据**（可选）——硬编码、独立文件、`.npz`/`.bin` 裸数据都行，你自己接线；
 - **评测脚本**（可选）——用户自己的 bench；读懂它、包装它，**不要改它的 trial 数/参考处理**（那是用户的契约；快迭代开关只用用户暴露的，没有就问）；
 - **硬件信息 / knowledge / hints**（可选）。
@@ -25,7 +25,7 @@ description: Protocol for long kernel-optimization runs under the kernel-opt plu
 
 ## 1. 评测入口：你自己组装，末尾打一行契约
 
-评测怎么跑由你定（推荐包一个 `scripts/bench.sh`）。**唯一硬性要求**：每完成一次真实评测，向 stdout 打印一行契约（行首，一行一个评测）：
+评测怎么跑由你定（推荐包一个 `scripts/bench.sh`）。**唯一硬性要求**：每完成一次真实评测，stdout 上要有一行契约（行首，一行一个评测）。用内置评测器时这行由它自己打，你什么都不用做——**别再手写第二行**；包别人的评测器、或自己写评测时，才由你来打：
 
 ```
 KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
@@ -37,13 +37,13 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 | `correct` | ✅ | 正确性判定（未验证就写 `false`） |
 | `latency_ms` | 测得就写 | 延迟毫秒数 |
 | `compiled` / `error` | 可选 | 编译结果 / 失败信息 |
-| `native_metrics` | 可选 | 数值映射；`speedup` 或 `ref_runtime_ms` 会变成面板的加速比列 |
+| `native_metrics` | 测了就写 | 数值映射；`speedup` 或 `ref_runtime_ms` 会变成面板的加速比列（曲线的纵轴也靠它） |
 | `reward_hack_detected` / `workload_indices` | 可选 | 评测器的反作弊标记 / 子集评测 |
 
 规矩：
 
 - **profile 出来的数就写进 `native_metrics`**（occupancy、实测带宽及其占峰值比例、cache 命中率、每 block 寄存器/共享内存……）。延迟说不出「为什么慢」，判断还有多少余量靠的是这些数；profile 完只留在自己上下文里、只报一个延迟，等于把证据扔了；
-- **跑了 reference 就把 `speedup`（或 `ref_runtime_ms`）一起写进 `native_metrics`**。评测器已经算出来的数不转述，面板就只有裸延迟：曲线的纵轴退化成延迟标注，人类看不出"这版到底比参考快几倍"。快迭代那些不跑 reference 的评测照常只报延迟，不用编；
+- **`speedup`（或 `ref_runtime_ms`）必须进 `native_metrics`**。评测器算出来的数不转述，面板就只有裸延迟，曲线纵轴退化成延迟标注，人类看不出"这版比参考快几倍"。**用内置评测器时你不用管**：它自己打这行契约（连 speedup 一起），你再手写一行就会把同一次评测记成两个点；
 - **前台跑 bench**（不要 `run_in_background`——后台 job 的输出面板不收）；
 - 包装脚本**env 自包含**（conda activate / PATH export 写进脚本里）——这同时是 finalize 复测能成功的前提；
 - 契约行**只能由真实评测产生**。`echo`/`cat` 出一行契约=伪造：面板给每个点标注产生它的命令行，监督模型会审这些命令行，人类看得见;
@@ -55,7 +55,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 **git checkpoint 三时机**（`git commit`，不必更频繁）：出现新的最佳结果时；换方法族时；finalize 时。commit 是 artifact 检查点（回滚/对比），不是日志。
 
-**快迭代**：昂贵的 reference 对"比较两个 solution"没有贡献——循环里按 solution 自身延迟排序（signal），只在提交赢家前跑全量出真 speedup（verdict）。这些开关只对**你自己写的**包装/内置评测器用；用户脚本的参数是用户契约。
+**每次评测都要有加速比**。reference 在整轮优化里是不变的，所以它只该被计时**一次**：内置评测器把这个数冻在 `--baseline`（默认 `.bench-baseline.json`）里，之后每次评测直接读回来——省掉的正是"reference 很贵"要省的那部分开销，而 `SPEEDUP` 照常有。别再为了快而放弃分母。这样还顺带修掉一件事：分母每次重测就会自带抖动（同一份没动过的 reference 在一台 A100 上量出 2.14 / 2.06 / 2.03 ms），足以让 453µs 报 ×3.60、454µs 报 ×3.61 —— 冻住之后加速比严格随 solution 自身延迟单调。机器可能漂了（降频、邻居抢卡）才用 `--refresh-baseline`，且**换了分母之后前后两段就不可比**，要在下一次汇报里说出来。用户自带的评测脚本另说：trial 数和参考处理是用户的契约，别去改。
 
 **停滞**：循环续跑消息会带"距上次改进已 N 评"的计数。要不要重新 profile、换方法族、上网查，你自己判断——没有固定门槛。同样，**不要为改写而改写**：带宽顶限的 elementwise op 该做的可能是调度而不是重写；改动半径跟着 headroom 证据走。
 

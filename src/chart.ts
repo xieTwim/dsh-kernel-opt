@@ -5,10 +5,13 @@
  * **The axis reads better-is-up.** The plotted quantity is 1/latency, which
  * every measured evaluation has, so a faster kernel always sits higher; the
  * LABELS read as the evaluator's speedup when the run has a reference to
- * divide by, and as latency when it does not. Plotting speedup directly would
- * empty the chart on the runs that iterate with the reference switched off —
- * a fast-iteration mode the evaluator guide actively recommends — and those
- * rows carry a latency like any other.
+ * divide by, and as latency when it does not.
+ *
+ * The bundled evaluator always reports a speedup (its reference is timed once
+ * and frozen), but the plugin does not require any particular evaluator: a
+ * user's own bench, or a session recorded before that changed, can report
+ * latency alone. Plotting speedup directly would hand those runs an empty
+ * chart, when they have a perfectly good latency for every point.
  */
 
 import type { WireIteration } from './wire.ts'

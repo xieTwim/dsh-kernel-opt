@@ -14,7 +14,7 @@
 KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ```
 
-模型经 `bash` 跑它，面板从 shell 结果里解析这一行。必需字段只有 `artifact`（测的是哪个文件）和 `correct`；测得延迟时给 `latency_ms`；可选 `compiled` / `error` / `native_metrics`（数值映射，`speedup` 或 `ref_runtime_ms` 会成为加速比列）/ `reward_hack_detected` / `workload_indices`。一行一个评测，行首开始，行内 JSON 后可跟杂质。
+模型经 `bash` 跑它，面板从 shell 结果里解析这一行。必需字段只有 `artifact`（测的是哪个文件）和 `correct`；测得延迟时给 `latency_ms`；可选 `compiled` / `error` / `native_metrics`（数值映射，`speedup` 或 `ref_runtime_ms` 会成为加速比列与曲线纵轴）/ `reward_hack_detected` / `advisory` / `workload_indices`。一行一个评测，行首开始，行内 JSON 后可跟杂质。**自带的评测器自己打这行**（连 speedup 一起），所以走它的时候数字是评测器的原话而不是模型的转述。
 
 **② 工具结果 JSON（MCP / 注册工具评测器）。** 评测器作为工具存在时（任何名字含 `kernel_evaluate` 的工具默认命中，可配），其 result 文本里的同字段 JSON 直接进面板。
 
@@ -42,7 +42,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ## 快速上手（自带 kernel）
 
 1. 安装插件（见下），重启 `dsh web`；
-2. 把要优化的 kernel 丢进工作目录——reference / 输入数据 / 你自己的评测脚本都可选，**任意形式**，模型自己盘点组装；没有评测手段就用**插件自带的评测器**（随算子优化模式落盘在 `~/.dsh/.agent-presets/kernel-opt/evaluator/`，同步自公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)：正确性 + median 计时 + fresh 输入 + mutation sentinel 反作弊），开箱即用；
+2. 把要优化的 kernel 丢进工作目录——reference / 输入数据 / 你自己的评测脚本都可选，**任意形式**，模型自己盘点组装（没给 reference 就以拿到手的原始 kernel 为分母，冻一份不动）；没有评测手段就用**插件自带的评测器**（随算子优化模式落盘在 `~/.dsh/.agent-presets/kernel-opt/evaluator/`，源自公开的 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)：正确性 + median 计时 + fresh 输入 + mutation sentinel 反作弊 + **参考实现只计时一次后冻结**，因此每次评测都带加速比、且加速比随延迟单调），开箱即用；
 3. 对模型说"优化这个 kernel"（建议配合 skill），或直接 `/kloop 30` 交给循环；
 4. 会话页顶部出现「评测」Tab——曲线、状态、方案、监督，全在里面；想引导随时打字。
 

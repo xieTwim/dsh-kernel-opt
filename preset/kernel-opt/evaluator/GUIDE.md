@@ -39,18 +39,38 @@ python bench/kernelbench/bench.py --ref <ref-path>.py --solution solution/<kerne
 
 If the file passed to `--inputs` also defines `get_init_inputs()`, it overrides the ref's version too. The solution file keeps `class Model` — the bench script transparently renames it to `class ModelNew` before evaluation.
 
-### Fast iteration on an expensive reference
+### There is always a reference
 
-The reference is re-run for every correctness trial *and* re-timed for the speedup denominator, but it is **invariant across solution edits** — so an expensive reference slows every iteration without helping you *rank* two solutions. For the loop, rank by the solution's own `RUNTIME` and skip the reference; pay for it only at the verdict:
+Speedup is the number the whole loop is steering by, so the evaluator never runs without a denominator. If the user handed you a reference implementation, that is it. If they did not — a bare kernel, no benchmark, nothing to compare against — then **the kernel as you received it is the reference**: copy it once, before you touch anything, and point `--ref` at that frozen copy. "×2.4 over where we started" is a real, checkable claim; a bare latency is not.
+
+Never point `--ref` at the file you are editing. `solution/` is the only directory the loop owns; the reference lives outside it and does not change for the length of the run.
+
+### The reference is timed once, then frozen
+
+The reference is invariant across solution edits, so `bench.py` times it **once** and freezes the number in `--baseline` (default `.bench-baseline.json`, written next to where you run the bench). Every later run reads it back:
 
 ```
-# signal (fast): rank by RUNTIME, no reference timing
-python bench/kernelbench/bench.py --ref <ref>.py --solution solution/<k>.py --no-ref --num-perf-trials 20
-# verdict (before declaring a winner): full run, real SPEEDUP + reward-hack check
+# first run: times the reference, writes the baseline
 python bench/kernelbench/bench.py --ref <ref>.py --solution solution/<k>.py
+  → REF_SOURCE: measured this run (baseline established)
+
+# every run after: reference timing skipped, speedup still reported
+python bench/kernelbench/bench.py --ref <ref>.py --solution solution/<k>.py
+  → REF_SOURCE: frozen baseline (measured 2026-08-15T08:29:18+00:00)
 ```
 
-`--no-ref` leaves `REF_RUNTIME`/`SPEEDUP` at -1 and skips the >10× reward-hack flag (it needs the ratio); correctness still runs the reference `--num-correct-trials` times, so trim that too (keep it ≥1) if the reference is the bottleneck. Never swap the comparison target to speed up the bench — only reduce how often the reference is paid for.
+Two things this buys, and the second is the reason it exists:
+
+- the reference's timing phase costs nothing per iteration — the whole saving the old `--no-ref` switch bought, except `SPEEDUP` survives, which is why `--no-ref` is gone;
+- `SPEEDUP` orders the same way the solution's own `RUNTIME` does. A denominator re-timed inside every evaluation carries its own noise: on one A100 the same untouched reference came back 2.14 / 2.06 / 2.03 ms across three runs, a 5% wobble — enough to report a 453µs kernel as ×3.60 and a 454µs one as ×3.61.
+
+The baseline re-measures itself when the comparison stops being the same one: a changed reference source, machine, backend, precision, input regime, trial count or seed. Each of those prints the reason it invalidated. Correctness is untouched — the reference still runs `--num-correct-trials` times per evaluation; only its *timing* phase is cached, so trim that count (keep it ≥1) if an expensive reference is still the bottleneck.
+
+`--refresh-baseline` re-times the reference and overwrites the frozen value. It is for a machine that may have drifted under you (thermal throttling, a noisy neighbour) — the one error a frozen denominator cannot cancel out. **Refreshing mid-run makes every earlier iteration incomparable with every later one**: the curve silently changes what it is measuring against. If you refresh, say so in your next report, and treat the numbers before and after as two series.
+
+### Never swap what you compare against
+
+Reducing how often the reference is *paid for* is fine — that is what the baseline does. Changing *what* the ratio is taken against, to make the number look better or the bench run faster, is not a measurement any more. That applies to `--ref`, to the input regime (`--fresh-inputs` / `--no-fresh-inputs` measure different quantities), and to precision.
 
 ## Output Format
 
@@ -62,6 +82,8 @@ CORRECT: True
 RUNTIME: 0.4523
 REF_RUNTIME: 1.2301
 SPEEDUP: 2.7197x
+REF_SOURCE: frozen baseline (measured 2026-08-15T08:29:18+00:00)
+KERNEL_EVAL={"artifact": "solution/kernel.py", "compiled": true, "correct": true, "latency_ms": 0.4523, "native_metrics": {"speedup": 2.7197, "ref_runtime_ms": 1.2301}}
 ```
 
 - **COMPILED** — whether the solution compiled successfully
@@ -71,8 +93,8 @@ SPEEDUP: 2.7197x
 - **SPEEDUP** — `REF_RUNTIME / RUNTIME`
 - **DEVIATION** — only when `CORRECT: False`: how far off the output was (`max_abs=… avg_abs=… failed_trials=…`, or the failure kind), so a numerics-tolerance near miss and a gross logic error are distinguishable at a glance
 - **MUTATION_SENTINEL** — `PASS` / `FAIL …`, printed by the performance phase: after timing, the performance input tensors are re-randomized **in place** and the solution must still track the reference on the new values. `FAIL` forces `CORRECT: False` — a cached or replayed output cannot follow a mutated input, so the timed result did not measure computation
-
-Under `--no-ref`, `REF_RUNTIME` and `SPEEDUP` print as `-1` (reference not timed); `COMPILED`, `CORRECT`, and `RUNTIME` are unaffected.
+- **REF_SOURCE** — which regime produced `REF_RUNTIME`: the frozen baseline (with when it was measured) or a fresh measurement this run. A speedup that moved is either the kernel or the denominator, and the ratio alone cannot say which
+- **KERNEL_EVAL={…}** — the kernel-opt panel's contract line. **This bench emits it itself**, so the point on the curve carries the evaluator's own numbers rather than a transcription of them: do not write a second trailer by hand for a run of this bench, or the evaluation is counted twice. `speedup` and `ref_runtime_ms` ride in `native_metrics`; a mutation-sentinel failure sets `reward_hack_detected`, while an over-threshold speedup rides `advisory` — real kernels do clear 10×, so that flag is a prompt to check, not a verdict
 
 Exit code: `0` = correct, `1` = incorrect or failed.
 
@@ -88,7 +110,9 @@ Exit code: `0` = correct, `1` = incorrect or failed.
 | `--backend` | auto-detected | `cuda`, `triton`, `tilelang`, `cute`, `hip` (auto-detected from solution source; pass explicitly to override — see below) |
 | `--num-correct-trials` | `10` | Number of correctness check iterations |
 | `--num-perf-trials` | `50` | Number of recorded performance timing iterations (first trial discarded, 10 untimed warmups; the reported statistic is the median) |
-| `--no-ref` | off | Skip reference timing: emit `COMPILED`/`CORRECT`/`RUNTIME` but set `REF_RUNTIME`/`SPEEDUP` to -1 (and skip the reward-hack flag, which needs the ratio). Fast iteration on an expensive reference — rank by the solution's own `RUNTIME`. See "Fast iteration" below. |
+| `--baseline` | `.bench-baseline.json` | Where the reference's frozen runtime lives. Measured on the first run, reused after; re-measures by itself when the reference, machine, backend, precision, input regime, trial count or seed changes, printing which one moved. |
+| `--refresh-baseline` | off | Re-time the reference and overwrite the frozen value. For a machine that may have drifted; makes iterations before and after incomparable — see above. |
+| ~~`--no-ref`~~ | removed | Accepted with a warning so older scripts keep running, but it no longer does anything: the frozen baseline already skips the reference's timing phase, and still reports a speedup. |
 | `--fresh-inputs` | **on** | Performance phase generates fresh input values before every timed trial (solution AND reference; tensors built outside the timed region) — no trial can be served from a value cache. `--no-fresh-inputs` restores the historical reused regime. The two regimes measure different quantities (cache-warmth meaning changes): pick one per run and never compare numbers across them. |
 | `--verbose` | off | Print detailed debug info |
 | `--self-test` | off | Run source transformation self-test and exit |

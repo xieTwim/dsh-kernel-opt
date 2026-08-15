@@ -441,6 +441,33 @@ test('project: unparsable result leaves a measured-nothing row, not a crash', ()
   assert.equal(series.bestIndex, null)
 })
 
+test('the bundled evaluator’s own trailer projects, speedup and all', () => {
+  // Copied verbatim from a real run of preset/kernel-opt/evaluator/bench.py on
+  // an A100 — the two halves of this repo agree on the contract, or the panel
+  // silently loses the number the evaluator already computed.
+  const events = [
+    call('bash', 'b1', { command: './bench.sh --ref ref.py --solution solution/kernel.py' }),
+    result('b1', [
+      'COMPILED: True',
+      'CORRECT: True',
+      'RUNTIME: 1.9900',
+      'REF_RUNTIME: 2.1400',
+      'SPEEDUP: 1.0754x',
+      'REF_SOURCE: frozen baseline (measured 2026-08-15T08:29:18+00:00)',
+      'KERNEL_EVAL={"artifact": "solution/kernel.py", "compiled": true, "correct": true, "latency_ms": 1.99, "native_metrics": {"speedup": 1.075377, "ref_runtime_ms": 2.14}}',
+    ].join('\n')),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 1)
+  const point = series.iterations[0]!
+  assert.equal(point.artifactPath, 'solution/kernel.py')
+  assert.equal(point.latencyMs, 1.99)
+  assert.equal(point.correct, true)
+  assert.equal(point.compiled, true)
+  // The evaluator's explicit speedup wins over deriving one from ref_runtime_ms.
+  assert.ok(point.speedup !== undefined && Math.abs(point.speedup - 1.075377) < 1e-9)
+})
+
 test('shell channel: bash trailer lines become self-reported points with provenance + changes', () => {
   const events = [
     call('write', 'w1', { file_path: 'solution/k.py', content: 'v2 kernel' }),
