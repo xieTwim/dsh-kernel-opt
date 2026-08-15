@@ -91,10 +91,18 @@ export function matchesTool(name: string, patterns: readonly string[]): boolean 
 const SEGMENT_SPLIT = /[;|&\n]+|\$\(|`/
 /** Programs that run another program: the profiler may follow one of these. */
 const COMMAND_WRAPPERS = new Set(['xcrun', 'sudo', 'env', 'nohup', 'time', 'command', 'stdbuf', 'exec'])
+/** Programs whose quoted argument is itself a command line to run elsewhere. */
+const COMMAND_EXECUTORS = new Set(['ssh', 'bash', 'sh', 'zsh', 'docker', 'podman', 'kubectl', 'srun', 'sbatch'])
 /** Arguments that turn a profiler invocation into a question ABOUT the profiler. */
 const INSPECTION_ARGS = new Set(['--help', '-h', 'help', '--version', '-V', '--list', 'list'])
 /** Leading `FOO=bar` environment assignments. */
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+/** Placeholder standing in for one quoted span, by index. */
+const QUOTED_SLOT = /^\0(\d+)\0$/
+/** ssh flags that take no value, so only one token gets skipped. */
+const SSH_BOOLEAN_FLAGS = /^-[46AaCfGgKkMNnqsTtVvXxYy]+$/
+/** How deep to follow `ssh host 'ssh other "…"'` before giving up. */
+const EXECUTOR_DEPTH = 3
 
 /**
  * Whether a shell command line actually RUNS one of the configured profilers.
@@ -106,15 +114,39 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
  * templates`, `ncu --help`) does not qualify either — measured on a real
  * run, where availability probes were the only matches and the panel then
  * claimed the agent had profiled.
+ *
+ * Quoted text is data, not shell syntax — except when the program holding it
+ * exists to run a command line somewhere else. `ssh box 'ncu … python bench.py'`
+ * is the normal shape of profiling a remote GPU, so an executor's quoted
+ * argument is re-scanned as a command line, while `git commit -m 'ncu run'`
+ * and `grep -E 'xctrace|instruments'` stay data.
  * @param command - the logged command line.
  * @param names - configured profiler executables.
  * @returns whether any segment invokes a profiler on a workload.
  */
 export function matchesProfileCommand(command: string, names: readonly string[]): boolean {
-  // Quoted text is data, not shell syntax. Without this, the `|` inside
-  // `grep -E 'xctrace|instruments'` opens a command position and the profiler
-  // name it is SEARCHING for reads as the profiler being run.
-  const shell = command.replace(/'[^']*'/g, ' ').replace(/"[^"]*"/g, ' ')
+  // One stash for the whole line: a body lifted out of `ssh a "ssh b 'ncu …'"`
+  // still refers to slots the outer pass filled, so recursion can resolve them.
+  const quoted: string[] = []
+  const stash = (_match: string, body: string): string => `\0${String(quoted.push(body) - 1)}\0`
+  const shell = command.replace(/'([^']*)'/g, stash).replace(/"([^"]*)"/g, stash)
+  return scanSegments(shell, quoted, names, EXECUTOR_DEPTH)
+}
+
+/**
+ * Whether any command segment of an already-stashed line invokes a profiler.
+ * @param shell - the line with quoted spans replaced by slot placeholders.
+ * @param quoted - bodies of the stashed quoted spans, by index.
+ * @param names - configured profiler executables.
+ * @param depth - remaining executor hops to follow.
+ * @returns whether any segment invokes a profiler on a workload.
+ */
+function scanSegments(
+  shell: string,
+  quoted: readonly string[],
+  names: readonly string[],
+  depth: number,
+): boolean {
   for (const segment of shell.split(SEGMENT_SPLIT)) {
     const tokens = segment.trim().split(/\s+/).filter(token => token.length > 0)
     let at = 0
@@ -125,14 +157,54 @@ export function matchesProfileCommand(command: string, names: readonly string[])
     }
     const head = tokens[at]
     if (head === undefined) continue
-    if (!names.includes(head.slice(head.lastIndexOf('/') + 1))) continue
+    const program = head.slice(head.lastIndexOf('/') + 1)
     const args = tokens.slice(at + 1)
+    if (COMMAND_EXECUTORS.has(program)) {
+      if (depth > 0 && followsExecutor(program, args, quoted, names, depth)) return true
+      continue
+    }
+    if (!names.includes(program)) continue
     // A profiler with nothing to profile prints its usage.
     if (args.length === 0) continue
     if (args.some(token => INSPECTION_ARGS.has(token))) continue
     return true
   }
   return false
+}
+
+/**
+ * Whether the command an executor was handed runs a profiler.
+ *
+ * Two shapes carry it: quoted (`ssh box 'ncu … a.py'`, `bash -c "ncu … a.py"`)
+ * and bare, where ssh's own flags and destination sit between the executor and
+ * the program it will run (`ssh -p 22 root@box ncu … a.py`).
+ * @param program - the executor's own name.
+ * @param args - the executor's arguments, quoted spans still stashed.
+ * @param quoted - bodies of the stashed quoted spans, by index.
+ * @param names - configured profiler executables.
+ * @param depth - remaining executor hops to follow.
+ * @returns whether the handed-off command line profiles.
+ */
+function followsExecutor(
+  program: string,
+  args: readonly string[],
+  quoted: readonly string[],
+  names: readonly string[],
+  depth: number,
+): boolean {
+  for (const token of args) {
+    const slot = QUOTED_SLOT.exec(token)
+    const body = slot === null ? undefined : quoted[Number(slot[1])]
+    if (body !== undefined && scanSegments(body, quoted, names, depth - 1)) return true
+  }
+  if (program !== 'ssh') return false
+  // `ssh [-p 22] [-o K=V] host cmd …`: skip flags with their values, then the destination.
+  let at = 0
+  while (at < args.length && (args[at] ?? '').startsWith('-')) {
+    at += SSH_BOOLEAN_FLAGS.test(args[at] ?? '') ? 1 : 2
+  }
+  const rest = args.slice(at + 1)
+  return rest.length > 0 && scanSegments(rest.join(' '), quoted, names, depth - 1)
 }
 
 /** Narrow an unknown to a plain record. */
