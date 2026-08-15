@@ -99,6 +99,29 @@ test('matchesProfileCommand: a remote GPU is profiled through an executor', () =
   assert.equal(matchesProfileCommand('rsync -az ./ box:/root/w/', names), false)
 })
 
+test('matchesProfileCommand: a bare `--` hands the command across', () => {
+  const names = DEFAULT_PROJECTION.profileCommands
+  // The two standard cluster shapes. Both executors were already listed, but
+  // their command is not quoted, and bare arguments were followed for ssh only.
+  assert.equal(matchesProfileCommand('kubectl exec pod-0 -- ncu --set full python bench.py', names), true)
+  assert.equal(matchesProfileCommand('srun -N1 --gres=gpu:1 -- nsys profile ./bench.sh', names), true)
+  assert.equal(matchesProfileCommand('docker run --rm img -- ncu -o rep python b.py', names), true)
+  // A site's own lease/queue wrapper is never on any list here; the marker is
+  // what carries the handoff, so it does not have to be.
+  assert.equal(
+    matchesProfileCommand("python3 gpuq.py exec L0324 --node w6 -- bash -c 'ncu --set full python bench.py'", names),
+    true,
+  )
+  // What crosses the marker still has to BE a profiler run.
+  assert.equal(matchesProfileCommand('python3 gpuq.py exec L0324 --node w6 -- python bench.py', names), false)
+  assert.equal(matchesProfileCommand('kubectl exec pod-0 -- ncu --version', names), false)
+  assert.equal(matchesProfileCommand('gpuq exec L0324 --', names), false) // nothing handed across
+  // `--` that separates operands is not a handoff, even when a path is named
+  // like a configured profiler — `perf` is the one that makes this bite.
+  assert.equal(matchesProfileCommand('git log -- perf src/', names), false)
+  assert.equal(matchesProfileCommand('grep -rn pattern -- ncu notes.txt', names), false)
+})
+
 test('project: a profiler run through the shell earns the mark', () => {
   seq = 0
   const events: ProjectionEvent[] = [

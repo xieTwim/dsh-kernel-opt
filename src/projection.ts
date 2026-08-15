@@ -101,6 +101,10 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 const QUOTED_SLOT = /^\0(\d+)\0$/
 /** ssh flags that take no value, so only one token gets skipped. */
 const SSH_BOOLEAN_FLAGS = /^-[46AaCfGgKkMNnqsTtVvXxYy]+$/
+/** End-of-options marker: for most programs holding one, a command line follows. */
+const HANDOFF = '--'
+/** Programs whose `--` introduces operands — usually paths — rather than a command. */
+const HANDOFF_OPERANDS = new Set(['git', 'grep', 'rg', 'find', 'ls', 'rm', 'cp', 'mv', 'diff'])
 /** How deep to follow `ssh host 'ssh other "…"'` before giving up. */
 const EXECUTOR_DEPTH = 3
 
@@ -120,6 +124,13 @@ const EXECUTOR_DEPTH = 3
  * is the normal shape of profiling a remote GPU, so an executor's quoted
  * argument is re-scanned as a command line, while `git commit -m 'ncu run'`
  * and `grep -E 'xctrace|instruments'` stay data.
+ *
+ * A bare `--` is followed the same way, because the command handed across it is
+ * usually not quoted: `kubectl exec pod -- ncu … a.py` and `srun -N1 -- nsys …`
+ * are the standard cluster shapes. Following the marker rather than the program
+ * in front of it also covers a scheduler that is not on any list here, which is
+ * what a site's own lease/queue wrapper always is. Programs whose `--` separates
+ * operands instead (`git log -- perf src/`) are excluded by name.
  * @param command - the logged command line.
  * @param names - configured profiler executables.
  * @returns whether any segment invokes a profiler on a workload.
@@ -159,6 +170,18 @@ function scanSegments(
     if (head === undefined) continue
     const program = head.slice(head.lastIndexOf('/') + 1)
     const args = tokens.slice(at + 1)
+    // A bare `--` ends the host program's own options, so what follows is the
+    // command line it will run. This is how the two standard cluster shapes
+    // carry a profiler — `kubectl exec pod -- ncu … a.py`, `srun -N1 -- nsys …`
+    // — neither of which is quoted, and bare arguments were previously followed
+    // for `ssh` alone. It also reaches a scheduler this file has never heard of
+    // (`gpuq exec L0324 --node w6 -- bash -c 'ncu … a.py'`), which is the point:
+    // the marker is a convention, so it does not need the wrapper enumerated.
+    if (depth > 0 && !HANDOFF_OPERANDS.has(program)) {
+      const marker = args.indexOf(HANDOFF)
+      const rest = marker === -1 ? [] : args.slice(marker + 1)
+      if (rest.length > 0 && scanSegments(rest.join(' '), quoted, names, depth - 1)) return true
+    }
     if (COMMAND_EXECUTORS.has(program)) {
       if (depth > 0 && followsExecutor(program, args, quoted, names, depth)) return true
       continue
