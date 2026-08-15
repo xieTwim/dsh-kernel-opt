@@ -2,9 +2,10 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  adviceFromReply, challengeText, continuationText, decideContinuation, finalAuditText,
+  HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, continuationText,
+  decideContinuation, finalAuditText,
   initialLoopState, planStale, reviewable, stagnationCount, supervisorDigest,
-  unreviewedEvals, wrapUpText,
+  supervisorSystem, unreviewedEvals, wrapUpText,
 } from '../src/loop.ts'
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
@@ -350,4 +351,34 @@ test('supervisor digest carries provenance for self-reported rows', () => {
   assert.ok(digest.includes('[shell]'))
   assert.ok(digest.includes('cmd:"bash scripts/bench.sh"'))
   assert.ok(digest.includes('self-reported'))
+})
+
+test('config can set the review language and add house rules, never remove the rubric', () => {
+  const plain = supervisorSystem(SUPERVISOR_SYSTEM)
+  // Unset, the reviewer follows the agent's own plans — the panel shows the
+  // review beside them, so an English review under Chinese plans reads wrong.
+  assert.ok(plain.includes('the language the agent states its own plans'))
+  assert.ok(plain.startsWith(SUPERVISOR_SYSTEM), 'the rubric leads, additions follow')
+
+  const zh = supervisorSystem(SUPERVISOR_SYSTEM, { language: '中文' })
+  assert.ok(zh.includes('Write the review in 中文.'))
+  assert.ok(!zh.includes('the language the agent states its own plans'))
+
+  // Whatever the language, the verdict token stays ASCII: adviceFromReply
+  // recognises approval by a literal OK/DONE, and a translated token would
+  // record every approval as advice and inject it into the agent.
+  for (const text of [plain, zh, supervisorSystem(HEADROOM_SYSTEM, { language: '日本語' })]) {
+    assert.ok(text.includes('`OK:` / `DONE:` exactly as written above, in ASCII'))
+  }
+  assert.equal(adviceFromReply('OK: 四个方向都试过了,最优点复测一致').advice, null)
+  assert.equal(adviceFromReply('OK: 四个方向都试过了,最优点复测一致').note, '四个方向都试过了,最优点复测一致')
+
+  // House rules are appended and capped; the rubric survives verbatim.
+  const housed = supervisorSystem(SUPERVISOR_SYSTEM, { instructions: 'Flag any run that never reports DRAM bandwidth.' })
+  assert.ok(housed.includes(SUPERVISOR_SYSTEM))
+  assert.ok(housed.includes('they add findings, they never remove a check'))
+  assert.ok(housed.includes('Flag any run that never reports DRAM bandwidth.'))
+  assert.ok(supervisorSystem(SUPERVISOR_SYSTEM, { instructions: 'x'.repeat(3000) }).includes('…'))
+  // Empty / whitespace-only config values are not a directive.
+  assert.equal(supervisorSystem(SUPERVISOR_SYSTEM, { language: '   ', instructions: '  ' }), plain)
 })

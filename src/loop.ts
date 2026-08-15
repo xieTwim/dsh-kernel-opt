@@ -365,6 +365,43 @@ export const HEADROOM_SYSTEM = [
 ].join('\n')
 
 /**
+ * The review's system prompt: the plugin's rubric, plus the two things a
+ * deployment may add to it — the language the review is written in, and house
+ * rules for what this project counts as a finding. Config cannot delete a line
+ * of the rubric, the same way a route override picks the reviewer and not the
+ * standard it reviews to.
+ *
+ * The verdict prefix is pinned to ASCII on the way past. {@link adviceFromReply}
+ * recognises approval by a literal `OK` / `DONE`, so a reviewer that translated
+ * its own verdict token would have every approval recorded — and injected into
+ * the agent as a correction — as advice instead.
+ */
+export function supervisorSystem(
+  base: string,
+  options: { language?: string; instructions?: string } = {},
+): string {
+  const language = options.language?.trim() ?? ''
+  const lines = [
+    base,
+    language.length > 0
+      ? `Write the review in ${language}.`
+      : 'Write the review in the language the agent states its own plans and reports in — the human reads '
+        + 'it beside them. The digest\'s own labels are English scaffolding and do not decide this; when the '
+        + 'run carries no plan text to judge by, use English.',
+    'The verdict prefix is protocol, not prose: keep `OK:` / `DONE:` exactly as written above, in ASCII, '
+    + 'and put your sentence after it in that language.',
+  ]
+  const extra = options.instructions?.trim() ?? ''
+  if (extra.length > 0) {
+    lines.push(
+      'House rules for this project, on top of everything above — they add findings, they never remove a check:',
+      extra.length > 2000 ? `${extra.slice(0, 2000)}…` : extra,
+    )
+  }
+  return lines.join('\n')
+}
+
+/**
  * Split a supervisor reply into advice and the approval note. An approving
  * verdict carries its own one-line observation (`OK: …` / `DONE: …`): a bare
  * "OK" recorded nothing the human could read, so the note is the record of

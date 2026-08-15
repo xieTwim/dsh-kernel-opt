@@ -42,7 +42,7 @@ import type { ProjectionConfig } from './projection.ts'
 import {
   HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, completedEvals,
   continuationText, decideContinuation, finalAuditText, initialLoopState, planStale,
-  reviewable, stagnationCount, supervisorDigest, unreviewedEvals, wrapUpText,
+  reviewable, stagnationCount, supervisorDigest, supervisorSystem, unreviewedEvals, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
@@ -152,6 +152,21 @@ export interface Config {
      * only moves that cliff, so an exhausted review retries without thinking.
      */
     maxTokens?: number
+    /**
+     * What language the review is written in — a name the model will
+     * recognise (`中文`, `Chinese`, `日本語`, …). Unset, the reviewer follows
+     * the language the agent states its own plans in, since the review is
+     * read beside them.
+     */
+    language?: string
+    /**
+     * Extra house rules, appended to the rubric. For what THIS project counts
+     * as a finding — a hardware quirk to watch, a metric that must appear, a
+     * habit to call out. It is appended, never a replacement: the review
+     * discipline is the plugin's and a config cannot delete it, the same way
+     * an override picks the route and not the rubric.
+     */
+    instructions?: string
   }
 }
 
@@ -545,7 +560,13 @@ export function apply(ctx: Context, config: Config = {}): void {
           const stream = lctx.llm.stream({
             provider: supervisor.provider,
             model: supervisor.model,
-            system: mode === 'headroom' ? HEADROOM_SYSTEM : SUPERVISOR_SYSTEM,
+            system: supervisorSystem(
+              mode === 'headroom' ? HEADROOM_SYSTEM : SUPERVISOR_SYSTEM,
+              {
+                ...(config.supervisor?.language !== undefined ? { language: config.supervisor.language } : {}),
+                ...(config.supervisor?.instructions !== undefined ? { instructions: config.supervisor.instructions } : {}),
+              },
+            ),
             messages: [createUserMessage({
               content: [{ type: 'text', text: digest }],
               source: { kind: 'plugin', plugin: PLUGIN_ID },
