@@ -38,6 +38,7 @@ const zh = {
   'tab.label': '评测',
   'empty.title': '暂无评测数据',
   'empty.body': 'Agent 每完成一次评测，这里会实时新增一个数据点并连成优化曲线，方案汇报与监督记录也在此展示；把 kernel 和评测方式告诉 Agent 即可开始。',
+  'uncollected.note': '⚠ 有 {count} 次评测跑在后台任务里，结果没有进入下面的记录，也不计入迭代次数。评测需要在前台运行才能被收录——曲线为空或偏少并不代表 Agent 没有测。',
   'chips.iterations': '{count} 次迭代',
   'chips.best': '最佳 {latency}',
   'chips.profiles': '{count} 次 profile',
@@ -149,6 +150,7 @@ const en = {
   'tab.label': 'Evaluations',
   'empty.title': 'No evaluations yet',
   'empty.body': 'Each completed evaluation adds a live point to the optimization curve here, along with plan reports and supervision notes; hand the agent a kernel and a way to evaluate it to begin.',
+  'uncollected.note': '⚠ {count} evaluation(s) ran in a background job: their results are missing from the record below and from the iteration count. The bench must run in the foreground to be recorded — an empty or short curve does not mean the agent measured nothing.',
   'chips.iterations': '{count} iterations',
   'chips.best': 'best {latency}',
   'chips.profiles': '{count} profiles',
@@ -1242,6 +1244,19 @@ export function KernelOptTab(
             )
           : null}
       </div>
+
+      {/* Evaluations that ran in a background job: their contract line reached
+          the log but not this panel, so an empty curve here would otherwise
+          read as "the agent measured nothing". Say which it is. */}
+      {series !== null && series.uncollectedSeqs.length > 0
+        ? (
+            <div style={{ ...cardStyle, padding: '14px 16px', color: COLOR.warn }}>
+              <div style={{ fontSize: 14, lineHeight: '22px' }}>
+                {t('uncollected.note', { count: series.uncollectedSeqs.length })}
+              </div>
+            </div>
+          )
+        : null}
 
       {/* empty-state guidance: the controls above stay usable before the
           first evaluation; only the data area explains itself. */}

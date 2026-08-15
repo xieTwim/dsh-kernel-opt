@@ -232,6 +232,12 @@ export interface WireSeries {
   envs: WireEnv[]
   /** seqs of profile-tool calls (event markers between iterations). */
   profileSeqs: number[]
+  /**
+   * seqs of background-job results that carried a contract line the projection
+   * did not collect. Non-empty means real evaluations ran where the panel and
+   * the budget gate cannot see them.
+   */
+  uncollectedSeqs: number[]
   /** Kernel-loop continuation/wrap-up messages in log order. */
   rounds: WireRound[]
   /** Index into `iterations` of the best honest measurement, if any. */

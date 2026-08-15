@@ -14,7 +14,7 @@ import {
 import type { WireIteration, WireSeries } from '../src/wire.ts'
 
 function series(iterations: WireIteration[], bestIndex: number | null = null): WireSeries {
-  return { sessionId: 's', updatedAt: 0, iterations, plans: [], envs: [], profileSeqs: [], rounds: [], bestIndex }
+  return { sessionId: 's', updatedAt: 0, iterations, plans: [], envs: [], profileSeqs: [], uncollectedSeqs: [], rounds: [], bestIndex }
 }
 function done(seq: number, latencyMs: number, correct = true): WireIteration {
   return { seq, tool: 'kernel_evaluate', latencyMs, correct, evaluationId: String(seq).padStart(4, '0') }
@@ -311,7 +311,7 @@ test('finalAuditText: OK closes on the record; findings demand bounded correctio
 test('stagnationCount counts completed evals after best; continuation nudges from 3', () => {
   const mk = (latencyMs: number | undefined, correct = true) => ({ seq: 1, tool: 'bash', ...(latencyMs !== undefined ? { latencyMs } : {}), correct })
   const series = {
-    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], rounds: [],
+    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], uncollectedSeqs: [], rounds: [],
     iterations: [mk(2.0), mk(1.0), mk(1.5), mk(1.4), mk(undefined, false)],
     bestIndex: 1,
   }
@@ -341,7 +341,7 @@ test('taskless continuation redirects to a workspace inventory, same anchor', ()
 
 test('supervisor digest carries provenance for self-reported rows', () => {
   const series = {
-    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], rounds: [], bestIndex: 0,
+    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], uncollectedSeqs: [], rounds: [], bestIndex: 0,
     iterations: [
       { seq: 1, tool: 'bash', channel: 'shell' as const, command: 'bash scripts/bench.sh', latencyMs: 1.2, correct: true },
       { seq: 2, tool: 'kernel_evaluate', evaluationId: '0002', latencyMs: 1.5, correct: true },
@@ -392,7 +392,7 @@ test('the digest shows the END of a command, where the benchmark actually is', (
     + './eval.sh --ref ref.py --solution solution/kernel.py --num-perf-trials 20 2>&1 '
     + '| grep -v "WARNING\\|vulnerable" | tail -8'
   const series = {
-    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], rounds: [], bestIndex: 0,
+    sessionId: 's', updatedAt: 0, plans: [], envs: [], profileSeqs: [], uncollectedSeqs: [], rounds: [], bestIndex: 0,
     iterations: [{ seq: 1, tool: 'bash', channel: 'shell' as const, command, latencyMs: 0.0819, correct: true }],
   }
   const digest = supervisorDigest(series, { armed: true, budget: 20, round: 1, lastEvalCount: 0, noProgressRounds: 0, supervise: true })
@@ -404,4 +404,17 @@ test('the digest shows the END of a command, where the benchmark actually is', (
   assert.ok(row !== undefined && row.includes('cd /Users/x/Work'), 'the row stays one line')
   // Short commands pass through untouched.
   assert.ok(digest.length > 0)
+})
+
+test('supervisor digest says when evaluations ran where the record cannot see them', () => {
+  const state = { ...initialLoopState(), armed: true, budget: 16, round: 2 }
+  // The run that motivated this: five background-job evaluations, zero points,
+  // so the reviewer was asked to judge progress against an empty record and
+  // would have read "no measurements" as "no work".
+  const hidden = { ...series([]), uncollectedSeqs: [41, 55, 63, 77, 88] }
+  const digest = supervisorDigest(hidden, state)
+  assert.ok(digest.includes('5 background-job read(s) carried a contract line'))
+  assert.ok(digest.includes('NOT counted against the budget'))
+  // Silent when every evaluation landed in the record.
+  assert.ok(!supervisorDigest(series([done(10, 5)]), state).includes('Uncollected:'))
 })

@@ -50,6 +50,15 @@ export interface ProjectionConfig {
    * polling re-reads would duplicate every trailer they contain.
    */
   readonly shellTools: readonly string[]
+  /**
+   * Match list for background-job readers, whose results are NOT collected as
+   * points (see {@link ProjectionConfig.shellTools}) but ARE counted when they
+   * carry a contract line. A run that backgrounds its bench would otherwise
+   * leave the panel showing an empty curve and the loop's budget gate reading
+   * zero while real evaluations completed — a silent blindness the human has
+   * no way to tell apart from an agent that measured nothing.
+   */
+  readonly jobTools: readonly string[]
 }
 
 /** Defaults cover any `kernel_evaluate`-named evaluator (MCP prefixes match as suffixes) plus the host's tool-fs pair and shell. */
@@ -68,6 +77,7 @@ export const DEFAULT_PROJECTION: ProjectionConfig = {
   envTool: 'kernel_env',
   changeTools: ['write', 'edit'],
   shellTools: ['bash'],
+  jobTools: ['job_output'],
 }
 
 /**
@@ -651,6 +661,10 @@ export function project(
   const pendingBench = new Map<string, WireIteration>()
   /** callId → shell-call provenance awaiting its result (trailer scan). */
   const pendingShell = new Map<string, { name: string; command?: string }>()
+  /** callId → background-job read awaiting its result (counted, not collected). */
+  const pendingJob = new Set<string>()
+  /** seqs of background-job results that carried an uncollected contract line. */
+  const uncollectedSeqs: number[] = []
   /** callId → finalize call awaiting its result (a replay trailer may ride it). */
   const pendingFinalize = new Map<string, { name: string }>()
   /** Structured file changes since the previous bench call, any path. */
@@ -745,6 +759,8 @@ export function project(
           name: call.name,
           ...(typeof command === 'string' && command.length > 0 ? { command: capCommand(command) } : {}),
         })
+      } else if (matchesTool(call.name, config.jobTools)) {
+        pendingJob.add(call.callId)
       }
       continue
     }
@@ -801,6 +817,15 @@ export function project(
         // Changes attribute to exactly one evaluation: the next one — but a
         // shell call that carried no evaluation leaves them pending.
         if (consumed) pendingChanges = []
+        continue
+      }
+      if (pendingJob.has(result.callId)) {
+        pendingJob.delete(result.callId)
+        // Not collected as a point (a poll may re-read output already seen), but
+        // never silently dropped: the panel and the supervisor say it happened.
+        if (collectResultText(result.message).includes(EVAL_TRAILER_PREFIX)) {
+          uncollectedSeqs.push(event.seq)
+        }
       }
     }
   }
@@ -833,5 +858,5 @@ export function project(
     if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) bestIndex = i
   }
 
-  return { sessionId, updatedAt: Date.now(), iterations, plans, envs, profileSeqs, rounds, bestIndex }
+  return { sessionId, updatedAt: Date.now(), iterations, plans, envs, profileSeqs, uncollectedSeqs, rounds, bestIndex }
 }

@@ -80,6 +80,12 @@ export interface Config {
    * contract trailer (self-reported channel; default `['bash']`).
    */
   shellTools?: string[]
+  /**
+   * Background-job readers whose contract lines are counted but not collected
+   * as points (default `['job_output']`), so a backgrounded bench shows up as
+   * missing measurements instead of an empty curve.
+   */
+  jobTools?: string[]
   /** Kernel-loop tuning. */
   loop?: {
     /** Budget when `/kloop` is armed without a number (default 20). */
@@ -181,6 +187,7 @@ function resolveProjection(config: Config): ProjectionConfig {
     finalizeTools: config.finalizeTools ?? DEFAULT_PROJECTION.finalizeTools,
     changeTools: config.changeTools ?? DEFAULT_PROJECTION.changeTools,
     shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
+    jobTools: config.jobTools ?? DEFAULT_PROJECTION.jobTools,
     planTool: DEFAULT_PROJECTION.planTool,
     envTool: DEFAULT_PROJECTION.envTool,
   }

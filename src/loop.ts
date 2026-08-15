@@ -308,6 +308,12 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
     lines.push('Profiling: no profiler invocation seen on the command lines — the run may be optimizing by '
       + 'guesswork rather than measurement (hand-written diagnostic scripts would not be detected here).')
   }
+  if (series.uncollectedSeqs.length > 0) {
+    lines.push(`Uncollected: ${String(series.uncollectedSeqs.length)} background-job read(s) carried a contract `
+      + 'line, so those evaluations are NOT in the record above and NOT counted against the budget. '
+      + 'The bench must run in the foreground to be recorded — judge this run on what is listed, and say '
+      + 'that measurements are missing rather than assuming the numbers above are the whole picture.')
+  }
   const env = series.envs[series.envs.length - 1]
   if (env !== undefined) {
     lines.push(`Environment (agent-reported): ${env.device} @ ${env.location}`

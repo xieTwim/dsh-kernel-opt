@@ -595,3 +595,34 @@ test('inWrapUpPhase: evaluations after the wrap-up delivery are wrap-up phase', 
   assert.equal(inWrapUpPhase(audited, 75), true)
   assert.equal(inWrapUpPhase(audited, 60), false)
 })
+
+test('background-job trailers are counted, not collected as points', () => {
+  // The failure this guards: a run whose bench went to a background job left
+  // the panel at zero iterations and the budget gate at zero, while five real
+  // evaluations (best 0.0215ms, ~20x) sat in the log — indistinguishable, to
+  // the human, from an agent that never measured anything.
+  const series = project('s', [
+    call('job_output', 'j1', { job_id: 'bash-14' }),
+    result('j1', 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":0.0215,"correct":true}'),
+  ])
+  assert.equal(series.iterations.length, 0)
+  assert.deepEqual(series.uncollectedSeqs.length, 1)
+})
+
+test('background-job reads without a trailer are not counted', () => {
+  // Polling a job that is still compiling must not raise the alarm.
+  const series = project('s', [
+    call('job_output', 'j1', { job_id: 'bash-14' }),
+    result('j1', 'ninja: building extension...'),
+  ])
+  assert.equal(series.uncollectedSeqs.length, 0)
+})
+
+test('a foreground bash trailer stays a real point, uncounted as uncollected', () => {
+  const series = project('s', [
+    call('bash', 'b1', { command: './bench.sh' }),
+    result('b1', 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.5,"correct":true}'),
+  ])
+  assert.equal(series.iterations.length, 1)
+  assert.equal(series.uncollectedSeqs.length, 0)
+})
