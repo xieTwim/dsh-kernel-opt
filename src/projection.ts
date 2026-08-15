@@ -51,12 +51,17 @@ export interface ProjectionConfig {
    */
   readonly shellTools: readonly string[]
   /**
-   * Match list for background-job readers, whose results are NOT collected as
-   * points (see {@link ProjectionConfig.shellTools}) but ARE counted when they
-   * carry a contract line. A run that backgrounds its bench would otherwise
-   * leave the panel showing an empty curve and the loop's budget gate reading
-   * zero while real evaluations completed — a silent blindness the human has
-   * no way to tell apart from an agent that measured nothing.
+   * Match list for background-job readers. Their results ARE scanned: a bench
+   * that runs long enough to be backgrounded is still a bench, and a cloud
+   * evaluation is reached that way as a matter of course. A Modal run measured
+   * here produced 32 contract lines across 12 job reads and never repeated
+   * one, so the duplication this channel was once excluded for did not occur;
+   * trailers are deduplicated per job anyway, since inventing a second point
+   * for one measurement is worse than merging two identical ones.
+   *
+   * Provenance comes from the shell call that launched the job, matched by the
+   * id it announced, so a background point carries the command a human or the
+   * supervising model can audit.
    */
   readonly jobTools: readonly string[]
 }
@@ -113,6 +118,26 @@ const QUOTED_SLOT = /^\0(\d+)\0$/
 const SSH_BOOLEAN_FLAGS = /^-[46AaCfGgKkMNnqsTtVvXxYy]+$/
 /** End-of-options marker: for most programs holding one, a command line follows. */
 const HANDOFF = '--'
+/**
+ * Programs that only read text back. A contract line in their output was
+ * printed by an evaluation that already happened somewhere else, so collecting
+ * it would invent a second point for one measurement — the phantom the README
+ * warns about, observed for real when a run grepped its own bench log and put
+ * three points on an otherwise empty chart.
+ */
+const READER_COMMANDS = new Set([
+  'cat', 'grep', 'egrep', 'fgrep', 'rg', 'head', 'tail', 'less', 'more',
+  'od', 'xxd', 'strings', 'wc', 'ls', 'find', 'diff',
+])
+/** Text a shell tool returns when it puts the command in the background. */
+const BACKGROUND_JOB_ANNOUNCE = /started background job (\S+)/
+/**
+ * Tools that hand back stored text. A contract line in their output restates a
+ * measurement rather than reporting a new one, so their silence on the curve
+ * is correct and needs no warning — unlike a channel nobody thought about,
+ * which is what {@link WireSeries.uncollectedSeqs} exists to surface.
+ */
+const TEXT_READING_TOOLS = new Set(['read', 'glob', 'grep', 'notebook_read'])
 /** Programs whose `--` introduces operands — usually paths — rather than a command. */
 const HANDOFF_OPERANDS = new Set(['git', 'grep', 'rg', 'find', 'ls', 'rm', 'cp', 'mv', 'diff'])
 /** How deep to follow `ssh host 'ssh other "…"'` before giving up. */
@@ -147,6 +172,38 @@ const EXECUTOR_DEPTH = 3
  * @param names - configured profiler executables.
  * @returns whether any segment invokes a profiler on a workload.
  */
+/**
+ * Whether a command line only reads stored text back, so its contract lines
+ * restate measurements rather than produce them. Every segment must be a
+ * reader: `cat log | bash` runs something, and one real program anywhere on
+ * the line makes the whole line an execution.
+ * @param command - the shell command line as logged.
+ * @returns whether the line cannot have produced a measurement.
+ */
+export function isReadBackCommand(command: string): boolean {
+  const quoted: string[] = []
+  const stash = (_match: string, body: string): string => `\0${String(quoted.push(body) - 1)}\0`
+  const shell = command.replace(/'([^']*)'/g, stash).replace(/"([^"]*)"/g, stash)
+  let sawReader = false
+  for (const segment of shell.split(SEGMENT_SPLIT)) {
+    const tokens = segment.trim().split(/\s+/).filter(token => token.length > 0)
+    let at = 0
+    while (at < tokens.length) {
+      const token = tokens[at] ?? ''
+      if (!ENV_ASSIGNMENT.test(token) && !COMMAND_WRAPPERS.has(token)) break
+      at += 1
+    }
+    const head = tokens[at]
+    if (head === undefined) continue
+    // `cd …` is navigation, not a program that could measure anything.
+    const program = head.slice(head.lastIndexOf('/') + 1)
+    if (program === 'cd' || program === 'echo') continue
+    if (!READER_COMMANDS.has(program)) return false
+    sawReader = true
+  }
+  return sawReader
+}
+
 export function matchesProfileCommand(command: string, names: readonly string[]): boolean {
   // One stash for the whole line: a body lifted out of `ssh a "ssh b 'ncu …'"`
   // still refers to slots the outer pass filled, so recursion can resolve them.
@@ -660,11 +717,17 @@ export function project(
   /** callId → pending bench iteration awaiting its result. */
   const pendingBench = new Map<string, WireIteration>()
   /** callId → shell-call provenance awaiting its result (trailer scan). */
-  const pendingShell = new Map<string, { name: string; command?: string }>()
-  /** callId → background-job read awaiting its result (counted, not collected). */
-  const pendingJob = new Set<string>()
-  /** seqs of background-job results that carried an uncollected contract line. */
+  const pendingShell = new Map<string, { name: string; command?: string; readBack?: boolean }>()
+  /** callId → id of the background job being read, awaiting its result. */
+  const pendingJob = new Map<string, string>()
+  /** Background job id → the shell command that launched it (provenance). */
+  const jobCommands = new Map<string, string>()
+  /** Job id → contract lines already collected from it, so a re-read adds none. */
+  const jobTrailers = new Map<string, Set<string>>()
+  /** One entry per contract line that reached no collecting channel. */
   const uncollectedSeqs: number[] = []
+  /** callId → tool name, so an unrecognised channel can still be named. */
+  const callNames = new Map<string, string>()
   /** callId → finalize call awaiting its result (a replay trailer may ride it). */
   const pendingFinalize = new Map<string, { name: string }>()
   /** Structured file changes since the previous bench call, any path. */
@@ -678,6 +741,7 @@ export function project(
     }
     const call = callSlice(event)
     if (call !== null) {
+      callNames.set(call.callId, call.name)
       if (call.name === config.planTool) {
         const args = parseResultJson(call.argumentsJson)
         if (args !== null && typeof args['phase'] === 'string' && typeof args['approach'] === 'string') {
@@ -757,10 +821,16 @@ export function project(
         }
         pendingShell.set(call.callId, {
           name: call.name,
+          // Judged on the full line, not the capped one the panel shows: the
+          // cap elides the middle, and a run hidden there would read back as
+          // a pure file read and have its measurement silently dropped.
+          ...(typeof command === 'string' && isReadBackCommand(command) ? { readBack: true } : {}),
           ...(typeof command === 'string' && command.length > 0 ? { command: capCommand(command) } : {}),
         })
       } else if (matchesTool(call.name, config.jobTools)) {
-        pendingJob.add(call.callId)
+        const args = parseResultJson(call.argumentsJson)
+        const jobId = args?.['job_id']
+        pendingJob.set(call.callId, typeof jobId === 'string' ? jobId : '')
       }
       continue
     }
@@ -797,7 +867,17 @@ export function project(
       if (shell !== undefined) {
         pendingShell.delete(result.callId)
         const text = collectResultText(result.message)
+        // A shell call that went to the background names the job it started.
+        // Its measurements arrive later through the job reader, and the
+        // command has to travel with them or the point loses its provenance.
+        const announced = BACKGROUND_JOB_ANNOUNCE.exec(text)
+        const announcedId = announced?.[1]
+        if (announcedId !== undefined && shell.command !== undefined) {
+          jobCommands.set(announcedId, shell.command)
+        }
         if (!text.includes(EVAL_TRAILER_PREFIX)) continue
+        // Reading a bench log back is not a second measurement.
+        if (shell.readBack === true) continue
         let consumed = false
         for (const payload of trailerPayloads(text)) {
           const point = trailerPoint(event.seq, shell.name, 'shell', payload)
@@ -819,12 +899,50 @@ export function project(
         if (consumed) pendingChanges = []
         continue
       }
-      if (pendingJob.has(result.callId)) {
+      const jobId = pendingJob.get(result.callId)
+      if (jobId !== undefined) {
         pendingJob.delete(result.callId)
-        // Not collected as a point (a poll may re-read output already seen), but
-        // never silently dropped: the panel and the supervisor say it happened.
-        if (collectResultText(result.message).includes(EVAL_TRAILER_PREFIX)) {
-          uncollectedSeqs.push(event.seq)
+        const text = collectResultText(result.message)
+        if (!text.includes(EVAL_TRAILER_PREFIX)) continue
+        const command = jobCommands.get(jobId)
+        let seen = jobTrailers.get(jobId)
+        if (seen === undefined) {
+          seen = new Set<string>()
+          jobTrailers.set(jobId, seen)
+        }
+        let consumed = false
+        for (const payload of trailerPayloads(text)) {
+          // One measurement, one point: a poll that re-reads output already
+          // collected must not enter the curve twice.
+          const key = JSON.stringify(payload)
+          if (seen.has(key)) continue
+          seen.add(key)
+          const point = trailerPoint(event.seq, jobId, 'shell', payload)
+          if (point === null) continue
+          if (command !== undefined) point.command = command
+          const artifact = point.artifactPath
+          if (artifact !== undefined) {
+            const matched = pendingChanges
+              .filter(entry => samePath(entry.path, artifact))
+              .map(entry => entry.change)
+              .slice(-CHANGES_PER_ITERATION_CAP)
+            if (matched.length > 0) point.changes = matched
+          }
+          iterations.push(point)
+          consumed = true
+        }
+        if (consumed) pendingChanges = []
+        continue
+      }
+      // Last net: a contract line in a channel none of the branches above
+      // claimed. Nothing to collect it, so at least refuse to be silent —
+      // an empty curve beside real measurements is indistinguishable, to the
+      // human, from an agent that measured nothing.
+      const toolName = callNames.get(result.callId)
+      if (toolName !== undefined && !TEXT_READING_TOOLS.has(toolName)) {
+        const text = collectResultText(result.message)
+        if (text.includes(EVAL_TRAILER_PREFIX)) {
+          for (const _payload of trailerPayloads(text)) uncollectedSeqs.push(event.seq)
         }
       }
     }

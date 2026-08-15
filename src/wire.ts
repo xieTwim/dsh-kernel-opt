@@ -233,9 +233,11 @@ export interface WireSeries {
   /** seqs of profile-tool calls (event markers between iterations). */
   profileSeqs: number[]
   /**
-   * seqs of background-job results that carried a contract line the projection
-   * did not collect. Non-empty means real evaluations ran where the panel and
-   * the budget gate cannot see them.
+   * One entry per contract line that arrived through a channel no branch of
+   * the projection collects. Non-empty means real evaluations ran where the
+   * panel and the budget gate cannot see them — the shape of failure that
+   * background jobs caused before they were collected, kept as the net for
+   * whatever channel is unaccounted for next.
    */
   uncollectedSeqs: number[]
   /** Kernel-loop continuation/wrap-up messages in log order. */

@@ -119,8 +119,8 @@ dsh --profile web --dump-config | grep kernel-opt   # 应出现 bundle 层
 | key | 默认 | 说明 |
 |---|---|---|
 | `benchTools` | `['kernel_evaluate']` | 计入曲线的评测**工具**名（精确或分隔符后缀匹配，MCP 前缀自动覆盖） |
-| `shellTools` | `['bash']` | 扫描契约行的 shell 工具名（自报通道；后台 job 读取器不默认收——轮询重复读会复制契约行） |
-| `jobTools` | `['job_output']` | 后台任务读取器：带契约行的结果**计数但不计点**，面板与监督摘要据此说明"有 N 次评测没有进入记录"，而不是让空曲线冒充"没测过" |
+| `shellTools` | `['bash']` | 扫描契约行的 shell 工具名（自报通道）。命令行**只做读取**（`cat`/`grep`/`head`/`tail`/`ls` 等，判定按整行逐段，任一段是真程序就算执行）时不计点——读回一份 bench 日志不是第二次测量 |
+| `jobTools` | `['job_output']` | 后台任务读取器，**照常计点**：跑得久到要放后台的 bench 仍然是 bench，云端评测更是天然如此。来源命令从启动该 job 的 shell 调用（`started background job <id>`）追回，所以后台点一样可审计；同一 job 内按契约行去重 |
 | `profileTools` | `['kernel_profile']` | 记为 ▲ 标记的 profiler **工具**名（注册工具/MCP 评测器才有；自组装评测入口的形态下不会触发） |
 | `profileCommands` | `ncu`/`nsys`/`nvprof`/`rocprof*`/`omniperf`/`vtune`/`perf`/`xctrace` 等 | 记为 ▲ 标记的 profiler **命令**名，按 shell 命令行的可执行 token 匹配（路径前缀算，`time.perf_counter` 不算）。认得出真 profiler，认不出手写诊断脚本——所以"没有 ▲"是弱证据 |
 | `finalizeTools` | `['run_finalize', 'kernel_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标 ⚑，`artifact_path` 参数把该 artifact 最优诚实点标 ⚑ |
@@ -156,8 +156,8 @@ peer 范围写作 `>=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2`，因为**宿主有
 ## 已知边界
 
 - 面板只覆盖**内存中的会话**（`ctx.sessions`）：dsh 重启后旧会话在被重新载入前查不到序列。
-- 契约行按"行首前缀"识别：`cat` 一个**整行包含**契约的文件会产生幻影点（面板会显示其来源命令是 `cat …`，一眼可辨）；文档里引用契约时写在句中即可避免。自报通道的点由 agent 转述，**可被伪造**——防线是来源命令行明牌 + 监督 + finalize 复测，不是不可伪造性。
-- 后台 bench（`run_in_background`）的输出**不计点**——前台跑评测。但它不再是静默的：带契约行的后台任务结果会被计数，面板给出警示、监督摘要说明"这些评测不在记录里、也不计入预算"，所以空曲线不会冒充"agent 没测过"。（实测来源：一轮 run 把 bench 跑在后台，日志里有 5 次真实评测、最好 0.0215ms／约 20×，面板却停在 0/16。）
+- 契约行按"行首前缀"识别。纯读取命令（`cat`/`grep`/…）的输出不再计点，但**文档或脚本里整行写出契约、又被真程序打印出来**仍会产生幻影点；引用契约时写在句中即可避免。自报通道的点由 agent 转述，**可被伪造**——防线是来源命令行明牌 + 监督 + finalize 复测，不是不可伪造性。
+- **profiler 的 ▲ 认不出跑在别处的 profiler**：检测按本机 shell 命令行的可执行 token 匹配，所以 `ssh box 'ncu …'` 认得出，而 `modal run app.py::profile`、`sbatch job.sh` 这类把命令封进脚本再投出去的形态认不出。实测：一轮 Modal run 真跑了 3 次 ncu 并在总结里给出 DRAM 66%／MemBusy 39.5%，面板 ▲ 是 0。所以"没有 ▲"是弱证据，profile 的**内容**仍只能走 `native_metrics`。
 - finalize 复测以**会话工作目录**为 cwd、以 dsh 服务进程 env 运行：包装脚本 env 自包含（skill 有要求）时可靠；命令超过 300 字符会因投影截断而跳过复测（面板如实标注"未复测"）。
 - 评测结果必须能按上述两种形态之一解析；纯文本工具结果显示为"未测得"行。
 - `self_compact` 的压缩范围由官方 compaction backend 决定。

@@ -413,7 +413,7 @@ test('supervisor digest says when evaluations ran where the record cannot see th
   // would have read "no measurements" as "no work".
   const hidden = { ...series([]), uncollectedSeqs: [41, 55, 63, 77, 88] }
   const digest = supervisorDigest(hidden, state)
-  assert.ok(digest.includes('5 background-job read(s) carried a contract line'))
+  assert.ok(digest.includes('5 contract line(s) arrived through a channel'))
   assert.ok(digest.includes('NOT counted against the budget'))
   // Silent when every evaluation landed in the record.
   assert.ok(!supervisorDigest(series([done(10, 5)]), state).includes('Uncollected:'))

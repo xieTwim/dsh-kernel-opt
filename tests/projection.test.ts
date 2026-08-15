@@ -596,17 +596,34 @@ test('inWrapUpPhase: evaluations after the wrap-up delivery are wrap-up phase', 
   assert.equal(inWrapUpPhase(audited, 60), false)
 })
 
-test('background-job trailers are counted, not collected as points', () => {
-  // The failure this guards: a run whose bench went to a background job left
-  // the panel at zero iterations and the budget gate at zero, while five real
-  // evaluations (best 0.0215ms, ~20x) sat in the log — indistinguishable, to
-  // the human, from an agent that never measured anything.
+test('background-job trailers are collected, with the launching command as provenance', () => {
+  // The failure this guards: two runs put their bench in a background job —
+  // one on an A100, one in a Modal container — and the panel sat at zero
+  // iterations while 5 and 32 real evaluations sat in the log, which also
+  // left kernel_finalize with nothing to replay.
   const series = project('s', [
+    call('bash', 'b1', { command: 'bash scripts/bench.sh iter-0' }),
+    result('b1', 'started background job bash-14'),
     call('job_output', 'j1', { job_id: 'bash-14' }),
     result('j1', 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":0.0215,"correct":true}'),
   ])
-  assert.equal(series.iterations.length, 0)
-  assert.deepEqual(series.uncollectedSeqs.length, 1)
+  assert.equal(series.iterations.length, 1)
+  assert.equal(series.iterations[0]?.latencyMs, 0.0215)
+  assert.equal(series.iterations[0]?.command, 'bash scripts/bench.sh iter-0')
+  assert.equal(series.uncollectedSeqs.length, 0)
+})
+
+test('a job re-read does not enter the same measurement twice', () => {
+  // Measured across two real runs: 17 job reads, 37 trailers, zero repeats —
+  // but a poll that returned cumulative output would double the curve.
+  const trailer = 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.5,"correct":true}'
+  const series = project('s', [
+    call('job_output', 'j1', { job_id: 'bash-2' }),
+    result('j1', trailer),
+    call('job_output', 'j2', { job_id: 'bash-2' }),
+    result('j2', `${trailer}\nKERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.2,"correct":true}`),
+  ])
+  assert.deepEqual(series.iterations.map(p => p.latencyMs), [1.5, 1.2])
 })
 
 test('background-job reads without a trailer are not counted', () => {
@@ -615,7 +632,42 @@ test('background-job reads without a trailer are not counted', () => {
     call('job_output', 'j1', { job_id: 'bash-14' }),
     result('j1', 'ninja: building extension...'),
   ])
+  assert.equal(series.iterations.length, 0)
   assert.equal(series.uncollectedSeqs.length, 0)
+})
+
+test('reading a bench log back does not invent points', () => {
+  // Observed: a run grepped its own output file and put three points on an
+  // otherwise empty chart, two of them without a latency.
+  const trailer = 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":0.058,"correct":true}'
+  const readBack = project('s', [
+    call('bash', 'b1', { command: 'cd /w && ls trajectory/ && grep -a "KERNEL_EVAL" _bench_output-iter-4.txt | head -10' }),
+    result('b1', trailer),
+  ])
+  assert.equal(readBack.iterations.length, 0)
+  assert.equal(readBack.uncollectedSeqs.length, 0)
+  // One real program anywhere on the line makes it an execution again.
+  const executes = project('s', [
+    call('bash', 'b1', { command: 'cat prelude.sh && ./bench.sh' }),
+    result('b1', trailer),
+  ])
+  assert.equal(executes.iterations.length, 1)
+})
+
+test('a contract line from an unrecognised channel is still surfaced', () => {
+  // The net that caught the background-job gap, kept for the next unknown.
+  const series = project('s', [
+    call('some_future_runner', 'x1', {}),
+    result('x1', 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.1,"correct":true}'),
+  ])
+  assert.equal(series.iterations.length, 0)
+  assert.equal(series.uncollectedSeqs.length, 1)
+  // Reading a file back is not a missing measurement.
+  const readTool = project('s', [
+    call('read', 'r1', { file_path: '/w/_bench_output-iter-0.txt' }),
+    result('r1', 'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.1,"correct":true}'),
+  ])
+  assert.equal(readTool.uncollectedSeqs.length, 0)
 })
 
 test('a foreground bash trailer stays a real point, uncounted as uncollected', () => {

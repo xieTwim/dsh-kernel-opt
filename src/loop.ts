@@ -309,10 +309,10 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
       + 'guesswork rather than measurement (hand-written diagnostic scripts would not be detected here).')
   }
   if (series.uncollectedSeqs.length > 0) {
-    lines.push(`Uncollected: ${String(series.uncollectedSeqs.length)} background-job read(s) carried a contract `
-      + 'line, so those evaluations are NOT in the record above and NOT counted against the budget. '
-      + 'The bench must run in the foreground to be recorded — judge this run on what is listed, and say '
-      + 'that measurements are missing rather than assuming the numbers above are the whole picture.')
+    lines.push(`Uncollected: ${String(series.uncollectedSeqs.length)} contract line(s) arrived through a channel `
+      + 'this record does not collect, so those evaluations are NOT listed above and NOT counted against the '
+      + 'budget. Judge this run on what is listed, and say that measurements are missing rather than assuming '
+      + 'the numbers above are the whole picture.')
   }
   const env = series.envs[series.envs.length - 1]
   if (env !== undefined) {
