@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/index.ts", "src/projection.ts", "src/wire.ts", "tests"]
+  "include": ["src/index.ts", "src/projection.ts", "src/wire.ts", "src/chart.ts", "tests"]
 }

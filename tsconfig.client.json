@@ -12,5 +12,5 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/client", "src/wire.ts"]
+  "include": ["src/client", "src/wire.ts", "src/chart.ts"]
 }

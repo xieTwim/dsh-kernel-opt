@@ -20,6 +20,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WireChange, WireControl, WireEnv, WireIteration, WireModels, WirePlan, WireRound, WireSeries } from '../wire.ts'
+import { AXIS_GAP, CHART, chartModel, formatLatency } from '../chart.ts'
 import {
   CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH,
   inWrapUpPhase, latestRunStart, samePath, unfinishedRun,
@@ -64,6 +65,8 @@ const zh = {
   'status.hack': '作弊检出',
   'status.error': '失败',
   'axis.best': '最佳',
+  'axis.hintSpeedup': '纵轴：相对参考实现的加速比，越高越快。曲线用整个 run 汇总出的参考实现耗时换算，因此严格随延迟单调；每次评测自己报的加速比（参考实现被重新计时，带自己的抖动）保留在下方表格与各点悬停中。',
+  'axis.hintLatency': '纵轴：延迟，方向已反转——越高越快。本次 run 尚无任何一次评测报出加速比，所以标注用的是延迟本身。',
   'loop.armed': '循环运行中 · 已迭代 {done}/{budget} 次',
   'loop.stopped': '循环已停止：{reason}',
   'loop.interrupted': '上一轮循环没有收尾记录：可能被手动停止，或被服务重启中断；重新启动循环会接着已有进度继续。',
@@ -135,6 +138,10 @@ const zh = {
   'tip.final': '收尾时选定的最终版本',
   'tip.best': '当前最优结果',
   'tip.ok': '正确性校验通过',
+  'tip.speedup': '该次评测自己报出的加速比：评测器在同一次运行里重新给参考实现计时再相除，所以参考侧的抖动会叠进来——两行延迟几乎相同的记录出现末位差异是正常的。曲线不用逐行的这个比值，改用整个 run 汇总出的参考耗时。',
+  'ctl.locked': '循环运行中：监督开关与监督模型已锁定。中途改动会让同一次 run 前后条件不一致，曲线也就不再是同一个实验；要调整请先停止循环，改完再启动——进度会接着走。',
+  'ctl.lockedHint': '循环运行中不可更改：先停止循环',
+  'sup.modelTip': '监督模型列表来自宿主已配置的模型服务，与对话使用的是同一份；在宿主设置里接入新的服务后会自动出现在这里。',
 } satisfies Record<string, string>
 /** Panel locale key union. */
 type LocaleKey = keyof typeof zh
@@ -169,6 +176,8 @@ const en = {
   'status.hack': 'reward-hack',
   'status.error': 'failed',
   'axis.best': 'best',
+  'axis.hintSpeedup': 'y axis: speedup over the reference kernel — higher is faster. The curve converts latency with one reference time pooled over the whole run, so it is monotone in latency; each evaluation\'s own reported speedup (measured against a freshly re-timed reference, with that jitter in it) stays in the table below and on each point.',
+  'axis.hintLatency': 'y axis: latency, direction inverted — higher is faster. No evaluation in this run reported a speedup, so the labels are the latencies themselves.',
   'loop.armed': 'loop running · {done}/{budget} iterations',
   'loop.stopped': 'loop stopped: {reason}',
   'loop.interrupted': 'The last loop run has no closing record: it was stopped, or a host restart cut it off. Starting again resumes from the progress already on record.',
@@ -240,6 +249,10 @@ const en = {
   'tip.final': 'The final version selected at wrap-up',
   'tip.best': 'Best result so far',
   'tip.ok': 'Correctness check passed',
+  'tip.speedup': 'The speedup this evaluation reported for itself: the evaluator re-times the reference kernel inside the same run and divides, so reference-side jitter rides along — two rows with near-identical latency differing in the last digit is normal. The curve does not use this per-row ratio; it uses one reference time pooled over the run.',
+  'ctl.locked': 'Loop running: the supervision switch and model are locked. Changing them mid-run would leave one run with two sets of conditions, and the curve would no longer be one experiment. Stop the loop to change them, then start again — progress carries over.',
+  'ctl.lockedHint': 'Locked while the loop runs — stop it first',
+  'sup.modelTip': 'The supervisor list comes from the models the host has configured — the same set the conversation uses. Add a service in host settings and it shows up here.',
 } satisfies Record<string, string>
 
 /** Poll cadence — the panel is a dashboard, not a ticker. */
@@ -350,13 +363,6 @@ function useSeries(sessionId: string): { series: WireSeries | null; refetch: () 
   return { series, refetch: () => setTick(n => n + 1) }
 }
 
-/** Human latency: µs under 1 ms, ms under 1 s, s above. */
-function formatLatency(ms: number): string {
-  if (ms < 1) return `${(ms * 1000).toPrecision(3)}µs`
-  if (ms < 1000) return `${ms.toPrecision(4)}ms`
-  return `${(ms / 1000).toPrecision(3)}s`
-}
-
 /** Status classification of one iteration for color and label. */
 function statusOf(point: WireIteration): 'pending' | 'ok' | 'wrong' | 'hack' | 'error' {
   if (point.pending === true) return 'pending'
@@ -374,95 +380,20 @@ const STATUS_COLOR: Record<ReturnType<typeof statusOf>, string> = {
   error: COLOR.bad,
 }
 
-/** Chart geometry constants (viewBox units). */
-const CHART = { w: 640, h: 200, l: 56, r: 16, t: 16, b: 26 }
-/** Minimum vertical clearance between two axis-gutter labels (viewBox units). */
-const AXIS_GAP = 13
-
-interface ChartModel {
-  /** x in viewBox units per iteration index. */
-  x: (index: number) => number
-  /** y in viewBox units for a latency (clamped into the focus domain). */
-  y: (latencyMs: number) => number
-  /** Whether a latency lies above the focus domain (pinned to the top edge). */
-  clamped: (latencyMs: number) => boolean
-  /** Whether the y axis is log10. */
-  log: boolean
-  /** Focus-domain bounds, and the true series maximum for the clamp label. */
-  lo: number
-  hi: number
-  max: number
-  /** Latency at a fraction of the axis height (0 = domain bottom), for gridlines. */
-  atFraction: (f: number) => number
-}
-
-/** Nearest-rank quantile of an ascending-sorted array. */
-function quantile(sorted: readonly number[], q: number): number {
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))] ?? 0
-}
-
-/**
- * Build the y mapping from the measured latencies. The domain focuses on the
- * convergence band [best × 0.97, P90 × 1.25]: a run whose early exploration
- * sits far above its converged band would otherwise compress every later
- * improvement into a flat line, log axis or not. Points above the band stay
- * visible, pinned to the top edge with an ↑ mark and the maximum labeled.
- */
-function chartModel(measured: readonly WireIteration[], count: number): ChartModel | null {
-  const sorted = measured
-    .map(p => p.latencyMs)
-    .filter((v): v is number => v !== undefined)
-    .sort((a, b) => a - b)
-  if (sorted.length === 0) return null
-  const min = sorted[0] ?? 0
-  const max = sorted[sorted.length - 1] ?? 0
-  let hi = max
-  if (sorted.length >= 6) {
-    const band = quantile(sorted, 0.9) * 1.25
-    if (band < hi) hi = band
-  }
-  // Headroom above the domain: without it a single-point (or new-best-last)
-  // chart pins its dot flush to the top frame, colliding with the labels.
-  hi *= 1.015
-  const lo = min * 0.97
-  const log = lo > 0 && hi / lo > 20
-  const toAxis = (v: number): number => (log ? Math.log10(v) : v)
-  const axLo = toAxis(lo)
-  const span = toAxis(hi) - axLo || 1
-  const innerW = CHART.w - CHART.l - CHART.r
-  const innerH = CHART.h - CHART.t - CHART.b
-  const denom = Math.max(1, count - 1)
-  // Horizontal inset keeps first/last points (and their ★/⚑ marks) off the
-  // frame edges.
-  const xPad = 14
-  return {
-    x: index => CHART.l + xPad + ((innerW - 2 * xPad) * index) / denom,
-    y: (latencyMs) => {
-      const v = Math.min(toAxis(latencyMs), axLo + span)
-      return CHART.t + innerH * (1 - (v - axLo) / span)
-    },
-    clamped: latencyMs => latencyMs > hi,
-    log, lo, hi, max,
-    atFraction: (f) => {
-      const v = axLo + span * f
-      return log ? 10 ** v : v
-    },
-  }
-}
-
-/** Latency curve with per-point status, best line, profile ▲ and finalize ★. */
+/** Optimization curve with per-point status, best line, profile ▲ and finalize ★. */
 function Chart(props: {
   series: WireSeries
   bestLabel: string
   statusLabel: (status: ReturnType<typeof statusOf>) => string
+  axisHint: (mode: 'speedup' | 'latency') => string
 }): ReactNode {
-  const { series, bestLabel, statusLabel } = props
+  const { series, bestLabel, statusLabel, axisHint } = props
   const { iterations, profileSeqs, bestIndex } = series
   const model = useMemo(() => chartModel(iterations, iterations.length), [iterations])
   if (model === null) return null
-  // The clamp label rides the first occurrence of the true maximum.
-  const maxClampedIndex = iterations.findIndex(
-    p => p.latencyMs === model.max && model.clamped(p.latencyMs),
+  // The clamp label rides the first occurrence of the slowest measurement.
+  const worstClampedIndex = iterations.findIndex(
+    p => p.latencyMs === model.worst && model.clamped(p.latencyMs),
   )
 
   const best = bestIndex !== null ? iterations[bestIndex] : undefined
@@ -487,6 +418,7 @@ function Chart(props: {
   })
 
   return (
+    <>
     <svg
       viewBox={`0 0 ${CHART.w} ${CHART.h}`}
       style={{ width: '100%', height: 'auto', display: 'block' }}
@@ -497,10 +429,10 @@ function Chart(props: {
       <line x1={CHART.l} y1={CHART.t} x2={CHART.l} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       <line x1={CHART.l} y1={CHART.h - CHART.b} x2={CHART.w - CHART.r} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       {Math.abs(CHART.t - bestY) >= AXIS_GAP
-        ? <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.hi)}</text>
+        ? <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={12} fill={COLOR.dim}>{model.label(model.fast)}</text>
         : null}
       {Math.abs(CHART.h - CHART.b - bestY) >= AXIS_GAP
-        ? <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={12} fill={COLOR.dim}>{formatLatency(model.lo)}</text>
+        ? <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={12} fill={COLOR.dim}>{model.label(model.slow)}</text>
         : null}
       {model.log
         ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2 + 14} textAnchor="end" fontSize={11} fill={COLOR.caption}>log</text>
@@ -514,7 +446,7 @@ function Chart(props: {
           <g key={`g${String(f)}`}>
             <line x1={CHART.l} x2={CHART.w - CHART.r} y1={gy} y2={gy} stroke={COLOR.border} strokeWidth={1} strokeDasharray="2 5" opacity={0.55} />
             {f === 0.5 && Math.abs(gy - bestY) >= AXIS_GAP
-              ? <text x={CHART.l - 6} y={gy + 4} textAnchor="end" fontSize={10} fill={COLOR.caption}>{formatLatency(value)}</text>
+              ? <text x={CHART.l - 6} y={gy + 4} textAnchor="end" fontSize={10} fill={COLOR.caption}>{model.label(value)}</text>
               : null}
           </g>
         )
@@ -538,7 +470,7 @@ function Chart(props: {
                 stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
               />
               <text x={CHART.l - 6} y={bestY + 4} textAnchor="end" fontSize={12} fontWeight={500} fill={COLOR.ok}>
-                {formatLatency(best.latencyMs)}
+                {model.label(best.latencyMs, best.speedup)}
               </text>
             </g>
           )
@@ -558,7 +490,11 @@ function Chart(props: {
         // same final version and carries its own 复测 badge in the table.
         const finalPick = p.finalized === true && p.channel !== 'replay'
         const marks = `${bestIndex === i ? ' ★' : ''}${finalPick ? ' ⚑' : ''}`
-        const tip = `#${String(i + 1)} · ${p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'} · ${statusLabel(status)}${marks}`
+        // The tooltip carries the RAW numbers of that evaluation: its own
+        // latency and, when the evaluator gave one, its own reported speedup
+        // — not the pooled value the axis is drawn from.
+        const reported = p.speedup !== undefined ? ` · ×${p.speedup.toPrecision(3)}` : ''
+        const tip = `#${String(i + 1)} · ${p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}${reported} · ${statusLabel(status)}${marks}`
         if (p.latencyMs === undefined) {
           // Unmeasured (pending / failed) points sit just below the axis —
           // off the value scale, so they never read as a low latency.
@@ -583,18 +519,19 @@ function Chart(props: {
             {status === 'ok'
               ? <circle cx={cx} cy={cy} r={3.5} fill={color} />
               : <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.8} />}
-            {/* ↑ marks a point above the focus domain, pinned to the top edge. */}
+            {/* ↓ marks a point below the focus domain, pinned to the bottom
+                edge — on a better-is-up axis the outliers are the slow ones. */}
             {clamped
-              ? <text x={cx} y={CHART.t - 4} textAnchor="middle" fontSize={9} fill={COLOR.caption}>↑</text>
+              ? <text x={cx} y={CHART.h - CHART.b - 10} textAnchor="middle" fontSize={9} fill={COLOR.caption}>↓</text>
               : null}
             {/* The one label that must stay inside the plot (the clamped
-                maximum sits at its own point). A painted halo keeps it
-                readable wherever the curve runs beneath it. */}
-            {clamped && i === maxClampedIndex
+                slowest sits at its own point). A painted halo keeps it
+                readable wherever the curve runs above it. */}
+            {clamped && i === worstClampedIndex
               ? (
                   <text
                     x={cx < CHART.w / 2 ? cx + 7 : cx - 7}
-                    y={CHART.t + 4}
+                    y={CHART.h - CHART.b - 4}
                     textAnchor={cx < CHART.w / 2 ? 'start' : 'end'}
                     fontSize={11}
                     fill={COLOR.dim}
@@ -602,16 +539,29 @@ function Chart(props: {
                     strokeWidth={3}
                     paintOrder="stroke"
                   >
-                    {formatLatency(model.max)}↑
+                    {model.label(model.worst)}↓
                   </text>
                 )
               : null}
-            {/* ★ where the best result was FIRST reached; ⚑ on the finalized pick. */}
+            {/* ★ where the best result was FIRST reached; ⚑ on the finalized
+                pick. Better-is-up puts the best point AT the top of the
+                domain, where a mark riding above it would leave the frame —
+                so the pair flips under the point when the room is not there. */}
             {isBest
-              ? <text x={cx} y={cy - 8} textAnchor="middle" fontSize={13} fill={COLOR.ok}>★</text>
+              ? <text x={cx} y={cy - 21 >= CHART.t ? cy - 8 : cy + 15} textAnchor="middle" fontSize={13} fill={COLOR.ok}>★</text>
               : null}
             {finalPick
-              ? <text x={cx} y={cy - (isBest ? 21 : 8)} textAnchor="middle" fontSize={12} fill={COLOR.curve}>⚑</text>
+              ? (
+                  <text
+                    x={cx}
+                    y={cy - 21 >= CHART.t ? cy - (isBest ? 21 : 8) : cy + (isBest ? 28 : 15)}
+                    textAnchor="middle"
+                    fontSize={12}
+                    fill={COLOR.curve}
+                  >
+                    ⚑
+                  </text>
+                )
               : null}
           </g>
         )
@@ -622,6 +572,13 @@ function Chart(props: {
         <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 13} textAnchor="middle" fontSize={10} fill={COLOR.caption}>▲</text>
       ))}
     </svg>
+    {/* What the axis is measuring. Needed in both modes for opposite reasons:
+        a × axis has to say the number is not the evaluator's per-row ratio,
+        and a latency axis has to say its numbers now DECREASE upward. */}
+    <div style={{ padding: '4px 8px 2px', fontSize: 11, lineHeight: '16px', color: COLOR.caption }}>
+      {axisHint(model.referenceMs !== undefined ? 'speedup' : 'latency')}
+    </div>
+    </>
   )
 }
 
@@ -1013,19 +970,20 @@ type T = PropsLocale<'kernel-opt'>['t']
  * popover. Unconfigured (no config route, no session override) renders
  * disabled with the how-to in its tooltip.
  */
-function SuperviseToggle(props: { control: WireControl; t: T; onToggle: () => void }): ReactNode {
-  const { control, t, onToggle } = props
+function SuperviseToggle(props: { control: WireControl; t: T; locked?: boolean; onToggle: () => void }): ReactNode {
+  const { control, t, locked = false, onToggle } = props
   const enabled = control.supervisor.enabled
   const configured = control.supervisor.configured
+  const disabled = locked || !configured
   return (
     <button
       type="button"
       style={{
         ...buttonStyle(enabled ? COLOR.curve : undefined),
-        ...(configured ? {} : disabledBtnStyle),
+        ...(disabled ? disabledBtnStyle : {}),
       }}
-      disabled={!configured}
-      title={configured ? undefined : t('sup.needCfg')}
+      disabled={disabled}
+      title={locked ? t('ctl.lockedHint') : configured ? undefined : t('sup.needCfg')}
       onClick={onToggle}
     >
       {t(enabled ? 'sup.on' : 'sup.off')}
@@ -1042,10 +1000,12 @@ function SupervisorSelect(props: {
   control: WireControl
   models: WireModels | null
   t: T
+  /** A running loop freezes its own conditions — see `ctl.locked`. */
+  locked?: boolean
   onUse: (provider: string, model: string) => void
   style?: CSSProperties
 }): ReactNode {
-  const { control, models, t, onUse } = props
+  const { control, models, t, locked = false, onUse } = props
   const effective = control.supervisor.effective
   const overrideValue = effective !== undefined && effective.source === 'session'
     ? `${effective.provider}/${effective.model}`
@@ -1075,8 +1035,9 @@ function SupervisorSelect(props: {
   return (
     <select
       value={overrideValue}
-      title={t('sup.model')}
-      style={{ ...selectStyle, ...props.style }}
+      disabled={locked}
+      title={locked ? t('ctl.lockedHint') : t('sup.modelTip')}
+      style={{ ...selectStyle, ...props.style, ...(locked ? disabledBtnStyle : {}) }}
       onChange={(event) => {
         const value = event.target.value
         if (value === '') {
@@ -1235,6 +1196,7 @@ export function KernelOptTab(
                   <SuperviseToggle
                     control={control}
                     t={t}
+                    locked={control.loop.armed}
                     onToggle={() => { void post(control.supervisor.enabled ? 'supervise-off' : 'supervise-on') }}
                   />
                   <span style={{ ...rowLabelStyle, marginLeft: 6 }}>{t('pop.model')}</span>
@@ -1242,6 +1204,7 @@ export function KernelOptTab(
                     control={control}
                     models={models}
                     t={t}
+                    locked={control.loop.armed}
                     onUse={(provider, model) => { void post('supervise-use', { provider, model }) }}
                   />
                 </div>
@@ -1253,6 +1216,17 @@ export function KernelOptTab(
                     ? t('ctl.supOff')
                     : control.loop.armed ? t('ctl.supOn') : t('ctl.supDep')}
                 </div>
+                {/* A run's conditions are frozen for the length of the run: the
+                    panel is a record of ONE experiment, and a supervision
+                    switch flipped at round 7 makes rounds 1-6 and 8-20 two
+                    different runs sharing a curve. */}
+                {control.loop.armed
+                  ? (
+                      <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                        {t('ctl.locked')}
+                      </div>
+                    )
+                  : null}
                 {/* An armed run that lost its state (host restart) leaves the
                     log's last word as a continuation and no finalize: say so,
                     instead of handing back an unfinished curve in silence. */}
@@ -1317,6 +1291,7 @@ export function KernelOptTab(
                 series={series as WireSeries}
                 bestLabel={t('axis.best')}
                 statusLabel={status => t(`status.${status}`)}
+                axisHint={mode => t(mode === 'speedup' ? 'axis.hintSpeedup' : 'axis.hintLatency')}
               />
             </div>
           )
@@ -1512,11 +1487,18 @@ export function KernelOptTab(
                         <span style={{ flex: 'none', width: 92, color: COLOR.text, fontVariantNumeric: 'tabular-nums' }}>
                           {p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}
                         </span>
-                        {/* speedup vs the reference kernel (evaluator-reported) — rises and falls. */}
-                        <span style={{
-                          flex: 'none', width: 70, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
-                          color: isBest ? COLOR.ok : COLOR.dim,
-                        }}>
+                        {/* Speedup vs the reference kernel, exactly as the
+                            evaluator reported it — reference re-timed per
+                            evaluation, so it does not order the same way the
+                            latency column does. The tooltip says why; the
+                            curve sidesteps it with a pooled reference. */}
+                        <span
+                          title={p.speedup !== undefined ? t('tip.speedup') : undefined}
+                          style={{
+                            flex: 'none', width: 70, fontVariantNumeric: 'tabular-nums', fontWeight: isBest ? 600 : 400,
+                            color: isBest ? COLOR.ok : COLOR.dim,
+                          }}
+                        >
                           {p.speedup !== undefined ? `×${p.speedup.toPrecision(3)}` : ''}
                         </span>
                         <span style={{ flex: 1 }} />
