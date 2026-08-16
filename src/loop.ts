@@ -173,7 +173,7 @@ const CMD_TAIL = 170
  * Long commands are elided in the MIDDLE, never at the tail. An agent edits
  * and then measures in one `&&` chain, so the benchmark invocation sits at the
  * END — a head-only cut hides exactly what the rubric asks the reviewer to
- * judge. On the kopt-gpu2 run, four rows opened with a patch heredoc or a
+ * judge. On one measured run, four rows opened with a patch heredoc or a
  * `git checkout` and ran `./eval.sh` past character 400; the reviewer, shown
  * the first 60 characters, called two of them non-benchmark rows in the
  * closing audit. They were real, and one of them tied the best result.

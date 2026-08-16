@@ -1,0 +1,42 @@
+# The 89 tests, the two typecheck passes, and the dual-half build — the same
+# `pnpm run check` the deployment procedure runs, so a green tick here means
+# what a local one means.
+#
+# `lib/` is committed (the plugin installs without a build step), so the build
+# doubles as a staleness check: if `lib/` does not match what `src/` compiles
+# to, someone shipped a source-only change and every host would load the old
+# half. That has happened here — three releases sat in src alone.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run check
+
+      - name: lib/ matches src/
+        run: |
+          if ! git diff --quiet -- lib; then
+            echo "::error::lib/ is stale — run 'pnpm run check' and commit the rebuilt lib/."
+            git diff --stat -- lib
+            exit 1
+          fi

@@ -131,10 +131,10 @@ test('supervisor digest states the environment, or that none was reported', () =
   assert.ok(supervisorDigest(series([done(1, 10)]), state).includes('Environment: not reported'))
   const withEnv = {
     ...series([done(1, 10)]),
-    envs: [{ seq: 5, location: 'kernel-box', device: 'H100 80GB x1', constraint: 'CUDA_VISIBLE_DEVICES=0' }],
+    envs: [{ seq: 5, location: 'remote gpu box', device: 'H100 80GB x1', constraint: 'CUDA_VISIBLE_DEVICES=0' }],
   }
   const digest = supervisorDigest(withEnv, state)
-  assert.ok(digest.includes('H100 80GB x1 @ kernel-box'))
+  assert.ok(digest.includes('H100 80GB x1 @ remote gpu box'))
   assert.ok(digest.includes('CUDA_VISIBLE_DEVICES=0'))
 })
 
@@ -410,10 +410,10 @@ test('config can set the review language and add house rules, never remove the r
 })
 
 test('the digest shows the END of a command, where the benchmark actually is', () => {
-  // Verbatim shape from the kopt-gpu2 run: patch the file, then measure, in
+  // Verbatim shape from a real run: patch the file, then measure, in
   // one chain. A head-only cut showed the reviewer the heredoc and nothing
   // else, and it called two such rows non-benchmark rows in the closing audit.
-  const command = `cd /Users/x/Work/Data/kopt-gpu2 && python3 - <<'EOF'\np = 'solution/kernel.py'\n`
+  const command = `cd /work/run && python3 - <<'EOF'\np = 'solution/kernel.py'\n`
     + `${'src = src.replace(old, new)\n'.repeat(20)}open(p, 'w').write(src)\nprint('ok')\nEOF\n`
     + './eval.sh --ref ref.py --solution solution/kernel.py --num-perf-trials 20 2>&1 '
     + '| grep -v "WARNING\\|vulnerable" | tail -8'
@@ -423,11 +423,11 @@ test('the digest shows the END of a command, where the benchmark actually is', (
   }
   const digest = supervisorDigest(series, { armed: true, budget: 20, round: 1, lastEvalCount: 0, noProgressRounds: 0, supervise: true })
   assert.ok(digest.includes('./eval.sh'), 'the invocation the reviewer is asked to judge must be visible')
-  assert.ok(digest.includes('cd /Users/x/Work/Data/kopt-gpu2'), 'and so must the opening context')
+  assert.ok(digest.includes('cd /work/run'), 'and so must the opening context')
   assert.ok(digest.includes(' … '), 'the middle is what gets dropped')
   // A heredoc's newlines would otherwise split one table row into twenty.
   const row = digest.split('\n').find(l => l.includes('./eval.sh'))
-  assert.ok(row !== undefined && row.includes('cd /Users/x/Work'), 'the row stays one line')
+  assert.ok(row !== undefined && row.includes('cd /work/run'), 'the row stays one line')
   // Short commands pass through untouched.
   assert.ok(digest.length > 0)
 })

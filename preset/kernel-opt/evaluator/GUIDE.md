@@ -1,6 +1,6 @@
 # KernelBench Default Benchmark
 
-Self-contained evaluation script for AKO4ALL. Inlines core logic from [KernelBench](https://github.com/KernelBench/KernelBench) so no external dependency is needed.
+Self-contained evaluation script — the kernel-opt plugin's built-in evaluator. Derived from the benchmark in [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL), which inlines core logic from [KernelBench](https://github.com/ScalingIntelligence/KernelBench); both MIT, notices in `bench.py`.
 
 ## Setup
 

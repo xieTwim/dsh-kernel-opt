@@ -174,3 +174,19 @@ peer 范围写作 `>=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2`，因为**宿主有
 - Tab 的按需出现由 client watcher 轮询判定（会话切换/首个信号后 ≤3s 出现）。
 - kernel 源码本体不进面板（结构化 `write`/`edit` 改动在展开行里可见；完整源码在你的工作区与 git 历史里）。
 - **信任链以会话日志完整性为前提**：它成立靠"写权限限制在 workspace 内 + 日志存放在 workspace 外"这对组合。若把会话 workspace 圈到 `~/.dsh` 或其上层（agent 因而能改写自己的日志），来源/复测的一切结论不再适用。
+
+## 许可与署名
+
+本仓库 **MIT**（`LICENSE`）。
+
+`preset/kernel-opt/evaluator/bench.py`（内置评测器）不是原创：它派生自
+[AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL) 附带的评测脚本，而后者又内联了
+[KernelBench](https://github.com/ScalingIntelligence/KernelBench) 的核心逻辑。两个上游都是 MIT，
+两份声明**逐字保留在该文件头部**，我们在 AKO4ALL 版本之上的改动就是文件开头「Measurement protocol」
+那几条（median、fresh 输入、mutation sentinel、DEVIATION 行、冻结分母）。
+
+## CI
+
+`.github/workflows/ci.yml` 跑的就是本地那条 `pnpm run check`（两遍 typecheck + 89 个测试 + 双半构建），
+外加一步 **`lib/` 是否跟得上 `src/`**——`lib/` 是提交进仓库的（安装免构建），所以源码改了没重新构建时，
+每个宿主加载的都还是旧的那一半。这件事在本仓库真实发生过，连续三个版本只活在 src 里。

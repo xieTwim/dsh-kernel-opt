@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Self-contained KernelBench benchmark for AKO4ALL.
+Self-contained kernel benchmark — the kernel-opt plugin's built-in evaluator.
 
-Evaluates an optimized kernel (solution) against a reference kernel.
-Inlines core logic from KernelBench's eval.py and timing.py so no external
-KernelBench dependency is needed.
+Evaluates an optimized kernel (solution) against a reference kernel. Core
+logic from KernelBench's eval.py and timing.py is inlined, so nothing outside
+the standard library and torch is needed at run time.
 
 Measurement protocol (2026-08 upgrade):
 - RUNTIME / REF_RUNTIME report the median over the recorded trials
@@ -48,8 +48,36 @@ Output (structured, one per line):
     DEVIATION: <how wrong>   (only present when CORRECT is False)
     KERNEL_EVAL={...}        (the kernel-opt panel's contract line)
 
-Portions of this file are derived from KernelBench
-(https://github.com/ScalingIntelligence/KernelBench).
+Provenance. This file is a derivative of the benchmark shipped with AKO4ALL
+(https://github.com/TongmingLAIC/AKO4ALL), which in turn inlines core logic
+from KernelBench (https://github.com/ScalingIntelligence/KernelBench). The
+kernel-opt plugin's changes on top of the AKO4ALL version are the ones the
+measurement-protocol notes above describe. Both upstreams are MIT; their
+notices follow, and this file stays MIT with them.
+
+--- AKO4ALL ---
+
+Copyright (c) 2026 TongmingLAIC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- KernelBench ---
 
 Copyright (c) 2023 Anne Ouyang, Simon Guo, Azalia Mirhoseini
 
