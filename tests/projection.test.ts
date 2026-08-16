@@ -591,9 +591,10 @@ test('finalize by artifact: kernel_finalize flags the best honest point and pars
 })
 
 test('a skill’s documented example is not an uncollected evaluation', () => {
-  // Verbatim shape from a real run: the agent loaded the kernel-opt skill and
-  // its SKILL.md documents the contract with a line-start example, so the
-  // plugin warned the reader about its own manual.
+  // Verbatim shape from a real run, back when the protocol shipped as a skill:
+  // its SKILL.md documented the contract with a line-start example, so the
+  // plugin warned the reader about its own manual. The protocol lives in the
+  // preset persona now, but any skill documenting the contract lands the same.
   const events = [
     call('skill', 's1', { name: 'kernel-opt' }),
     result('s1', [

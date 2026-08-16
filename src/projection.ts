@@ -139,9 +139,11 @@ const BACKGROUND_JOB_ANNOUNCE = /started background job (\S+)/
  *
  * `skill` belongs here for a sharper reason than the readers: it returns a
  * skill's own text, so the only contract line it can carry is a documented
- * EXAMPLE of one. Without it the plugin warns about its own SKILL.md, which is
- * what a real run did — "1 evaluation came back through a channel this panel
- * does not collect" pointing at the line that documents the channel.
+ * EXAMPLE of one. A real run proved it — the plugin warned about the very
+ * manual that documents the channel, "1 evaluation came back through a
+ * channel this panel does not collect" pointing at the example line. That
+ * skill is gone (its protocol lives in the preset persona now), but any
+ * skill documenting the contract would land the same way.
  */
 const TEXT_READING_TOOLS = new Set(['read', 'glob', 'grep', 'notebook_read', 'skill'])
 /** Programs whose `--` introduces operands — usually paths — rather than a command. */

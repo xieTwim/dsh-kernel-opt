@@ -34,10 +34,10 @@ async function walkFiles(dir: string, prefix = ''): Promise<string[]> {
  *
  * The old rule was copy-once — existing files were never overwritten, so a
  * user's edits survived. That protected the wrong thing: after any plugin
- * update the on-disk `evaluator/bench.py` stayed at whatever shipped the day
- * it was first installed, while SKILL.md (read live from the package) described
- * the new one. The tool and its own documentation disagreed, silently, and the
- * only way out was a manual copy nobody knows to make.
+ * update the on-disk `evaluator/bench.py` and persona stayed at whatever
+ * shipped the day they were first installed, while the plugin they answer to
+ * had moved on. The tool and its own instructions disagreed, silently, and
+ * the only way out was a manual copy nobody knows to make.
  *
  * So ownership is tracked instead of assumed. A manifest records the hash of
  * every file this plugin wrote; on each install a file is
