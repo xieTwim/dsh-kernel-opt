@@ -11,7 +11,7 @@ import {
 } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { challengeText, continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
-import { inWrapUpPhase, latestRunStart, unfinishedRun } from '../src/wire.ts'
+import { inWrapUpPhase, latestRunStart, referenceDrift, unfinishedRun } from '../src/wire.ts'
 import type { WireIteration, WireRound } from '../src/wire.ts'
 
 let seq = 0
@@ -588,6 +588,27 @@ test('finalize by artifact: kernel_finalize flags the best honest point and pars
   assert.equal(replay.finalized, true)
   assert.equal(replay.command, 'bash scripts/bench.sh')
   assert.equal(replay.latencyMs, 1.12)
+})
+
+test('referenceDrift: fires on a denominator that moved, stays quiet on jitter', () => {
+  const at = (latencyMs: number, speedup: number): WireIteration =>
+    ({ seq: latencyMs, tool: 'bash', latencyMs, speedup, correct: true })
+  // A frozen reference implies exactly one denominator, however the solution moves.
+  assert.equal(referenceDrift([at(1, 2), at(0.5, 4), at(0.25, 8), at(0.2, 10)]), undefined)
+  // Re-timing an unchanged reference on one settled machine: 2.14 / 2.06 / 2.03
+  // / 2.06 ms — the reported ratios differ in their last digit and nothing
+  // more, which is not worth a warning.
+  assert.equal(referenceDrift([at(1, 2.14), at(1, 2.06), at(1, 2.03), at(1, 2.06)]), undefined)
+  // Re-timing it once per container: the widest pair disagrees by half.
+  const drift = referenceDrift([at(1, 2.03), at(1, 2.04), at(1, 2.52), at(1, 3.11)])
+  assert.ok(drift !== undefined)
+  assert.equal(drift.count, 4)
+  assert.ok(Math.abs(drift.min - 2.03) < 1e-9 && Math.abs(drift.max - 3.11) < 1e-9)
+  assert.ok(Math.abs(drift.ratio - 3.11 / 2.03) < 1e-9)
+  // Too few ratios to call it a pattern.
+  assert.equal(referenceDrift([at(1, 2.03), at(1, 3.11), at(1, 2.04)]), undefined)
+  // Rows that never reported a ratio contribute no denominator at all.
+  assert.equal(referenceDrift([{ seq: 1, tool: 'bash', latencyMs: 1, correct: true }]), undefined)
 })
 
 test('latestRunStart: re-armed runs segment at the round-counter reset', () => {

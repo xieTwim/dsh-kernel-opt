@@ -13,7 +13,7 @@
 import type { WireIteration, WireSeries } from './wire.ts'
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CHALLENGE_LINE, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
-  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX,
+  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, referenceDrift,
 } from './wire.ts'
 
 /** Per-session loop control state (in-memory; the loop is a live-run aid). */
@@ -307,6 +307,20 @@ export function supervisorDigest(series: WireSeries, state: LoopState, tail = 10
   } else if (evalsDone >= 3) {
     lines.push('Profiling: no profiler invocation seen on the command lines — the run may be optimizing by '
       + 'guesswork rather than measurement (hand-written diagnostic scripts would not be detected here).')
+  }
+  // A supervisor reads the speedup column to judge progress. When the run did
+  // not divide by one number, that column is not a series — the same kernel
+  // measured twice lands on two different multiples — so the review has to be
+  // told before it reads a denominator's drift as an improvement.
+  const drift = referenceDrift(series.iterations)
+  if (drift !== undefined) {
+    lines.push(`Denominator: NOT one number. Across ${String(drift.count)} evaluations the reference latency `
+      + `each one divided by ranges ${drift.min.toPrecision(4)}–${drift.max.toPrecision(4)} ms `
+      + `(${String(Math.round((drift.ratio - 1) * 100))}% apart), so the evaluator re-timed its reference `
+      + 'instead of freezing it, or the machine changed mid-run. Speedups from different evaluations are NOT '
+      + 'comparable with each other: judge progress by latency, because a speedup that moves while the latency '
+      + 'it belongs to does not is the denominator moving, not the kernel. That cuts both ways here — a faster '
+      + 'version can carry a lower reported multiple than a slower one.')
   }
   if (series.uncollectedSeqs.length > 0) {
     lines.push(`Uncollected: ${String(series.uncollectedSeqs.length)} contract line(s) arrived through a channel `

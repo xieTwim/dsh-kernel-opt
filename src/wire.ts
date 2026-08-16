@@ -258,6 +258,69 @@ export function samePath(a: string, b: string): boolean {
 }
 
 /**
+ * The reference latency each evaluation actually divided by, recovered as
+ * `latency × speedup`. A frozen denominator repeats one value; an evaluator
+ * that re-times its reference per evaluation returns a slightly different one
+ * each time, and one that re-times it per CONTAINER — the normal shape of
+ * remote evaluation, where the cache file dies with the container — can return
+ * a very different one. Shared protocol helper: the chart pools these into the
+ * axis, and the drift check below reads their spread.
+ */
+export function impliedReferences(iterations: readonly WireIteration[]): number[] {
+  const out: number[] = []
+  for (const point of iterations) {
+    const { latencyMs, speedup } = point
+    if (latencyMs === undefined || latencyMs <= 0) continue
+    if (speedup === undefined || speedup <= 0) continue
+    out.push(latencyMs * speedup)
+  }
+  return out
+}
+
+/**
+ * Widest denominator disagreement in a run, as a ratio of the largest implied
+ * reference to the smallest — reported only once it is wide enough to change a
+ * reading, so a quiet run says nothing.
+ *
+ * The threshold sits between two measured shapes. Re-timing an unchanged
+ * reference on one settled A100 spread it 2.14 / 2.06 / 2.03 ms — 5.4% — which
+ * moves a speedup's last digit and nothing else. Re-timing it once per
+ * container across 13 containers of one remote run spread it 2.03 → 3.11 ms —
+ * 53% — and there the same unchanged kernel reported ×35.5 and ×53.2, which is
+ * larger than most late-run improvements and reads as one. 15% is about three
+ * times ordinary jitter and far below a reading that misleads.
+ *
+ * Four ratios are the floor for saying anything: below that a spread is one
+ * unlucky measurement rather than a pattern, and the run has too few numbers
+ * to compare anyway.
+ */
+export const REFERENCE_DRIFT_RATIO = 1.15
+const REFERENCE_DRIFT_MIN_POINTS = 4
+
+export interface ReferenceDrift {
+  /** Smallest and largest reference latency (ms) any evaluation implied. */
+  min: number
+  max: number
+  /** `max / min` — 1.53 means the widest pair disagreed by 53%. */
+  ratio: number
+  /** How many evaluations reported a ratio at all. */
+  count: number
+}
+
+export function referenceDrift(iterations: readonly WireIteration[]): ReferenceDrift | undefined {
+  const implied = impliedReferences(iterations)
+  if (implied.length < REFERENCE_DRIFT_MIN_POINTS) return undefined
+  let min = implied[0] as number
+  let max = min
+  for (const value of implied) {
+    if (value < min) min = value
+    if (value > max) max = value
+  }
+  const ratio = max / min
+  return ratio >= REFERENCE_DRIFT_RATIO ? { min, max, ratio, count: implied.length } : undefined
+}
+
+/**
  * Index into `rounds` where the latest loop run begins. Every arm resets the
  * continuation counter, so a round number that does not increase past its
  * predecessor's opens a new run; wrap-up messages (no round number) stay with

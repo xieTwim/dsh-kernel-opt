@@ -265,6 +265,32 @@ test('supervisor digest carries the evaluator metrics and the edits behind the r
   assert.ok(!supervisorDigest(series([done(10, 5)]), state).includes('what was actually edited'))
 })
 
+test('supervisor digest tells the reviewer when the denominator moved', () => {
+  const state = { ...initialLoopState(), armed: true, budget: 20, round: 2 }
+  // The shape from a real remote run: an unchanged kernel at a near-identical
+  // latency comes back ×35.5 and ×53.2 because its reference was re-timed in a
+  // different container. A reviewer reading the speedup column as progress
+  // would call that an improvement.
+  const drifted = series([
+    { ...done(10, 0.0573), speedup: 35.487 },
+    { ...done(20, 0.0584), speedup: 46.306 },
+    { ...done(30, 0.0584), speedup: 53.223 },
+    { ...done(40, 0.0573), speedup: 35.483 },
+  ])
+  const digest = supervisorDigest(drifted, state)
+  assert.ok(digest.includes('Denominator: NOT one number'))
+  assert.ok(digest.includes('53% apart'))
+  assert.ok(digest.includes('judge progress by latency'))
+  // One frozen denominator: the ratios track latency, so there is nothing to say.
+  const frozen = series([
+    { ...done(10, 1), speedup: 2 },
+    { ...done(20, 0.5), speedup: 4 },
+    { ...done(30, 0.25), speedup: 8 },
+    { ...done(40, 0.2), speedup: 10 },
+  ])
+  assert.ok(!supervisorDigest(frozen, state).includes('Denominator:'))
+})
+
 test('supervisor digest flags a run that never profiled, and stays quiet early', () => {
   const state = { ...initialLoopState(), armed: true, budget: 20, round: 2 }
   const blind = series([done(10, 5), done(20, 4), done(30, 4)])

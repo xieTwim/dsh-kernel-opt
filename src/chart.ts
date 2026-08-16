@@ -15,6 +15,7 @@
  */
 
 import type { WireIteration } from './wire.ts'
+import { impliedReferences } from './wire.ts'
 
 /** Human latency: µs under 1 ms, ms under 1 s, s above. */
 export function formatLatency(ms: number): string {
@@ -74,13 +75,7 @@ function quantile(sorted: readonly number[], q: number): number {
  * reads the pooled estimate.
  */
 export function referenceLatency(measured: readonly WireIteration[]): number | undefined {
-  const implied: number[] = []
-  for (const point of measured) {
-    const { latencyMs, speedup } = point
-    if (latencyMs === undefined || latencyMs <= 0) continue
-    if (speedup === undefined || speedup <= 0) continue
-    implied.push(latencyMs * speedup)
-  }
+  const implied = impliedReferences(measured)
   if (implied.length === 0) return undefined
   implied.sort((a, b) => a - b)
   const mid = Math.floor(implied.length / 2)

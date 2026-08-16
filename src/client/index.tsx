@@ -23,7 +23,7 @@ import type { WireChange, WireControl, WireEnv, WireIteration, WireModels, WireP
 import { AXIS_GAP, CHART, chartModel, formatLatency } from '../chart.ts'
 import {
   CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH,
-  inWrapUpPhase, latestRunStart, samePath, unfinishedRun,
+  inWrapUpPhase, latestRunStart, referenceDrift, samePath, unfinishedRun,
 } from '../wire.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -67,6 +67,7 @@ const zh = {
   'status.error': '失败',
   'axis.best': '最佳',
   'axis.hintSpeedup': '纵轴：相对参考实现的加速比，越高越快。曲线用整个 run 汇总出的参考耗时换算，因此严格随延迟单调；逐次评测自己报的加速比保留在下方表格与各点悬停中（评测器若每次重新给参考计时，那个数会带参考侧的抖动）。',
+  'axis.drift': '⚠ 分母不是同一个：{count} 次评测隐含的参考耗时落在 {min} – {max}（相差 {pct}%）。曲线已按汇总分母重算，图上仍可比；但表格里逐行自报的加速比互不可比——同一份没改过的 kernel 会报出不同倍数，更快的一版甚至可能报出更低的倍数。成因通常是评测器每次重新给参考计时（临时容器里，冻结文件随容器一起消失），或中途机器真的变了（锁频、换卡）——后者是真换了分母，要在结论里声明前后不可比。',
   'axis.hintLatency': '⚠ 纵轴退回延迟本身，方向已反转——越高越快。本次 run 的契约行里一个加速比字段都没有（`speedup` 或 `ref_runtime_ms`，写在 `native_metrics` 里或与 `latency_ms` 并排都认），所以这里既标不出「比参考快几倍」，也无法汇总出统一分母去抵消逐次评测的参考抖动。按协议每次评测都该带分母——评测器算了却没写进契约行时，看到的就是现在这样。',
   'loop.armed': '循环运行中 · 已迭代 {done}/{budget} 次',
   'loop.stopped': '循环已停止：{reason}',
@@ -179,6 +180,7 @@ const en = {
   'status.error': 'failed',
   'axis.best': 'best',
   'axis.hintSpeedup': 'y axis: speedup over the reference kernel — higher is faster. The curve converts latency with one reference time pooled over the whole run, so it is monotone in latency; each evaluation\'s own reported speedup stays in the table below and on each point (an evaluator that re-times its reference per run puts that jitter in the reported number).',
+  'axis.drift': '⚠ The denominator is not one number: across {count} evaluations the implied reference latency ranges {min} – {max} ({pct}% apart). The curve is recomputed against the pooled reference and stays comparable; the per-row speedups in the table are not — the same unchanged kernel reports different multiples, and a faster version can even report a lower one. Usually the evaluator re-timed its reference on each run (in an ephemeral container the frozen file dies with the container), or the machine really changed mid-run (clocks locked, a different card) — that last one is a genuine change of denominator, and the two segments have to be declared incomparable.',
   'axis.hintLatency': '⚠ The y axis fell back to latency, direction inverted — higher is faster. Not one contract line in this run carried a speedup field (`speedup` or `ref_runtime_ms`, either inside `native_metrics` or beside `latency_ms`), so the panel can neither label "× over the reference" nor pool one denominator to cancel the reference jitter of individual evaluations. The protocol asks every evaluation to carry one — an evaluator that computed the ratio but left it out of the contract line looks exactly like this.',
   'loop.armed': 'loop running · {done}/{budget} iterations',
   'loop.stopped': 'loop stopped: {reason}',
@@ -388,10 +390,12 @@ function Chart(props: {
   bestLabel: string
   statusLabel: (status: ReturnType<typeof statusOf>) => string
   axisHint: (mode: 'speedup' | 'latency') => string
+  driftNote: (drift: { min: number, max: number, ratio: number, count: number }) => string
 }): ReactNode {
-  const { series, bestLabel, statusLabel, axisHint } = props
+  const { series, bestLabel, statusLabel, axisHint, driftNote } = props
   const { iterations, profileSeqs, bestIndex } = series
   const model = useMemo(() => chartModel(iterations, iterations.length), [iterations])
+  const drift = useMemo(() => referenceDrift(iterations), [iterations])
   if (model === null) return null
   // The clamp label rides the first occurrence of the slowest measurement.
   const worstClampedIndex = iterations.findIndex(
@@ -592,6 +596,18 @@ function Chart(props: {
     >
       {axisHint(model.referenceMs !== undefined ? 'speedup' : 'latency')}
     </div>
+    {/* The pooled axis keeps the CURVE readable when the evaluator re-timed its
+        reference, but it cannot make the per-row ratios agree with each other,
+        and the table prints those verbatim. Say so where the ratios are, so a
+        reader comparing two rows is not left to notice on their own that the
+        denominator moved under them. */}
+    {drift !== undefined
+      ? (
+          <div style={{ padding: '0 8px 2px', fontSize: 11, lineHeight: '16px', color: COLOR.warn }}>
+            {driftNote(drift)}
+          </div>
+        )
+      : null}
     </>
   )
 }
@@ -1319,6 +1335,12 @@ export function KernelOptTab(
                 bestLabel={t('axis.best')}
                 statusLabel={status => t(`status.${status}`)}
                 axisHint={mode => t(mode === 'speedup' ? 'axis.hintSpeedup' : 'axis.hintLatency')}
+                driftNote={d => t('axis.drift', {
+                  count: d.count,
+                  min: formatLatency(d.min),
+                  max: formatLatency(d.max),
+                  pct: Math.round((d.ratio - 1) * 100),
+                })}
               />
             </div>
           )
