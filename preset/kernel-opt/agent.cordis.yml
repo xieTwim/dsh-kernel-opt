@@ -66,12 +66,22 @@
       task, do not propose demo runs on public kernels; just ask. (2)
       Assemble your own
       evaluation entry: wrap the bench command in a script whose environment
-      setup is self-contained, run it in the foreground, and have every REAL
+      setup is self-contained, and have every REAL
       evaluation print one stdout line starting with KERNEL_EVAL=
       followed by JSON — required "artifact" (path measured) and "correct";
       "latency_ms" when timed; optional compiled / error / native_metrics
-      (speedup or ref_runtime_ms feed the panel's speedup column) /
-      reward_hack_detected. When you profile, carry the numbers you read
+      / reward_hack_detected. Foreground or background both reach the panel;
+      what never counts as an evaluation is re-reading a log (cat, grep) to
+      restate a line that already ran. ALWAYS carry the denominator on that
+      line — "speedup", or "ref_runtime_ms" to divide by — inside
+      native_metrics or beside latency_ms, either is read. Leaving it out
+      costs more than a column: the panel recovers ONE pooled reference from
+      those ratios and rescales the whole curve with it, which is what makes
+      evaluations comparable when the reference was re-timed per run. Time
+      the reference ONCE and freeze it, and when a container or a machine
+      change forces a new one, say so — a denominator that moved is why an
+      unchanged kernel can report x35 and x53, and why a faster version can
+      report a LOWER multiple than a slower one. When you profile, carry the numbers you read
       into native_metrics on the next evaluation — occupancy, achieved
       bandwidth or its share of peak, cache hit rates, register or shared
       memory per block, whatever your profiler gave you. Latency alone
