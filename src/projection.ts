@@ -136,8 +136,14 @@ const BACKGROUND_JOB_ANNOUNCE = /started background job (\S+)/
  * measurement rather than reporting a new one, so their silence on the curve
  * is correct and needs no warning — unlike a channel nobody thought about,
  * which is what {@link WireSeries.uncollectedSeqs} exists to surface.
+ *
+ * `skill` belongs here for a sharper reason than the readers: it returns a
+ * skill's own text, so the only contract line it can carry is a documented
+ * EXAMPLE of one. Without it the plugin warns about its own SKILL.md, which is
+ * what a real run did — "1 evaluation came back through a channel this panel
+ * does not collect" pointing at the line that documents the channel.
  */
-const TEXT_READING_TOOLS = new Set(['read', 'glob', 'grep', 'notebook_read'])
+const TEXT_READING_TOOLS = new Set(['read', 'glob', 'grep', 'notebook_read', 'skill'])
 /** Programs whose `--` introduces operands — usually paths — rather than a command. */
 const HANDOFF_OPERANDS = new Set(['git', 'grep', 'rg', 'find', 'ls', 'rm', 'cp', 'mv', 'diff'])
 /** How deep to follow `ssh host 'ssh other "…"'` before giving up. */
@@ -741,8 +747,25 @@ export function project(
   const pendingJob = new Map<string, string>()
   /** Background job id → the shell command that launched it (provenance). */
   const jobCommands = new Map<string, string>()
-  /** Job id → contract lines already collected from it, so a re-read adds none. */
-  const jobTrailers = new Map<string, Set<string>>()
+  /**
+   * Contract line → index of the point that already carries it, for the whole
+   * session rather than for one job. One measurement is one point no matter
+   * how many times its line comes back, and a run has more ways to fetch a
+   * line again than a job re-read: a real run polled `modal app logs <app> |
+   * grep KERNEL_EVAL` beside the job that was producing the lines, and every
+   * poll minted a fresh copy of evaluations already on the curve — 15 real
+   * evaluations became 20 points.
+   *
+   * The identity is the payload verbatim: same artifact, same latency, same
+   * ratio, same metrics. Two independent runs of one kernel do not land there
+   * — they differ in a digit somewhere, which is exactly what a re-timed
+   * reference and instance variance keep producing. A genuine repeat that DID
+   * match to the last digit would lose a duplicate row of an identical number;
+   * counting a fetched line twice inflates the curve and the budget.
+   */
+  const trailerIndex = new Map<string, number>()
+  /** Indices whose command came from a job announcement (the launching run). */
+  const jobLaunched = new Set<number>()
   /** One entry per contract line that reached no collecting channel. */
   const uncollectedSeqs: number[] = []
   /** callId → tool name, so an unrecognised channel can still be named. */
@@ -899,9 +922,12 @@ export function project(
         if (shell.readBack === true) continue
         let consumed = false
         for (const payload of trailerPayloads(text)) {
+          const key = JSON.stringify(payload)
+          if (trailerIndex.has(key)) continue
           const point = trailerPoint(event.seq, shell.name, 'shell', payload)
           if (point === null) continue
           if (shell.command !== undefined) point.command = shell.command
+          trailerIndex.set(key, iterations.length)
           const artifact = point.artifactPath
           if (artifact !== undefined) {
             const matched = pendingChanges
@@ -924,21 +950,32 @@ export function project(
         const text = collectResultText(result.message)
         if (!text.includes(EVAL_TRAILER_PREFIX)) continue
         const command = jobCommands.get(jobId)
-        let seen = jobTrailers.get(jobId)
-        if (seen === undefined) {
-          seen = new Set<string>()
-          jobTrailers.set(jobId, seen)
-        }
         let consumed = false
         for (const payload of trailerPayloads(text)) {
           // One measurement, one point: a poll that re-reads output already
           // collected must not enter the curve twice.
           const key = JSON.stringify(payload)
-          if (seen.has(key)) continue
-          seen.add(key)
+          const prior = trailerIndex.get(key)
+          if (prior !== undefined) {
+            // The same line already arrived on a plain shell result, which for
+            // a job's own output means it was FETCHED — from a log tail, a
+            // cloud log command, wherever the run puts its output. This branch
+            // knows the command that launched the run, so hand the existing
+            // point the better provenance and still keep one point.
+            if (command !== undefined && !jobLaunched.has(prior)) {
+              const existing = iterations[prior]
+              if (existing !== undefined) existing.command = command
+              jobLaunched.add(prior)
+            }
+            continue
+          }
           const point = trailerPoint(event.seq, jobId, 'shell', payload)
           if (point === null) continue
-          if (command !== undefined) point.command = command
+          if (command !== undefined) {
+            point.command = command
+            jobLaunched.add(iterations.length)
+          }
+          trailerIndex.set(key, iterations.length)
           const artifact = point.artifactPath
           if (artifact !== undefined) {
             const matched = pendingChanges

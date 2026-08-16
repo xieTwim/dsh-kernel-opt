@@ -590,6 +590,68 @@ test('finalize by artifact: kernel_finalize flags the best honest point and pars
   assert.equal(replay.latencyMs, 1.12)
 })
 
+test('a skill’s documented example is not an uncollected evaluation', () => {
+  // Verbatim shape from a real run: the agent loaded the kernel-opt skill and
+  // its SKILL.md documents the contract with a line-start example, so the
+  // plugin warned the reader about its own manual.
+  const events = [
+    call('skill', 's1', { name: 'kernel-opt' }),
+    result('s1', [
+      '## 1. 评测入口：你自己组装，末尾打一行契约',
+      '```',
+      'KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}',
+      '```',
+    ].join('\n')),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 0)
+  assert.deepEqual(series.uncollectedSeqs, [])
+})
+
+test('one measurement is one point however many channels fetch its line', () => {
+  // The real shape: a bench runs as a background job while the agent polls the
+  // cloud log for the same lines. Every poll used to mint fresh points.
+  const line = 'KERNEL_EVAL={"artifact":"experiments/v3/kernel.py","correct":true,"latency_ms":1.02,'
+    + '"native_metrics":{"speedup":2.627451}}'
+  const events = [
+    call('bash', 'b1', { command: 'git add -A && git commit -qm ckpt && ./scripts/bench.sh experiments/v3/kernel.py' }),
+    result('b1', 'started background job job-7'),
+    // Polled from the cloud log while the job was still running: a real
+    // execution by the shell rules (modal is no local reader), so it counts —
+    // but only once.
+    call('bash', 'b2', { command: 'timeout 60 modal app logs ap-xyz 2>&1 | tail -40' }),
+    result('b2', line),
+    call('job_output', 'j1', { job_id: 'job-7' }),
+    result('j1', line),
+    // A second poll, this time grepping the whole app log: same line again.
+    call('bash', 'b3', { command: 'timeout 90 modal app logs ap-xyz 2>&1 | grep -E "KERNEL_EVAL"' }),
+    result('b3', line),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 1)
+  // The surviving point carries the command that RAN the bench, not the poll
+  // that fetched its output back.
+  assert.equal(series.iterations[0]?.command?.includes('./scripts/bench.sh'), true)
+  assert.deepEqual(series.uncollectedSeqs, [])
+})
+
+test('the finalize replay stays its own point even when it repeats a number', () => {
+  // The replay re-measures the delivered artifact; it is a separate reading and
+  // carries the panel's 复测 badge, so payload dedup must not swallow it.
+  const same = '{"artifact":"solution/kernel.py","correct":true,"latency_ms":0.0452,'
+    + '"native_metrics":{"speedup":59.292035}}'
+  const events = [
+    call('bash', 'b1', { command: './scripts/bench.sh solution/kernel.py' }),
+    result('b1', `KERNEL_EVAL=${same}`),
+    call('kernel_finalize', 'f1', { artifact_path: 'solution/kernel.py' }),
+    result('f1', [`[replay] ./scripts/bench.sh solution/kernel.py`, `KERNEL_EVAL=${same}`].join('\n')),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations.length, 2)
+  assert.equal(series.iterations[0]?.channel, 'shell')
+  assert.equal(series.iterations[1]?.channel, 'replay')
+})
+
 test('referenceDrift: fires on a denominator that moved, stays quiet on jitter', () => {
   const at = (latencyMs: number, speedup: number): WireIteration =>
     ({ seq: latencyMs, tool: 'bash', latencyMs, speedup, correct: true })
