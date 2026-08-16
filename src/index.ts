@@ -10,9 +10,7 @@
  * render identically.
  *
  * On top of the projection sit the run controls:
- * - `kernel_plan` / `self_compact` tools — the model's levers (plan
- *   reporting; log-preserving context compaction through the `compaction`
- *   seam, registered only when a provider is composed in);
+ * - the browser panel's `/series`, `/control` and `/models` routes;
  * - `/kloop` — a kernel-opt loop that re-drives the agent at turn settle
  *   while the projected run state says the run is unfinished (budget left,
  *   no finalize, still making progress) — run-state-driven, not a timer;
@@ -20,24 +18,27 @@
  *   each continuation point and rides its advice on the continuation
  *   message; failures degrade to "no advice", never a stalled loop.
  *
+ * The model-facing tools are NOT here. They belong to one mode, so they mount
+ * in the AGENT plane as rows of the kernel-opt preset — `./agent` for
+ * `kernel_plan` / `kernel_env` / `kernel_finalize`, `./self-compact` for
+ * `self_compact`. This half hands them its resolved configuration through the
+ * `kernelOptRuntime` service.
+ *
  * @module @xietwim/dsh-kernel-opt
  */
 import type { IncomingMessage } from 'node:http'
-import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-commands'
-import { DEFAULT_PROJECTION, hasUserTask, project } from './projection.ts'
-import type { ProjectionConfig } from './projection.ts'
+import { hasUserTask, project } from './projection.ts'
+import { KernelOptRuntime, resolveProjection } from './runtime.ts'
 import {
   HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, completedEvals,
   continuationText, decideContinuation, finalAuditText, initialLoopState, planStale,
@@ -45,11 +46,11 @@ import {
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { syncPreset } from './preset.ts'
-import { CONTROL_PATH, MODELS_PATH, PRESET_ID, REPLAY_LINE_PREFIX, SERIES_PATH, samePath } from './wire.ts'
-import type { WireControl, WireIteration, WireModels, WireSeries } from './wire.ts'
+import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH } from './wire.ts'
+import type { WireControl, WireModels, WireSeries } from './wire.ts'
 
 export const name = 'kernel-opt'
-export const inject = ['tools', 'agents', 'sessions']
+export const inject = ['agents', 'sessions']
 
 /** Plugin id stamped on plugin-sourced messages. */
 const PLUGIN_ID = 'kernel-opt'
@@ -178,21 +179,6 @@ export interface Config {
   }
 }
 
-/** Resolve the projection routing from plugin config over defaults. */
-function resolveProjection(config: Config): ProjectionConfig {
-  return {
-    benchTools: config.benchTools ?? DEFAULT_PROJECTION.benchTools,
-    profileTools: config.profileTools ?? DEFAULT_PROJECTION.profileTools,
-    profileCommands: config.profileCommands ?? DEFAULT_PROJECTION.profileCommands,
-    finalizeTools: config.finalizeTools ?? DEFAULT_PROJECTION.finalizeTools,
-    changeTools: config.changeTools ?? DEFAULT_PROJECTION.changeTools,
-    shellTools: config.shellTools ?? DEFAULT_PROJECTION.shellTools,
-    jobTools: config.jobTools ?? DEFAULT_PROJECTION.jobTools,
-    planTool: DEFAULT_PROJECTION.planTool,
-    envTool: DEFAULT_PROJECTION.envTool,
-  }
-}
-
 /** Absolute path of the bundled preset directory (repo/package layout). */
 function bundledPresetDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '../preset/kernel-opt')
@@ -201,55 +187,6 @@ function bundledPresetDir(): string {
 /** Expand a leading `~/` the way the preset roots document it. */
 function expandHome(path: string): string {
   return path.startsWith('~') ? join(homedir(), path.slice(1)) : path
-}
-
-/** Outcome of one replay execution. */
-interface ReplayOutcome {
-  output: string
-  exit: number | null
-  failure?: string
-}
-
-/** Run one recorded benchmark command (`bash -c`); resolves, never throws. */
-function runReplay(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<ReplayOutcome> {
-  return new Promise((resolve) => {
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn('bash', ['-c', command], {
-        cwd,
-        timeout: timeoutMs,
-        ...(signal !== undefined ? { signal } : {}),
-      })
-    } catch (error) {
-      resolve({ output: '', exit: null, failure: error instanceof Error ? error.message : String(error) })
-      return
-    }
-    const chunks: string[] = []
-    let size = 0
-    const take = (chunk: Buffer): void => {
-      if (size > 200_000) return
-      size += chunk.length
-      chunks.push(chunk.toString('utf8'))
-    }
-    child.stdout?.on('data', take)
-    child.stderr?.on('data', take)
-    child.on('error', (error) => {
-      resolve({ output: chunks.join(''), exit: null, failure: error.message })
-    })
-    child.on('close', (code, killSignal) => {
-      resolve({
-        output: chunks.join(''),
-        exit: code,
-        ...(killSignal !== null ? { failure: `terminated by ${killSignal}` } : {}),
-      })
-    })
-  })
-}
-
-/** Cap replay output for the tool result, keeping the tail (trailer lives there). */
-function capReplayOutput(output: string, headCap = 2_000, tailCap = 10_000): string {
-  if (output.length <= headCap + tailCap) return output
-  return `${output.slice(0, headCap)}\n…[replay output trimmed]…\n${output.slice(output.length - tailCap)}`
 }
 
 /** Read and parse a small JSON request body; null on any shape/size problem. */
@@ -363,163 +300,19 @@ export function apply(ctx: Context, config: Config = {}): void {
     return null
   }
 
-  // kernel_plan — the call itself is the record: the projection reads the
-  // logged arguments, so the tool body only acknowledges.
-  ctx.tools.register(defineTool({
-    name: 'kernel_plan',
-    description: 'Report your CURRENT kernel-optimization plan to the human evaluation panel. '
-      + 'Call BEFORE starting a new approach and again whenever the plan changes, so the human '
-      + 'can steer early instead of after a wasted iteration. Keep every field to one short line. '
-      + 'phase: loop stage (e.g. explore / tune / verify / stuck). approach: the technique being '
-      + 'tried (e.g. "split-K over KV, BLOCK_H=8"). hypothesis: why it should be faster. '
-      + 'next: the immediate action.',
-    parameters: {
-      phase: { type: 'string', required: true, description: 'Loop stage: explore / tune / verify / stuck / done.' },
-      approach: { type: 'string', required: true, description: 'One-line description of the current technique.' },
-      hypothesis: { type: 'string', description: 'Why this should be faster (one line).' },
-      next: { type: 'string', description: 'Immediate next action (one line).' },
+  // The model-facing tools (kernel_plan / kernel_env / kernel_finalize, and
+  // self_compact) are NOT registered here: they belong to 「算子优化模式」, so
+  // they mount as rows of `preset/kernel-opt/agent.cordis.yml` from this
+  // package's `./agent` and `./self-compact` entry points. Registering them at
+  // profile level put their descriptions in every unrelated session's tool
+  // catalog. What crosses the plane boundary is this service — one resolved
+  // config, so a preset row never restates `benchTools` or `replay`.
+  new KernelOptRuntime(ctx, {
+    projection,
+    replay: {
+      enabled: config.replay?.enabled !== false,
+      timeoutMs: (config.replay?.timeoutSec ?? 900) * 1000,
     },
-    output: {
-      schema: { type: 'string' },
-      render: (_args, value) => [{ type: 'text', text: value }],
-    },
-    execute: async (args) => {
-      return `Plan recorded (${args.phase}): ${args.approach}`
-    },
-  }))
-
-  // kernel_env — the environment the MEASUREMENTS happen in, reported by the
-  // agent rather than probed here. The plugin runs where the panel is served,
-  // which is not necessarily where the benchmark executes (remote box, cloud
-  // runner, container), and even on one host the user may have ruled a device
-  // out; only the agent knows what it actually decided to run on.
-  ctx.tools.register(defineTool({
-    name: 'kernel_env',
-    description: 'Report the environment your EVALUATIONS run in, to the human evaluation panel. '
-      + 'Call once after inventory and BEFORE the first evaluation, and again whenever the '
-      + 'environment changes (you move to a remote host, switch device, or the user constrains it). '
-      + 'Report where the BENCHMARK executes, not where you are thinking: if the user pointed you at '
-      + 'a remote machine or a cloud runner, describe THAT machine. If the user ruled a device out '
-      + '("CPU only", a pinned CUDA_VISIBLE_DEVICES), state the device you are actually using and put '
-      + 'the instruction in constraint. Read the facts, never guess them, and name the commands you '
-      + 'read them from in probe.',
-    parameters: {
-      location: {
-        type: 'string',
-        required: true,
-        description: 'Where evaluations execute, e.g. "本机 (macOS)" / "kernel-box via rt" / "Modal B200 容器".',
-      },
-      device: {
-        type: 'string',
-        required: true,
-        description: 'The compute device the timed runs use, e.g. "NVIDIA H100 80GB ×1" / "Apple M5 CPU (10 核)".',
-      },
-      constraint: {
-        type: 'string',
-        description: 'User/task instruction that decided the device, e.g. "用户要求仅用 CPU" / "CUDA_VISIBLE_DEVICES=0".',
-      },
-      versions: {
-        type: 'object',
-        // Open map: the useful version keys differ per backend (cuda/driver on
-        // NVIDIA, none of them on a CPU-only run), so the schema fixes none.
-        additionalProperties: true,
-        description: 'Key toolchain versions as read, e.g. {"python":"3.11.9","torch":"2.6.0+cu124","cuda":"12.4","driver":"550.90"}.',
-      },
-      probe: { type: 'string', description: 'Command(s) these facts were read from, e.g. "nvidia-smi; python -c ...".' },
-      notes: { type: 'string', description: 'Anything qualifying the measurements (clocks not locked, shared host, …).' },
-    },
-    output: {
-      schema: { type: 'string' },
-      render: (_args, value) => [{ type: 'text', text: value }],
-    },
-    execute: async (args) => {
-      return `Environment recorded: ${args.device} @ ${args.location}`
-    },
-  }))
-
-  // kernel_finalize — the finalize record for evaluation pipelines with no
-  // evaluator-issued ids (the self-reported channel). The call itself is the
-  // record; when the artifact's best measurement is self-reported and replay
-  // is enabled, the plugin re-executes that recorded command once and appends
-  // its output — the trailer inside becomes the verified [replay] final
-  // measurement, read back by the projection like everything else.
-  ctx.tools.register(defineTool({
-    name: 'kernel_finalize',
-    description: 'Record your FINAL kernel choice by artifact path (for evaluation pipelines without '
-      + 'evaluator-issued ids; with an id-issuing evaluator call its own finalize instead). Call once, at the '
-      + 'end, with the artifact you stand behind — restore it verbatim first if a later edit regressed it. '
-      + 'When the best measurement for that artifact is self-reported, the plugin replays the recorded '
-      + 'benchmark command once and appends the output as the verified final measurement.',
-    parameters: {
-      artifact_path: { type: 'string', required: true, description: 'Path of the final artifact, as printed in its KERNEL_EVAL trailer.' },
-      note: { type: 'string', description: 'One-line closing note (optional).' },
-    },
-    output: {
-      schema: { type: 'string' },
-      render: (_args, value) => [{ type: 'text', text: value }],
-    },
-    execute: async (args, exec) => {
-      const ack = `Finalize recorded for ${args.artifact_path}.${args.note !== undefined ? ` Note: ${args.note}` : ''}`
-      const agent = ctx.agents.currentInitiator()
-      if (agent === undefined) return `${ack} (no active agent turn; not replayed)`
-      const session = ctx.sessions.get(SessionId(agent.id))
-      if (session === undefined) return `${ack} (session not found; not replayed)`
-      if (config.replay?.enabled === false) return `${ack} Replay disabled by config; the final number stays self-reported.`
-      const series = project(agent.id, session.events, projection)
-      let best: WireIteration | undefined
-      for (const point of series.iterations) {
-        if (point.channel !== 'shell') continue
-        if (point.artifactPath === undefined || !samePath(point.artifactPath, args.artifact_path)) continue
-        if (point.correct !== true || point.rewardHack === true || point.error !== undefined) continue
-        if (point.latencyMs === undefined) continue
-        if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) best = point
-      }
-      if (best === undefined) {
-        return `${ack} No self-reported measurement found for this artifact — nothing to replay `
-          + '(tool-channel measurements are already verified).'
-      }
-      const command = best.command
-      if (command === undefined || command.endsWith('…')) {
-        return `${ack} Recorded command ${command === undefined ? 'unavailable' : 'truncated in the projection'}; not replayed.`
-      }
-      const cwd: unknown = session.header.cwd
-      if (typeof cwd !== 'string' || cwd.length === 0) return `${ack} Session working directory unknown; not replayed.`
-      const outcome = await runReplay(command, cwd, (config.replay?.timeoutSec ?? 900) * 1000, exec.signal)
-      const lines = [ack, `${REPLAY_LINE_PREFIX}${command}`]
-      if (outcome.failure !== undefined) {
-        lines.push(`Replay failed: ${outcome.failure}. The final number stays self-reported.`)
-      }
-      lines.push('--- replay output ---', capReplayOutput(outcome.output))
-      if (outcome.exit !== null) lines.push(`[replay exit ${String(outcome.exit)}]`)
-      return lines.join('\n')
-    },
-  }))
-
-  // self_compact — only exists when a compaction provider is composed in.
-  ctx.inject(['compaction'], (cctx) => {
-    cctx.tools.register(defineTool({
-      name: 'self_compact',
-      description: 'Compact THIS session\'s older history into a summary now, keeping the recent tail. '
-        + 'Use when you switch to a different optimization approach family and the accumulated '
-        + 'tool output no longer pays rent, or when old exploration details stop being relevant. '
-        + 'The full history stays in the durable session log; only the model-visible context shrinks. '
-        + 'State what must survive in reason — it becomes part of the record.',
-      parameters: {
-        reason: { type: 'string', required: true, description: 'Why compaction is safe now and what must survive.' },
-      },
-      output: {
-        schema: { type: 'string' },
-        render: (_args, value) => [{ type: 'text', text: value }],
-      },
-      execute: async (args, exec) => {
-        const agent = cctx.agents.currentInitiator()
-        if (agent === undefined) throw new Error('self_compact requires an active agent turn')
-        const result = await cctx.compaction.compactNow(agent, exec.signal)
-        if (result === null) return 'No compactable history yet — continue as is.'
-        return `Compacted ${result.shadowedSeqs.length} history items (~${result.shadowedTokenCount} tokens). `
-          + `Reason recorded: ${args.reason}`
-      },
-    }))
   })
 
   // Kernel loop + supervisor: commands, settle-driven continuation, review.

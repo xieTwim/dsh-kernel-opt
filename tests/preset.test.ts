@@ -124,3 +124,34 @@ test('a bundled file added later still tops up', async () => {
     await cleanup()
   }
 })
+
+// ── where the model-facing tools are allowed to live ────────────────────────
+// The four tools are levers of ONE mode. Registering them from the plugin's
+// profile-level `apply` is what put their descriptions in the tool catalog of
+// every session in the deployment, kernel-opt or not — the cost this split
+// removed. These two tests pin the split itself, since nothing else fails when
+// a tool drifts back: the mode keeps working and only unrelated sessions pay.
+
+test('the profile-level half registers no model-facing tool', async () => {
+  const source = await read(new URL('../src/index.ts', import.meta.url).pathname)
+  const registrations = source.match(/\.tools\.register\(/g) ?? []
+  assert.equal(registrations.length, 0,
+    'a tool registered here reaches every session in the deployment; '
+    + 'register it from src/agent.ts (or src/self-compact.ts) instead')
+})
+
+test('the preset carries the tool rows, and self_compact sits in the compaction group', async () => {
+  const composition = await read(new URL('../preset/kernel-opt/agent.cordis.yml', import.meta.url).pathname)
+  assert.match(composition, /name: '@xietwim\/dsh-kernel-opt\/agent'/,
+    'the kernel_plan / kernel_env / kernel_finalize row is missing — the mode has no tools')
+
+  // `isolate: { compaction: true }` gives the group its own realm, so a row
+  // outside it cannot reach `compaction` and self_compact silently vanishes
+  // from the catalog (which is exactly how it was lost before).
+  const groupStart = composition.indexOf('- id: compaction')
+  const groupEnd = composition.indexOf('\n- id: ', groupStart + 1)
+  assert.ok(groupStart >= 0, 'the compaction group is gone')
+  const group = composition.slice(groupStart, groupEnd < 0 ? undefined : groupEnd)
+  assert.match(group, /name: '@xietwim\/dsh-kernel-opt\/self-compact'/,
+    'self_compact must be registered from INSIDE the compaction group or the service is out of reach')
+})

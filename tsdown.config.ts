@@ -5,7 +5,15 @@
  */
 export default [
   {
-    entry: { index: 'src/index.ts' },
+    // Three Node entries, one build: the profile-plane half plus the two
+    // agent-plane tool rows the kernel-opt preset mounts. Shared modules
+    // (projection, wire, runtime) land in a chunk both halves import, so the
+    // service class stays one identity across them.
+    entry: {
+      index: 'src/index.ts',
+      agent: 'src/agent.ts',
+      'self-compact': 'src/self-compact.ts',
+    },
     format: 'esm',
     platform: 'node',
     target: 'es2023',
@@ -14,7 +22,8 @@ export default [
     clean: true,
     external: [/^@deepseek-ai\//],
     outputOptions: {
-      entryFileNames: 'index.mjs',
+      entryFileNames: '[name].mjs',
+      chunkFileNames: 'chunk-[name]-[hash].mjs',
     },
   },
   {

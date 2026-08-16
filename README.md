@@ -34,12 +34,15 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 |---|---|
 | 「评测」会话 Tab | `conversation.view` 槽，**按需出现**：算子优化模式的会话常显示；其余会话检测到评测/plan/循环 armed 才持有注册。内容：SVG 曲线（**纵轴越高越快**：绘制量是 1/延迟，标注在本 run 报出过加速比时读作 ×、否则读作延迟；y 域聚焦收敛带，慢的离群点底边截断，hover 给该次评测的原始延迟与它自己报的 ×）+ 状态芯片与**循环/监督控件** + 当前方案卡 + 监督记录卡 + **可展开迭代表**（评测完整判定、来源命令行、生效方案、该轮监督、该轮 write/edit 改动） |
 | `kernel_plan` 工具 | 模型汇报 phase/approach/hypothesis/next；调用本身即记录 |
+| `kernel_env` 工具 | 模型汇报**评测跑在哪**（主机/设备/约束/版本/探测命令）；跑分的机器不一定是插件所在的机器 |
 | `kernel_finalize` 工具 | 无 id 评测管线的收尾记录（按 `artifact_path`）+ 上述复测 |
-| `self_compact` 工具 | 包装官方 `compaction` seam；仅当组合里有 compaction provider 时注册 |
+| `self_compact` 工具 | 包装官方 `compaction` seam |
 | `/kloop [预算]` 命令 | **kernel 优化循环**：按 run 状态驱动的续跑——turn 落定且预算未尽、未 finalize、上轮有进展才续投；续投消息带停滞计数；预算耗尽/停滞先投**收尾轮**再停 |
 | `/supervise on\|off` 命令 | **外部模型监督**：每个续跑点复审 run digest（含每点来源命令行），建议随续投消息注入；失败降级为无建议 |
 | series / control / models 路由 | `GET …/series?sessionId=` 即时投影；`POST …/control` 驱动与 slash 命令同一份循环/监督状态（含 `supervise-use` 会话级换监督模型）；`GET …/models` 供面板选择器枚举 provider/model |
 | `skills/kernel-opt` | 优化协议（盘点→组装评测入口→自由迭代→诚实收尾），可选装 |
+
+**上面四个工具只在「算子优化模式」的会话里存在**，不在插件的 profile 层注册。它们是这一个模式的操纵杆——别的 preset 的会话既用不了，也看不到它们喂的面板，而工具描述是每轮都在的上下文。实现上它们是 preset 组合里的两行（`@xietwim/dsh-kernel-opt/agent` 与 `@xietwim/dsh-kernel-opt/self-compact`），配置不重写一遍：profile 半把解析好的那份通过服务递过去。面板、路由、`/kloop` 仍在 profile 层。
 
 ## 快速上手（自带 kernel）
 
@@ -122,7 +125,7 @@ dsh --profile web --dump-config | grep kernel-opt   # 应出现 bundle 层
 |---|---|---|
 | `benchTools` | `['kernel_evaluate']` | 计入曲线的评测**工具**名（精确或分隔符后缀匹配，MCP 前缀自动覆盖） |
 | `shellTools` | `['bash']` | 扫描契约行的 shell 工具名（自报通道）。命令行**只做读取**（`cat`/`grep`/`head`/`tail`/`ls` 等，判定按整行逐段，任一段是真程序就算执行）时不计点——读回一份 bench 日志不是第二次测量 |
-| `jobTools` | `['job_output']` | 后台任务读取器，**照常计点**：跑得久到要放后台的 bench 仍然是 bench，云端评测更是天然如此。来源命令从启动该 job 的 shell 调用（`started background job <id>`）追回，所以后台点一样可审计；同一 job 内按契约行去重 |
+| `jobTools` | `['job_output']` | 后台任务读取器，**照常计点**：跑得久到要放后台的 bench 仍然是 bench，云端评测更是天然如此。来源命令从启动该 job 的 shell 调用（`started background job <id>`）追回，所以后台点一样可审计；契约行按 payload 在**整个会话内**去重（见「已知边界」） |
 | `profileTools` | `['kernel_profile']` | 记为 ▲ 标记的 profiler **工具**名（注册工具/MCP 评测器才有；自组装评测入口的形态下不会触发） |
 | `profileCommands` | `ncu`/`nsys`/`nvprof`/`rocprof*`/`omniperf`/`vtune`/`perf`/`xctrace` 等 | 记为 ▲ 标记的 profiler **命令**名，按 shell 命令行的可执行 token 匹配（路径前缀算，`time.perf_counter` 不算）。认得出真 profiler，认不出手写诊断脚本——所以"没有 ▲"是弱证据 |
 | `finalizeTools` | `['run_finalize', 'kernel_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标 ⚑，`artifact_path` 参数把该 artifact 最优诚实点标 ⚑ |

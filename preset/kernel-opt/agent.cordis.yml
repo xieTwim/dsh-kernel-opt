@@ -136,6 +136,21 @@
   config:
     maxBytes: 65536
 
+# ── kernel-opt tools ────────────────────────────────────────────────────────
+# The plugin's model-facing tools: kernel_plan / kernel_env / kernel_finalize.
+# They are rows HERE and not part of the plugin's profile-level mount, because
+# they are levers of THIS mode: a session on a general coding preset can
+# neither use them nor see the panel they feed, and carrying their
+# descriptions cost every unrelated session context for nothing.
+#
+# The row takes no config — it reads the plugin's own resolved settings
+# (bench/shell tool routing, finalize replay) through a service, so there is
+# still exactly one place to configure them. Without the plugin the service is
+# absent and the row simply does not mount.
+
+- id: kernel-opt-tools
+  name: '@xietwim/dsh-kernel-opt/agent'
+
 # ── shell ───────────────────────────────────────────────────────────────────
 
 - id: tool-bash
@@ -219,6 +234,15 @@
         thresholdChars: 8192
         headChars: 4096
         tailChars: 1024
+
+    # self_compact — the persona tells the agent to compact when it switches
+    # approach families, and this row is what makes the tool exist. It sits
+    # INSIDE this group on purpose: `isolate` above gives `compaction` a realm
+    # of its own, so the service is reachable from here and nowhere outside.
+    # `tools` is not isolated, so the registration still reaches the agent's
+    # catalog like every other row.
+    - id: kernel-opt-self-compact
+      name: '@xietwim/dsh-kernel-opt/self-compact'
 
 # ── delegation and workflows ────────────────────────────────────────────────
 
