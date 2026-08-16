@@ -136,17 +136,19 @@
   config:
     maxBytes: 65536
 
-# ── kernel-opt tools ────────────────────────────────────────────────────────
-# The plugin's model-facing tools: kernel_plan / kernel_env / kernel_finalize.
-# They are rows HERE and not part of the plugin's profile-level mount, because
-# they are levers of THIS mode: a session on a general coding preset can
-# neither use them nor see the panel they feed, and carrying their
-# descriptions cost every unrelated session context for nothing.
+# ── kernel-opt tools and commands ───────────────────────────────────────────
+# The plugin's model-facing tools (kernel_plan / kernel_env / kernel_finalize)
+# and its human-facing commands (/kloop, /supervise). They are rows HERE and
+# not part of the plugin's profile-level mount, because they are levers of
+# THIS mode: a session on a general coding preset can neither use them nor see
+# the panel they feed, yet the tool descriptions cost it context every turn and
+# the commands cluttered its slash menu.
 #
 # The row takes no config — it reads the plugin's own resolved settings
-# (bench/shell tool routing, finalize replay) through a service, so there is
-# still exactly one place to configure them. Without the plugin the service is
-# absent and the row simply does not mount.
+# (bench/shell tool routing, finalize replay) and drives the plugin's own loop
+# state through a service, so there is still exactly one place to configure
+# them and the panel's buttons and /kloop can never disagree. Without the
+# plugin the service is absent and the row simply does not mount.
 
 - id: kernel-opt-tools
   name: '@xietwim/dsh-kernel-opt/agent'

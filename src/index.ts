@@ -18,11 +18,12 @@
  *   each continuation point and rides its advice on the continuation
  *   message; failures degrade to "no advice", never a stalled loop.
  *
- * The model-facing tools are NOT here. They belong to one mode, so they mount
- * in the AGENT plane as rows of the kernel-opt preset — `./agent` for
- * `kernel_plan` / `kernel_env` / `kernel_finalize`, `./self-compact` for
- * `self_compact`. This half hands them its resolved configuration through the
- * `kernelOptRuntime` service.
+ * Neither the tools nor the commands are registered here. They belong to one
+ * mode, so they mount in the AGENT plane as rows of the kernel-opt preset —
+ * `./agent` for `kernel_plan` / `kernel_env` / `kernel_finalize` and the two
+ * commands, `./self-compact` for `self_compact`. This half hands them its
+ * resolved configuration and one loop face through the `kernelOptRuntime`
+ * service, so the panel's `/control` route and `/kloop` drive the same state.
  *
  * @module @xietwim/dsh-kernel-opt
  */
@@ -32,13 +33,14 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type {} from '@deepseek-ai/dsh-commands'
 import { hasUserTask, project } from './projection.ts'
 import { KernelOptRuntime, resolveProjection } from './runtime.ts'
+import type { LoopOps } from './runtime.ts'
 import {
   HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, completedEvals,
   continuationText, decideContinuation, finalAuditText, initialLoopState, planStale,
@@ -252,13 +254,6 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
 
   /**
-   * Loop-machinery face shared with the control route. `arm` exists exactly
-   * while the commands/llm composition is live; the route degrades to an
-   * explicit 503 instead of arming a loop nothing would drive.
-   */
-  const bridge: { arm?: (sessionId: string, budget: number) => void } = {}
-
-  /**
    * Disarm a session's loop by human decision (no wrap-up round), and abort
    * the in-flight turn: a human pressing stop means stop NOW, not "after the
    * model finishes what it is doing". Queued human messages survive the
@@ -300,23 +295,55 @@ export function apply(ctx: Context, config: Config = {}): void {
     return null
   }
 
-  // The model-facing tools (kernel_plan / kernel_env / kernel_finalize, and
-  // self_compact) are NOT registered here: they belong to 「算子优化模式」, so
-  // they mount as rows of `preset/kernel-opt/agent.cordis.yml` from this
-  // package's `./agent` and `./self-compact` entry points. Registering them at
-  // profile level put their descriptions in every unrelated session's tool
-  // catalog. What crosses the plane boundary is this service — one resolved
-  // config, so a preset row never restates `benchTools` or `replay`.
+  /**
+   * The loop's one operating face. Both drivers go through it — the panel's
+   * `/control` route below, and the `/kloop` / `/supervise` commands, which
+   * are registered in the agent plane. `arm` stays an open slot filled by the
+   * machinery that can actually advance a run, so a driver that finds it empty
+   * refuses instead of arming a loop nothing would drive.
+   */
+  const loopOps: LoopOps = {
+    defaultBudget,
+    stop: stopLoop,
+    setSupervise,
+    setSupervisorRoute: (sessionId, route) => {
+      const state = stateFor(sessionId)
+      if (route === undefined) delete state.supervisorOverride
+      else state.supervisorOverride = route
+    },
+    status: (sessionId) => {
+      const state = loops.get(sessionId)
+      const supervisor = effectiveSupervisor(state)
+      return {
+        armed: state?.armed ?? false,
+        round: state?.round ?? 0,
+        budget: state?.budget ?? 0,
+        supervise: state?.supervise ?? false,
+        ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
+        ...(supervisor !== undefined ? { supervisor } : {}),
+      }
+    },
+  }
+
+  // Neither the model-facing tools nor the human-facing commands are
+  // registered here: they belong to 「算子优化模式」, so they mount as rows of
+  // `preset/kernel-opt/agent.cordis.yml` from this package's `./agent` and
+  // `./self-compact` entry points. Registering them at profile level put the
+  // tool descriptions in every unrelated session's tool catalog and `/kloop`
+  // in every session's command menu. What crosses the plane boundary is this
+  // service: one resolved config, and one loop face — so a preset row never
+  // restates `benchTools`, and never owns loop state of its own.
   new KernelOptRuntime(ctx, {
     projection,
     replay: {
       enabled: config.replay?.enabled !== false,
       timeoutMs: (config.replay?.timeoutSec ?? 900) * 1000,
     },
+    loop: loopOps,
   })
 
   // Kernel loop + supervisor: commands, settle-driven continuation, review.
-  ctx.inject(['commands', 'llm'], (lctx) => {
+  ctx.inject(['llm'], (lctx) => {
     /** Pending settle timers, cleared with the plugin. */
     const timers = new Set<ReturnType<typeof setTimeout>>()
     lctx.effect(() => () => {
@@ -564,10 +591,10 @@ export function apply(ctx: Context, config: Config = {}): void {
       delete state.challengedFinalizeSeq
       scheduleCheckpoint(sessionId, 10)
     }
-    bridge.arm = armLoop
+    loopOps.arm = armLoop
     lctx.effect(() => () => {
-      delete bridge.arm
-    }, 'kernel-opt: loop bridge')
+      delete loopOps.arm
+    }, 'kernel-opt: loop arm slot')
 
     // The loop trigger is the logged turn boundary — the same surface the
     // projection reads, so a continuation can never race its own data.
@@ -589,90 +616,6 @@ export function apply(ctx: Context, config: Config = {}): void {
       loops.delete(agent.id)
     })
 
-    lctx.commands.register({
-      name: 'kloop',
-      description: 'Kernel-opt loop: /kloop [budget] arms run-state-driven continuation '
-        + '(stops on finalize, budget exhaustion, or no progress); /kloop stop disarms; /kloop status reports.',
-      input: { hint: '[budget] | stop | status' },
-      handler: (invocation) => {
-        const raw = invocation.rawInput.trim()
-        const sessionId = invocation.agent.id
-        const state = stateFor(sessionId)
-        if (raw === 'stop') {
-          if (!stopLoop(sessionId)) return { kind: 'error', text: 'kernel loop is not armed.' }
-          return { kind: 'success', text: 'Kernel loop stopped.' }
-        }
-        if (raw === 'status' || (raw !== '' && !/^\d+$/.test(raw))) {
-          const supervise = state.supervise ? 'on' : 'off'
-          return {
-            kind: 'success',
-            text: state.armed
-              ? `armed: round ${String(state.round)}, budget ${String(state.budget)}, supervisor ${supervise}.`
-              : `not armed${state.stopReason !== undefined ? ` (last stop: ${state.stopReason})` : ''}; supervisor ${supervise}. Usage: /kloop [budget]`,
-          }
-        }
-        armLoop(sessionId, raw === '' ? defaultBudget : Number(raw))
-        return {
-          kind: 'success',
-          text: `Kernel loop armed: budget ${String(state.budget)} evaluations, supervisor ${state.supervise ? 'on' : 'off'}. `
-            + 'It continues the run whenever a turn settles unfinished, and asks for a finalize before stopping on '
-            + 'budget/stall; /kloop stop disarms.',
-        }
-      },
-    })
-
-    lctx.commands.register({
-      name: 'supervise',
-      description: 'Second-model supervisor: /supervise on|off toggles review at kernel-loop continuation '
-        + 'points; /supervise use <provider>/<model> overrides the supervisor route for this session '
-        + '("use default" follows the plugin config again).',
-      input: { hint: 'on | off | use <provider>/<model> | status' },
-      handler: (invocation) => {
-        const raw = invocation.rawInput.trim()
-        const state = stateFor(invocation.agent.id)
-        if (raw === 'on') {
-          const error = setSupervise(invocation.agent.id, true)
-          if (error !== null) return { kind: 'error', text: error }
-          const supervisor = effectiveSupervisor(state)
-          return {
-            kind: 'success',
-            text: `Supervisor on${supervisor !== undefined ? ` (${supervisor.provider}/${supervisor.model}, ${supervisor.source})` : ''}; reviews run at kernel-loop continuation points.`,
-          }
-        }
-        if (raw === 'off') {
-          setSupervise(invocation.agent.id, false)
-          return { kind: 'success', text: 'Supervisor off.' }
-        }
-        if (raw.startsWith('use ') || raw === 'use') {
-          const spec = raw.slice(3).trim()
-          if (spec === 'default' || spec === '') {
-            delete state.supervisorOverride
-            const fallback = effectiveSupervisor(state)
-            return {
-              kind: 'success',
-              text: fallback !== undefined
-                ? `Supervisor override cleared; following config: ${fallback.provider}/${fallback.model}.`
-                : 'Supervisor override cleared; nothing configured — /supervise use <provider>/<model> to pick one.',
-            }
-          }
-          // First slash splits: provider routes carry no slash, model ids may.
-          const slash = spec.indexOf('/')
-          if (slash <= 0 || slash === spec.length - 1) {
-            return { kind: 'error', text: 'Usage: /supervise use <provider>/<model> (or `use default` to follow config).' }
-          }
-          state.supervisorOverride = { provider: spec.slice(0, slash), model: spec.slice(slash + 1) }
-          return {
-            kind: 'success',
-            text: `Supervisor model for this session: ${spec}.${state.supervise ? '' : ' Enable with /supervise on.'}`,
-          }
-        }
-        const effective = effectiveSupervisor(state)
-        return {
-          kind: 'success',
-          text: `supervisor ${state.supervise ? 'on' : 'off'}; ${effective !== undefined ? `route: ${effective.provider}/${effective.model} (${effective.source})` : 'not configured'}.`,
-        }
-      },
-    })
   })
 
   // Agent-preset self-install: composing this plugin makes an「算子优化模式」
@@ -710,7 +653,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           budget: state?.budget ?? 0,
           round: state?.round ?? 0,
           evalsDone: completedEvals(series),
-          available: bridge.arm !== undefined,
+          available: loopOps.arm !== undefined,
           defaultBudget,
           ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
         },
@@ -803,7 +746,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             }
             let error: string | null = null
             if (action === 'loop-arm') {
-              const arm = bridge.arm
+              const arm = loopOps.arm
               if (arm === undefined) {
                 respond(503, { error: 'loop machinery not composed (commands/llm absent)' })
                 return

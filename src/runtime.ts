@@ -20,6 +20,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { DEFAULT_PROJECTION } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
+import type { LoopState } from './loop.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -38,10 +39,53 @@ export interface ReplaySettings {
   timeoutMs: number
 }
 
+/** Which supervisor route a session would review with, and where it came from. */
+export interface SupervisorRoute {
+  provider: string
+  model: string
+  source: 'session' | 'config'
+}
+
+/** What `/kloop status` and the panel's control block both report. */
+export interface LoopStatus {
+  armed: boolean
+  round: number
+  budget: number
+  supervise: boolean
+  stopReason?: LoopState['stopReason']
+  supervisor?: SupervisorRoute
+}
+
+/**
+ * The loop's operations, as the ONE face both drivers use: the panel's
+ * `/control` route (profile plane) and the `/kloop` / `/supervise` commands
+ * (agent plane). Neither owns the state — it lives with the loop machinery in
+ * the plugin's `apply`, and both reach it through here.
+ */
+export interface LoopOps {
+  /** Budget used when `/kloop` is armed without a number. */
+  readonly defaultBudget: number
+  /**
+   * Arm (or re-arm) a session's loop. Absent while the machinery that would
+   * drive it is not composed (`llm`), which is what lets both drivers refuse
+   * with the same reason instead of arming a loop nothing advances.
+   */
+  arm?: (sessionId: string, budget: number) => void
+  /** Disarm by human decision, cancelling the in-flight turn; false if not armed. */
+  stop: (sessionId: string) => boolean
+  /** Toggle supervision; returns an error string when no supervisor is configured. */
+  setSupervise: (sessionId: string, enabled: boolean) => string | null
+  /** Override this session's supervisor route; `undefined` follows plugin config again. */
+  setSupervisorRoute: (sessionId: string, route: { provider: string; model: string } | undefined) => void
+  /** Current loop/supervisor state for a session (never creates one). */
+  status: (sessionId: string) => LoopStatus
+}
+
 /** The subset of plugin config the agent-plane tool rows need. */
 export interface RuntimeSettings {
   projection: ProjectionConfig
   replay: ReplaySettings
+  loop: LoopOps
 }
 
 /**
@@ -54,11 +98,13 @@ export interface RuntimeSettings {
 export class KernelOptRuntime extends Service {
   readonly projection: ProjectionConfig
   readonly replay: ReplaySettings
+  readonly loop: LoopOps
 
   constructor(ctx: Context, settings: RuntimeSettings) {
     super(ctx, RUNTIME_SERVICE)
     this.projection = settings.projection
     this.replay = settings.replay
+    this.loop = settings.loop
   }
 }
 

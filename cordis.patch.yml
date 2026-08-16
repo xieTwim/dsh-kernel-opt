@@ -3,11 +3,13 @@
 # service the mode's tools read). The browser half is discovered through this
 # package's `dsh.client` declaration — no extra row.
 #
-# The model-facing tools are NOT mounted here. kernel_plan / kernel_env /
-# kernel_finalize / self_compact are levers of 「算子优化模式」 alone, so they
-# are rows of that preset's own composition (`@xietwim/dsh-kernel-opt/agent`
-# and `/self-compact`); mounting them here put their descriptions in every
-# unrelated session's tool catalog. The config below still governs them.
+# The tools and the slash commands are NOT mounted here. kernel_plan /
+# kernel_env / kernel_finalize / self_compact and /kloop / /supervise are
+# levers of 「算子优化模式」 alone, so they are rows of that preset's own
+# composition (`@xietwim/dsh-kernel-opt/agent` and `/self-compact`); mounting
+# them here put the tool descriptions in every unrelated session's tool
+# catalog and both commands in every session's slash menu. The config below
+# still governs them, and the loop state stays on this side.
 #
 # Optional config keys (defaults shown; any bench tooling works):
 #   benchTools:    ['kernel_evaluate']

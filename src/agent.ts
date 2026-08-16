@@ -1,21 +1,25 @@
 /**
- * dsh-kernel-opt — the model-facing tools, mounted in the AGENT plane.
+ * dsh-kernel-opt — the mode's own surfaces, mounted in the AGENT plane: the
+ * model-facing tools, and the human-facing `/kloop` and `/supervise` commands.
  *
- * `kernel_plan`, `kernel_env` and `kernel_finalize` are the levers of ONE
- * mode. A session that chose a general coding preset can neither use them nor
- * see the panel they feed, so registering them at profile level put their
- * descriptions in every unrelated session's tool catalog for nothing. They
- * live here instead, as a row in `preset/kernel-opt/agent.cordis.yml`, and a
- * session that did not choose 「算子优化模式」 never carries them.
+ * All of them are levers of ONE mode. A session that chose a general coding
+ * preset can neither use them nor see the panel they feed, so registering them
+ * at profile level put the tool descriptions in every unrelated session's tool
+ * catalog and both commands in every session's slash menu. They live here
+ * instead, as a row in `preset/kernel-opt/agent.cordis.yml`, and a session that
+ * did not choose 「算子优化模式」 never carries them.
  *
  * The tools stay declarative: the call itself is the record. The projection
  * reads the logged arguments, so two of the three bodies only acknowledge.
  * The exception is `kernel_finalize`, which replays the recorded bench
  * command once to turn a self-reported best into a verified one.
  *
- * Configuration is NOT restated on the preset row — it is read from the
- * `kernelOptRuntime` service the profile-plane half publishes, which is also
- * why this row does not mount when the plugin is absent.
+ * The commands own no state either — they read and drive the ONE loop face
+ * (`runtime.loop`) that the panel's `/control` route drives, so the two can
+ * never disagree about a run. Configuration is likewise not restated on the
+ * preset row: it comes from the `kernelOptRuntime` service the profile-plane
+ * half publishes, which is also why this row does not mount when the plugin
+ * is absent.
  *
  * @module @xietwim/dsh-kernel-opt/agent
  */
@@ -23,10 +27,12 @@ import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-commands'
 import { project } from './projection.ts'
 import { REPLAY_LINE_PREFIX, samePath } from './wire.ts'
 import type { WireIteration } from './wire.ts'
-import type {} from './runtime.ts'
+import type { LoopOps } from './runtime.ts'
 
 export const name = 'kernel-opt-tools'
 export const inject = ['tools', 'agents', 'sessions', 'kernelOptRuntime']
@@ -81,10 +87,12 @@ function capReplayOutput(output: string, headCap = 2_000, tailCap = 10_000): str
 }
 
 /**
- * Register the mode's model-facing tools.
+ * Register the mode's model-facing tools and its human-facing commands.
  * @param ctx - the agent-plane context of the kernel-opt preset row.
  */
 export function apply(ctx: Context): void {
+  applyCommands(ctx)
+
   // kernel_plan — the call itself is the record: the projection reads the
   // logged arguments, so the tool body only acknowledges.
   ctx.tools.register(defineTool({
@@ -217,4 +225,111 @@ export function apply(ctx: Context): void {
       return lines.join('\n')
     },
   }))
+}
+
+/**
+ * Register `/kloop` and `/supervise`.
+ *
+ * Soft-gated on `commands` rather than declared in this module's `inject`: a
+ * deployment without the command registry should lose the slash commands, not
+ * the tools — and a row that fails to activate fails the whole preset mount.
+ * @param ctx - the agent-plane context of the kernel-opt preset row.
+ */
+function applyCommands(ctx: Context): void {
+  ctx.inject(['commands'], (cctx) => {
+    const loop = (): LoopOps => cctx.kernelOptRuntime.loop
+
+    cctx.commands.register({
+      name: 'kloop',
+      description: 'Kernel-opt loop: /kloop [budget] arms run-state-driven continuation '
+        + '(stops on finalize, budget exhaustion, or no progress); /kloop stop disarms; /kloop status reports.',
+      input: { hint: '[budget] | stop | status' },
+      handler: (invocation) => {
+        const raw = invocation.rawInput.trim()
+        const sessionId = invocation.agent.id
+        const ops = loop()
+        if (raw === 'stop') {
+          if (!ops.stop(sessionId)) return { kind: 'error', text: 'kernel loop is not armed.' }
+          return { kind: 'success', text: 'Kernel loop stopped.' }
+        }
+        if (raw === 'status' || (raw !== '' && !/^\d+$/.test(raw))) {
+          const state = ops.status(sessionId)
+          const supervise = state.supervise ? 'on' : 'off'
+          return {
+            kind: 'success',
+            text: state.armed
+              ? `armed: round ${String(state.round)}, budget ${String(state.budget)}, supervisor ${supervise}.`
+              : `not armed${state.stopReason !== undefined ? ` (last stop: ${state.stopReason})` : ''}; supervisor ${supervise}. Usage: /kloop [budget]`,
+          }
+        }
+        // The same refusal the panel's control route gives: nothing would
+        // advance a run the loop armed, so it does not arm one.
+        const arm = ops.arm
+        if (arm === undefined) return { kind: 'error', text: 'loop machinery not composed (llm absent).' }
+        arm(sessionId, raw === '' ? ops.defaultBudget : Number(raw))
+        const state = ops.status(sessionId)
+        return {
+          kind: 'success',
+          text: `Kernel loop armed: budget ${String(state.budget)} evaluations, supervisor ${state.supervise ? 'on' : 'off'}. `
+            + 'It continues the run whenever a turn settles unfinished, and asks for a finalize before stopping on '
+            + 'budget/stall; /kloop stop disarms.',
+        }
+      },
+    })
+
+    cctx.commands.register({
+      name: 'supervise',
+      description: 'Second-model supervisor: /supervise on|off toggles review at kernel-loop continuation '
+        + 'points; /supervise use <provider>/<model> overrides the supervisor route for this session '
+        + '("use default" follows the plugin config again).',
+      input: { hint: 'on | off | use <provider>/<model> | status' },
+      handler: (invocation) => {
+        const raw = invocation.rawInput.trim()
+        const sessionId = invocation.agent.id
+        const ops = loop()
+        if (raw === 'on') {
+          const error = ops.setSupervise(sessionId, true)
+          if (error !== null) return { kind: 'error', text: error }
+          const { supervisor } = ops.status(sessionId)
+          return {
+            kind: 'success',
+            text: `Supervisor on${supervisor !== undefined ? ` (${supervisor.provider}/${supervisor.model}, ${supervisor.source})` : ''}; reviews run at kernel-loop continuation points.`,
+          }
+        }
+        if (raw === 'off') {
+          ops.setSupervise(sessionId, false)
+          return { kind: 'success', text: 'Supervisor off.' }
+        }
+        if (raw.startsWith('use ') || raw === 'use') {
+          const spec = raw.slice(3).trim()
+          if (spec === 'default' || spec === '') {
+            ops.setSupervisorRoute(sessionId, undefined)
+            const { supervisor } = ops.status(sessionId)
+            return {
+              kind: 'success',
+              text: supervisor !== undefined
+                ? `Supervisor override cleared; following config: ${supervisor.provider}/${supervisor.model}.`
+                : 'Supervisor override cleared; nothing configured — /supervise use <provider>/<model> to pick one.',
+            }
+          }
+          // First slash splits: provider routes carry no slash, model ids may.
+          const slash = spec.indexOf('/')
+          if (slash <= 0 || slash === spec.length - 1) {
+            return { kind: 'error', text: 'Usage: /supervise use <provider>/<model> (or `use default` to follow config).' }
+          }
+          ops.setSupervisorRoute(sessionId, { provider: spec.slice(0, slash), model: spec.slice(slash + 1) })
+          const state = ops.status(sessionId)
+          return {
+            kind: 'success',
+            text: `Supervisor model for this session: ${spec}.${state.supervise ? '' : ' Enable with /supervise on.'}`,
+          }
+        }
+        const state = ops.status(sessionId)
+        return {
+          kind: 'success',
+          text: `supervisor ${state.supervise ? 'on' : 'off'}; ${state.supervisor !== undefined ? `route: ${state.supervisor.provider}/${state.supervisor.model} (${state.supervisor.source})` : 'not configured'}.`,
+        }
+      },
+    })
+  })
 }

@@ -125,19 +125,22 @@ test('a bundled file added later still tops up', async () => {
   }
 })
 
-// ── where the model-facing tools are allowed to live ────────────────────────
-// The four tools are levers of ONE mode. Registering them from the plugin's
-// profile-level `apply` is what put their descriptions in the tool catalog of
-// every session in the deployment, kernel-opt or not — the cost this split
-// removed. These two tests pin the split itself, since nothing else fails when
-// a tool drifts back: the mode keeps working and only unrelated sessions pay.
+// ── where the mode's surfaces are allowed to live ───────────────────────────
+// The four tools and the two commands are levers of ONE mode. Registering them
+// from the plugin's profile-level `apply` is what put the tool descriptions in
+// every session's tool catalog and `/kloop` in every session's slash menu,
+// kernel-opt or not — the cost this split removed. These tests pin the split
+// itself, since nothing else fails when one drifts back: the mode keeps
+// working and only unrelated sessions pay.
 
-test('the profile-level half registers no model-facing tool', async () => {
+test('the profile-level half registers nothing session-facing', async () => {
   const source = await read(new URL('../src/index.ts', import.meta.url).pathname)
-  const registrations = source.match(/\.tools\.register\(/g) ?? []
-  assert.equal(registrations.length, 0,
+  assert.equal((source.match(/\.tools\.register\(/g) ?? []).length, 0,
     'a tool registered here reaches every session in the deployment; '
     + 'register it from src/agent.ts (or src/self-compact.ts) instead')
+  assert.equal((source.match(/\.commands\.register\(/g) ?? []).length, 0,
+    'a command registered here appears in every session\'s slash menu; '
+    + 'register it from src/agent.ts instead, driving the loop through `runtime.loop`')
 })
 
 test('the preset carries the tool rows, and self_compact sits in the compaction group', async () => {

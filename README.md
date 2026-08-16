@@ -42,7 +42,11 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 | series / control / models 路由 | `GET …/series?sessionId=` 即时投影；`POST …/control` 驱动与 slash 命令同一份循环/监督状态（含 `supervise-use` 会话级换监督模型）；`GET …/models` 供面板选择器枚举 provider/model |
 | `skills/kernel-opt` | 优化协议（盘点→组装评测入口→自由迭代→诚实收尾），可选装 |
 
-**上面四个工具只在「算子优化模式」的会话里存在**，不在插件的 profile 层注册。它们是这一个模式的操纵杆——别的 preset 的会话既用不了，也看不到它们喂的面板，而工具描述是每轮都在的上下文。实现上它们是 preset 组合里的两行（`@xietwim/dsh-kernel-opt/agent` 与 `@xietwim/dsh-kernel-opt/self-compact`），配置不重写一遍：profile 半把解析好的那份通过服务递过去。面板、路由、`/kloop` 仍在 profile 层。
+**上面四个工具与两条命令只在「算子优化模式」的会话里存在**，不在插件的 profile 层注册。它们是这一个模式的操纵杆——别的 preset 的会话既用不了，也看不到它们喂的面板；工具描述是每轮都在的上下文（实测每个无关会话省 3897 B），命令则会出现在每个会话的斜杠菜单里。
+
+实现上是 preset 组合里的两行：`@xietwim/dsh-kernel-opt/agent`（三个工具 + `/kloop` + `/supervise`）和 `@xietwim/dsh-kernel-opt/self-compact`（`self_compact`，必须放在 compaction 组内，因为那个组 `isolate` 掉了 compaction 服务）。两行都不写配置：profile 半把**解析好的配置**和**唯一一份循环操作面**通过 `kernelOptRuntime` 服务递过去，所以面板的 `/control` 按钮和 `/kloop` 驱动的是同一份状态，且 preset 行自己不持有任何循环状态。插件不在时服务不在，两行干脆不挂载。
+
+投影、面板前端、`/series` `/control` `/models` 路由、preset 自安装仍在 profile 层——它们是宿主侧的东西，不进模型上下文也不进会话菜单。
 
 ## 快速上手（自带 kernel）
 
