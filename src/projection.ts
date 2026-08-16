@@ -485,19 +485,38 @@ function numericMetrics(value: unknown, cap = 12): Record<string, number> | unde
 
 /**
  * Speedup vs the reference kernel, from the evaluator's own numbers only: an
- * explicit `speedup` metric wins; else a `ref_runtime_ms` metric divided by
- * the measured latency. Returns undefined when the evaluator reported neither.
+ * explicit `speedup` wins; else `ref_runtime_ms` divided by the measured
+ * latency. Each is looked up inside `native_metrics` first — the documented
+ * home, and where the bundled evaluator writes it — and then at the payload's
+ * own top level, beside `latency_ms`.
+ *
+ * Reading both places is not politeness about schema. An agent-written
+ * evaluator printed `"speedup": 29.221` next to `"latency_ms"` on all 31 of a
+ * run's contract lines; reading only `native_metrics` dropped every one of
+ * them, which cost the × axis, cost the pooled reference the chart derives
+ * FROM those ratios (`referenceLatency`) — the one thing that would have
+ * cancelled a denominator re-timed in each of 13 containers — and left the
+ * panel telling the reader that no evaluation had reported a speedup.
+ * A number named `speedup` sitting in a contract line means one thing.
  */
-function speedupFrom(metrics: Record<string, number> | undefined, latencyMs: number | undefined): number | undefined {
-  if (metrics === undefined) return undefined
-  for (const [key, value] of Object.entries(metrics)) {
-    if ((key === 'speedup' || key.endsWith('.speedup')) && value > 0) return value
+function speedupFrom(
+  metrics: Record<string, number> | undefined,
+  payload: Record<string, unknown>,
+  latencyMs: number | undefined,
+): number | undefined {
+  const pick = (name: string): number | undefined => {
+    for (const [key, value] of Object.entries(metrics ?? {})) {
+      if ((key === name || key.endsWith(`.${name}`)) && value > 0) return value
+    }
+    const direct = payload[name]
+    if (typeof direct === 'number' && Number.isFinite(direct) && direct > 0) return direct
+    return undefined
   }
+  const explicit = pick('speedup')
+  if (explicit !== undefined) return explicit
   if (latencyMs === undefined || latencyMs <= 0) return undefined
-  for (const [key, value] of Object.entries(metrics)) {
-    if ((key === 'ref_runtime_ms' || key.endsWith('.ref_runtime_ms')) && value > 0) return value / latencyMs
-  }
-  return undefined
+  const ref = pick('ref_runtime_ms')
+  return ref === undefined ? undefined : ref / latencyMs
 }
 
 /** String entries of an unknown array, each capped, the list capped. */
@@ -525,7 +544,7 @@ function fillFromPayload(point: WireIteration, payload: Record<string, unknown>,
   if (typeof latency === 'number' && Number.isFinite(latency)) point.latencyMs = latency
   const metrics = numericMetrics(payload['native_metrics'])
   if (metrics !== undefined) point.metrics = metrics
-  const speedup = speedupFrom(metrics, point.latencyMs)
+  const speedup = speedupFrom(metrics, payload, point.latencyMs)
   if (speedup !== undefined) point.speedup = speedup
   if (payload['reward_hack_detected'] === true) point.rewardHack = true
   if (typeof payload['error'] === 'string' && payload['error'].length > 0) point.error = payload['error']

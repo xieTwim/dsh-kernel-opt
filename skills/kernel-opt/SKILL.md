@@ -37,14 +37,15 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 | `correct` | ✅ | 正确性判定（未验证就写 `false`） |
 | `latency_ms` | 测得就写 | 延迟毫秒数 |
 | `compiled` / `error` | 可选 | 编译结果 / 失败信息 |
-| `native_metrics` | 测了就写 | 数值映射；`speedup` 或 `ref_runtime_ms` 会变成面板的加速比列（曲线的纵轴也靠它） |
+| `speedup` / `ref_runtime_ms` | 测了就写 | 分母。面板的加速比列与曲线纵轴都靠它；写进 `native_metrics` 或与 `latency_ms` 并排都认，前者优先 |
+| `native_metrics` | 测了就写 | 其余数值映射（profile 出来的数写这儿） |
 | `reward_hack_detected` / `workload_indices` | 可选 | 评测器的反作弊标记 / 子集评测 |
 
 规矩：
 
 - **profile 出来的数就写进 `native_metrics`**（occupancy、实测带宽及其占峰值比例、cache 命中率、每 block 寄存器/共享内存……）。延迟说不出「为什么慢」，判断还有多少余量靠的是这些数；profile 完只留在自己上下文里、只报一个延迟，等于把证据扔了；
-- **`speedup`（或 `ref_runtime_ms`）必须进 `native_metrics`**。评测器算出来的数不转述，面板就只有裸延迟，曲线纵轴退化成延迟标注，人类看不出"这版比参考快几倍"。**用内置评测器时你不用管**：它自己打这行契约（连 speedup 一起），你再手写一行就会把同一次评测记成两个点；
-- **前台跑 bench**（不要 `run_in_background`——后台 job 的输出面板不收）；
+- **每次评测都要把分母写进契约行**（`speedup` 或 `ref_runtime_ms`）。评测器算出来的数不转述，丢的不只是一列加速比：面板靠这些比值反推出**一个统一分母**去抵消"每次评测各自重测参考"的抖动，分母一漏，整轮的可比性跟着丢。实测一轮 13 个容器的远程 run，同一份没改过的 kernel 自报 ×35.5／×46.3／×53.2／×35.5，统一分母后是 ×34.9／×35.5／×34.9／×35.5。**用内置评测器时你不用管**：它自己打这行契约（连 speedup 一起），你再手写一行就会把同一次评测记成两个点；
+- **bench 前台后台都收**：后台 job 的契约行会经 `started background job <id>` 追回启动命令，同 job 内按契约行去重。远程/慢评测该开后台就开。唯一别做的是**用回读伪造契约行**——`cat bench.log`、`grep KERNEL_EVAL out.txt` 这类纯读取命令不计点，因为它们不是一次评测；
 - 包装脚本**env 自包含**（conda activate / PATH export 写进脚本里）——这同时是 finalize 复测能成功的前提；
 - 契约行**只能由真实评测产生**。`echo`/`cat` 出一行契约=伪造：面板给每个点标注产生它的命令行，监督模型会审这些命令行，人类看得见;
 - 有 MCP/注册工具评测器时不用契约行——工具结果 JSON 直接进面板（同样字段，走 `benchTools` 配置），且不可伪造。

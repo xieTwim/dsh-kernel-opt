@@ -67,7 +67,7 @@ const zh = {
   'status.error': '失败',
   'axis.best': '最佳',
   'axis.hintSpeedup': '纵轴：相对参考实现的加速比，越高越快。曲线用整个 run 汇总出的参考耗时换算，因此严格随延迟单调；逐次评测自己报的加速比保留在下方表格与各点悬停中（评测器若每次重新给参考计时，那个数会带参考侧的抖动）。',
-  'axis.hintLatency': '纵轴：延迟，方向已反转——越高越快。本次 run 没有任何一次评测报出加速比，所以标注用的是延迟本身。',
+  'axis.hintLatency': '⚠ 纵轴退回延迟本身，方向已反转——越高越快。本次 run 的契约行里一个加速比字段都没有（`speedup` 或 `ref_runtime_ms`，写在 `native_metrics` 里或与 `latency_ms` 并排都认），所以这里既标不出「比参考快几倍」，也无法汇总出统一分母去抵消逐次评测的参考抖动。按协议每次评测都该带分母——评测器算了却没写进契约行时，看到的就是现在这样。',
   'loop.armed': '循环运行中 · 已迭代 {done}/{budget} 次',
   'loop.stopped': '循环已停止：{reason}',
   'loop.interrupted': '上一轮循环没有收尾记录：可能被手动停止，或被服务重启中断；重新启动循环会接着已有进度继续。',
@@ -179,7 +179,7 @@ const en = {
   'status.error': 'failed',
   'axis.best': 'best',
   'axis.hintSpeedup': 'y axis: speedup over the reference kernel — higher is faster. The curve converts latency with one reference time pooled over the whole run, so it is monotone in latency; each evaluation\'s own reported speedup stays in the table below and on each point (an evaluator that re-times its reference per run puts that jitter in the reported number).',
-  'axis.hintLatency': 'y axis: latency, direction inverted — higher is faster. No evaluation in this run reported a speedup, so the labels are the latencies themselves.',
+  'axis.hintLatency': '⚠ The y axis fell back to latency, direction inverted — higher is faster. Not one contract line in this run carried a speedup field (`speedup` or `ref_runtime_ms`, either inside `native_metrics` or beside `latency_ms`), so the panel can neither label "× over the reference" nor pool one denominator to cancel the reference jitter of individual evaluations. The protocol asks every evaluation to carry one — an evaluator that computed the ratio but left it out of the contract line looks exactly like this.',
   'loop.armed': 'loop running · {done}/{budget} iterations',
   'loop.stopped': 'loop stopped: {reason}',
   'loop.interrupted': 'The last loop run has no closing record: it was stopped, or a host restart cut it off. Starting again resumes from the progress already on record.',
@@ -576,8 +576,20 @@ function Chart(props: {
     </svg>
     {/* What the axis is measuring. Needed in both modes for opposite reasons:
         a × axis has to say the number is not the evaluator's per-row ratio,
-        and a latency axis has to say its numbers now DECREASE upward. */}
-    <div style={{ padding: '4px 8px 2px', fontSize: 11, lineHeight: '16px', color: COLOR.caption }}>
+        and a latency axis has to say its numbers now DECREASE upward.
+        The latency axis is also an ANOMALY, not a second normal mode: the
+        protocol asks every evaluation for a denominator, so reaching this
+        branch means a run's ratios went missing between the evaluator and
+        here. It carries a warning's colour to match — a dim caption is how
+        this went unread for a whole run. */}
+    <div
+      style={{
+        padding: '4px 8px 2px',
+        fontSize: 11,
+        lineHeight: '16px',
+        color: model.referenceMs !== undefined ? COLOR.caption : COLOR.warn,
+      }}
+    >
       {axisHint(model.referenceMs !== undefined ? 'speedup' : 'latency')}
     </div>
     </>

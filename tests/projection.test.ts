@@ -468,6 +468,49 @@ test('the bundled evaluator’s own trailer projects, speedup and all', () => {
   assert.ok(point.speedup !== undefined && Math.abs(point.speedup - 1.075377) < 1e-9)
 })
 
+test('an agent-written evaluator’s top-level speedup counts too', () => {
+  // Verbatim shape from a real Modal run: this evaluator put `speedup` and
+  // `ref_runtime_ms` beside `latency_ms` rather than inside `native_metrics`,
+  // and reading only the nested home dropped the ratio on every line of the
+  // run — taking the × axis and the pooled reference down with it.
+  const events = [
+    call('bash', 'b1', { command: 'modal run bench_modal.py' }),
+    result('b1', [
+      'KERNEL_EVAL={"artifact": "solution/v3_compile.py", "correct": true, "latency_ms": 0.0696,'
+      + ' "ref_runtime_ms": 2.0347, "speedup": 29.221,'
+      + ' "native_metrics": {"floor_copy_ms": 0.0471, "achieved_gbs": 3848.8}}',
+    ].join('\n')),
+  ]
+  const series = project('s', events)
+  const point = series.iterations[0]!
+  assert.ok(point.speedup !== undefined && Math.abs(point.speedup - 29.221) < 1e-9)
+  // The nested metrics still arrive intact — top-level reading is additive.
+  assert.equal(point.metrics?.['floor_copy_ms'], 0.0471)
+})
+
+test('top-level ref_runtime_ms derives a speedup, and native_metrics still wins', () => {
+  const events = [
+    call('bash', 'b1', { command: './bench.sh' }),
+    result('b1', 'KERNEL_EVAL={"artifact":"solution/k.py","correct":true,"latency_ms":2.0,"ref_runtime_ms":8.0}'),
+    call('bash', 'b2', { command: './bench.sh' }),
+    // Both homes populated and disagreeing: the documented one is the answer.
+    result('b2', 'KERNEL_EVAL={"artifact":"solution/k.py","correct":true,"latency_ms":2.0,"speedup":99,'
+      + '"native_metrics":{"speedup":3.5}}'),
+  ]
+  const series = project('s', events)
+  assert.ok(series.iterations[0]?.speedup !== undefined && Math.abs(series.iterations[0].speedup - 4) < 1e-9)
+  assert.equal(series.iterations[1]?.speedup, 3.5)
+})
+
+test('a zero or negative top-level speedup is not a reading', () => {
+  const events = [
+    call('bash', 'b1', { command: './bench.sh' }),
+    result('b1', 'KERNEL_EVAL={"artifact":"solution/k.py","correct":true,"latency_ms":2.0,"speedup":0,"ref_runtime_ms":0}'),
+  ]
+  const series = project('s', events)
+  assert.equal(series.iterations[0]?.speedup, undefined)
+})
+
 test('shell channel: bash trailer lines become self-reported points with provenance + changes', () => {
   const events = [
     call('write', 'w1', { file_path: 'solution/k.py', content: 'v2 kernel' }),

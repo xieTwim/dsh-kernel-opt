@@ -14,7 +14,9 @@
 KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ```
 
-模型经 `bash` 跑它，面板从 shell 结果里解析这一行。必需字段只有 `artifact`（测的是哪个文件）和 `correct`；测得延迟时给 `latency_ms`；可选 `compiled` / `error` / `native_metrics`（数值映射，`speedup` 或 `ref_runtime_ms` 会成为加速比列与曲线纵轴）/ `reward_hack_detected` / `advisory` / `workload_indices`。一行一个评测，行首开始，行内 JSON 后可跟杂质。**自带的评测器自己打这行**（连 speedup 一起），所以走它的时候数字是评测器的原话而不是模型的转述。
+模型经 `bash` 跑它，面板从 shell 结果里解析这一行。必需字段只有 `artifact`（测的是哪个文件）和 `correct`；测得延迟时给 `latency_ms`；可选 `compiled` / `error` / `native_metrics`（数值映射）/ `reward_hack_detected` / `advisory` / `workload_indices`。一行一个评测，行首开始，行内 JSON 后可跟杂质。**自带的评测器自己打这行**（连 speedup 一起），所以走它的时候数字是评测器的原话而不是模型的转述。
+
+**分母（`speedup` 或 `ref_runtime_ms`）写在 `native_metrics` 里或与 `latency_ms` 并排都认**，前者优先。它撑起加速比列与曲线纵轴，还有一层不那么显眼的作用：面板把每行的 `延迟 × 加速比` 反推成参考耗时、取中位数，用**这一个**分母重算整条曲线，于是逐次评测各自重测参考带来的抖动被抵消掉。实测一轮 13 个容器的 Modal run：同一份没改过的 kernel 自报 ×35.5／×46.3／×53.2／×35.5，统一分母后是 ×34.9／×35.5／×34.9／×35.5——剩下的 1.9% 正是它自己两次延迟的差。所以**分母漏进契约行不只是少一列**，整轮的可比性都跟着丢。
 
 **② 工具结果 JSON（MCP / 注册工具评测器）。** 评测器作为工具存在时（任何名字含 `kernel_evaluate` 的工具默认命中，可配），其 result 文本里的同字段 JSON 直接进面板。
 
