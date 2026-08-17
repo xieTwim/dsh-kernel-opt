@@ -530,22 +530,26 @@ function Chart(props: {
             {clamped
               ? <text x={cx} y={CHART.h - CHART.b - 10} textAnchor="middle" fontSize={9} fill={COLOR.caption}>↓</text>
               : null}
-            {/* The one label that must stay inside the plot (the clamped
-                slowest sits at its own point). A painted halo keeps it
-                readable wherever the curve runs above it. */}
+            {/* How far below the domain the slowest point actually sits.
+                It rides in the gutter under its own point, not beside it
+                inside the plot: a clamped point is pinned ON the bottom
+                edge, so the segment leaving it runs through exactly the
+                band an in-plot label would occupy — a halo there only
+                chops the curve instead of separating the two. Clamped to
+                the plot's x range so an edge point keeps it in frame. */}
             {clamped && i === worstClampedIndex
               ? (
                   <text
-                    x={cx < CHART.w / 2 ? cx + 7 : cx - 7}
-                    y={CHART.h - CHART.b - 4}
-                    textAnchor={cx < CHART.w / 2 ? 'start' : 'end'}
+                    x={Math.min(Math.max(cx, CHART.l + 18), CHART.w - CHART.r - 18)}
+                    y={CHART.h - CHART.b + 30}
+                    textAnchor="middle"
                     fontSize={11}
                     fill={COLOR.dim}
                     stroke={COLOR.halo}
                     strokeWidth={3}
                     paintOrder="stroke"
                   >
-                    {model.label(model.worst)}↓
+                    {model.label(model.worst)}
                   </text>
                 )
               : null}

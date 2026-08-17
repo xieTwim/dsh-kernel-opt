@@ -24,8 +24,16 @@ export function formatLatency(ms: number): string {
   return `${(ms / 1000).toPrecision(3)}s`
 }
 
-/** Chart geometry constants (viewBox units). */
-export const CHART = { w: 640, h: 200, l: 56, r: 16, t: 16, b: 26 }
+/**
+ * Chart geometry constants (viewBox units).
+ *
+ * `b` is deeper than the axis needs because the gutter under the plot is a
+ * working row, not margin: unmeasured points, the profiler ▲, and the
+ * slowest-point label all live there. `h - b` is what every drawn y is
+ * anchored to, so growing the two together adds gutter without moving the
+ * plot by a pixel.
+ */
+export const CHART = { w: 640, h: 212, l: 56, r: 16, t: 16, b: 38 }
 /** Minimum vertical clearance between two axis-gutter labels (viewBox units). */
 export const AXIS_GAP = 13
 
