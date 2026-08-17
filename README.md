@@ -1,5 +1,5 @@
 <h1 align="center">dsh-kernel-opt</h1>
-<p align="center"><b>Watch a model optimize a kernel — live, inside DSH</b></p>
+<p align="center"><b>Watch a model optimize a kernel — live, inside DeepSeek Harness</b></p>
 
 <p align="center">
   <a href="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml"><img src="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -20,11 +20,7 @@
 
 ## News
 
-- 🚀 **[2026.08.17]** **dsh-kernel-opt is open-source.**
-- ✨ **[2026.08.16]** The tools and the `/kloop` · `/supervise` commands moved **inside the Kernel-Opt mode** — unrelated sessions no longer pay for them.
-- 🔍 **[2026.08.14]** **Second-model supervision** — a reviewer reads each round's evidence, and its verdict rides along with the loop's next message.
-- 🔁 **[2026.08.13]** **`/kloop`** — a budget-driven optimization loop that always ends in a clean wrap-up, never a silent power cut.
-- 🚀 **[2026.08.13]** First release — the live evaluation panel.
+- 🚀 **[2026.08.17]** **dsh-kernel-opt is released** — the live evaluation panel, the `/kloop` optimization loop, and optional second-model supervision.
 
 **Table of Contents**
 
@@ -40,7 +36,7 @@
 
 ## What is dsh-kernel-opt?
 
-**dsh-kernel-opt is a [DSH](https://github.com/deepseek-ai/deepseek-harness) plugin that turns a long kernel-optimization run into something a human can watch and steer.**
+**dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
 
 The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, profiling ▲ / first-best ★ / finalize ⚑ markers, the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment — DSH's native steering. When the model changes tack, it can compact its own context and keep going (`self_compact`).
 
@@ -74,7 +70,7 @@ That last row is the point: when the model calls `kernel_finalize`, the plugin *
 
 ## Install
 
-**Not on npm** — install from git. Build output ships with the repo (`lib/` is committed), so there is nothing to build and no toolchain beyond Node:
+Build output ships with the repo (`lib/` is committed), so there is nothing to build and no toolchain beyond Node:
 
 ```sh
 # from git, pinned to a commit (the repo is public — no credentials needed)
@@ -84,7 +80,7 @@ dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt#<sha>"
 dsh plugin --profile web add /path/to/dsh-kernel-opt
 ```
 
-Upgrading = `add` again with a newer sha. The `@xietwim` in the package name is just a namespace; it corresponds to no npm organization.
+Upgrading = `add` again with a newer sha.
 
 Restart `dsh web`, then verify:
 
