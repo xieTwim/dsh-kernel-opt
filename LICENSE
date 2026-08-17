@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
---- Third-party notices ---
-
-preset/kernel-opt/evaluator/bench.py is a derivative of the benchmark shipped
-with AKO4ALL (https://github.com/TongmingLAIC/AKO4ALL, MIT, Copyright (c) 2026
-TongmingLAIC), which in turn inlines core logic from KernelBench
-(https://github.com/ScalingIntelligence/KernelBench, MIT, Copyright (c) 2023
-Anne Ouyang, Simon Guo, Azalia Mirhoseini). Both notices are reproduced in
-full at the top of that file.

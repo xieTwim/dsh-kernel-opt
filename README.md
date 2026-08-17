@@ -107,13 +107,16 @@ GPU 在评测命令跑的地方——本机、容器、远程提交都行，插�
 
 ## 安装
 
-构建产物随仓库分发（`lib/` 已提交），安装免构建：
+**不在 npm 上**，从 git 源装。构建产物随仓库分发（`lib/` 已提交），所以安装免构建、也不需要 Node 以外的工具链：
 
 ```sh
-dsh plugin --profile web add /path/to/dsh-kernel-opt   # 本地目录
-# 或 git 源(pin commit;私有仓库需本机 git 具备访问权):
+# git 源(pin 一个 commit;仓库公开,无需凭据)
 dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt#<sha>"
+
+dsh plugin --profile web add /path/to/dsh-kernel-opt    # 或本地目录/开发用
 ```
+
+升级 = 换一个 sha 重新 `add`。包名里的 `@xietwim` 只是命名空间，不对应任何 npm 组织。
 
 重启 `dsh web` 生效。验证：
 
@@ -182,7 +185,7 @@ peer 范围写作 `>=0.0.1-rc.2 <0.1.0 || >=0.1.0-rc.2 <0.2`，因为**宿主有
 `preset/kernel-opt/evaluator/bench.py`（内置评测器）不是原创：它派生自
 [AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL) 附带的评测脚本，而后者又内联了
 [KernelBench](https://github.com/ScalingIntelligence/KernelBench) 的核心逻辑。两个上游都是 MIT，
-两份声明**逐字保留在该文件头部**，我们在 AKO4ALL 版本之上的改动就是文件开头「Measurement protocol」
+两份声明逐字保留在 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 与该文件头部；我们在 AKO4ALL 版本之上的改动就是文件开头「Measurement protocol」
 那几条（median、fresh 输入、mutation sentinel、DEVIATION 行、冻结分母）。
 
 ## CI
