@@ -506,7 +506,7 @@ function Chart(props: {
           // off the value scale, so they never read as a low latency.
           const cy = CHART.h - CHART.b + 8
           return (
-            <g key={p.seq}>
+            <g key={`${String(p.seq)}-${String(i)}`}>
               <title>{tip}</title>
               <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.5}>
                 {status === 'pending'
@@ -520,7 +520,9 @@ function Chart(props: {
         const isBest = bestIndex === i
         const clamped = model.clamped(p.latencyMs)
         return (
-          <g key={p.seq}>
+          // seq is NOT unique: one shell call printing two contract lines
+          // gives two iterations the same seq. Index disambiguates.
+          <g key={`${String(p.seq)}-${String(i)}`}>
             <title>{tip}</title>
             {status === 'ok'
               ? <circle cx={cx} cy={cy} r={3.5} fill={color} />
@@ -1107,7 +1109,10 @@ export function KernelOptTab(
   const { series, refetch } = useSeries(sessionId)
   const models = useModels()
   const [budgetDraft, setBudgetDraft] = useState<string | null>(null)
-  const [expandedSeq, setExpandedSeq] = useState<number | null>(null)
+  // Keyed by the iteration's INDEX, not its seq: one shell call that prints
+  // two contract lines (two seeds in one bench run) yields two iterations
+  // sharing a seq, and a seq-keyed expansion opens both rows at once.
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const [expandedReview, setExpandedReview] = useState<number | null>(null)
   const [planHistory, setPlanHistory] = useState(false)
 
@@ -1517,14 +1522,14 @@ export function KernelOptTab(
                   const status = statusOf(p)
                   const idx = iterations.indexOf(p)
                   const isBest = series !== null && series.bestIndex === idx
-                  const expanded = expandedSeq === p.seq
+                  const expanded = expandedIdx === idx
                   // A finalized self-reported point without a replay point on
                   // the same artifact: the final number was never re-measured.
                   const unverifiedFinal = p.finalized === true && p.channel === 'shell'
                     && !iterations.some(q => q.channel === 'replay' && q.artifactPath !== undefined
                       && p.artifactPath !== undefined && samePath(q.artifactPath, p.artifactPath))
                   return (
-                    <div key={p.seq}>
+                    <div key={idx}>
                       <div
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
@@ -1532,7 +1537,7 @@ export function KernelOptTab(
                           borderBottom: `1px solid ${COLOR.border}`,
                           cursor: 'pointer',
                         }}
-                        onClick={() => { setExpandedSeq(expanded ? null : p.seq) }}
+                        onClick={() => { setExpandedIdx(expanded ? null : idx) }}
                       >
                         <span style={{ flex: 'none', width: 14, color: COLOR.caption }}>{expanded ? '▾' : '▸'}</span>
                         <span style={{ flex: 'none', width: 32, color: COLOR.caption }}>#{idx + 1}</span>
