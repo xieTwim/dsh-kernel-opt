@@ -62,6 +62,12 @@ test('matchesProfileCommand: invoked profilers only, never a bench script timing
   assert.equal(matchesProfileCommand('/usr/local/cuda/bin/ncu -o rep python bench.py', names), true)
   assert.equal(matchesProfileCommand('cd run && nsys profile ./bench.sh', names), true)
   assert.equal(matchesProfileCommand('perf stat -e cycles ./a.out', names), true)
+  // macOS's built-in sampler, the shape a real run used.
+  assert.equal(matchesProfileCommand('/usr/bin/sample 21261 4 -file /tmp/prof.txt', names), true)
+  assert.equal(matchesProfileCommand('sample $BGPID 4 -file /tmp/prof.txt', names), true)
+  // …and the generic-word traps that keep it honest.
+  assert.equal(matchesProfileCommand('python sample.py', names), false)
+  assert.equal(matchesProfileCommand('cp sample out', names), false)
   // The trap this rule exists for: every bench script in this domain times
   // with time.perf_counter, and `perf` is a configured profiler.
   assert.equal(matchesProfileCommand('python -c "import time; time.perf_counter()"', names), false)

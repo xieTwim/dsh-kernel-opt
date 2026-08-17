@@ -72,10 +72,16 @@ export const DEFAULT_PROJECTION: ProjectionConfig = {
   profileTools: ['kernel_profile'],
   // Profilers only: a correctness checker or a device monitor answers a
   // different question than "why is this slow", and would dilute the mark.
+  // `sample` is macOS's built-in sampling profiler (`/usr/bin/sample`), the
+  // local analogue of `perf` — a run really did profile with it, find its
+  // hot path in `__psynch_cvwait`, and act on that, while the panel counted
+  // zero ▲. The word is generic, but the matcher only looks at a segment's
+  // EXECUTABLE token and requires an argument, so `python sample.py` and a
+  // bare mention both stay out.
   profileCommands: [
     'ncu', 'nv-nsight-cu-cli', 'nsys', 'nvprof',
     'rocprof', 'rocprofv2', 'rocprofv3', 'omniperf',
-    'vtune', 'perf', 'xctrace', 'instruments',
+    'vtune', 'perf', 'xctrace', 'instruments', 'sample',
   ],
   finalizeTools: ['run_finalize', 'kernel_finalize'],
   planTool: 'kernel_plan',
