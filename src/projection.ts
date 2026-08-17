@@ -121,9 +121,9 @@ const HANDOFF = '--'
 /**
  * Programs that only read text back. A contract line in their output was
  * printed by an evaluation that already happened somewhere else, so collecting
- * it would invent a second point for one measurement — the phantom the README
- * warns about, observed for real when a run grepped its own bench log and put
- * three points on an otherwise empty chart.
+ * it would invent a second point for one measurement — the phantom
+ * `docs/limits.md` warns about, observed for real when a run grepped its own
+ * bench log and put three points on an otherwise empty chart.
  */
 const READER_COMMANDS = new Set([
   'cat', 'grep', 'egrep', 'fgrep', 'rg', 'head', 'tail', 'less', 'more',

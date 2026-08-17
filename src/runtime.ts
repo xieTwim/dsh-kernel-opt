@@ -4,7 +4,7 @@
  *
  * The model-facing tools moved to the AGENT plane (they belong to the
  * 「算子优化模式」 preset, not to every session in the deployment), but their
- * behaviour is still governed by the ONE plugin config block the README
+ * behaviour is still governed by the ONE plugin config block `docs/config.md`
  * documents — `shellTools`, `jobTools`, `replay`, and the rest. Handing that
  * across as a service is what keeps it one config surface: a preset row that
  * had to restate `benchTools` would be a second place to forget.
