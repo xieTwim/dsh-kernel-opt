@@ -10,10 +10,10 @@
  * supervisor failure degrades to "no advice", never a stalled loop.
  * @module
  */
-import type { WireIteration, WireSeries } from './wire.ts'
+import type { RunLanguage, WireIteration, WireSeries } from './wire.ts'
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CHALLENGE_LINE, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
-  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, referenceDrift,
+  REVIEW_HEADER, REVIEW_OK_LINE, WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, inWrapUpPhase, referenceDrift,
 } from './wire.ts'
 
 /** Per-session loop control state (in-memory; the loop is a live-run aid). */
@@ -33,7 +33,9 @@ export interface LoopState {
   /** Whether the supervisor reviews at continuation points. */
   supervise: boolean
   /** Session-level supervisor route override (wins over plugin config). */
-  supervisorOverride?: { provider: string; model: string }
+  supervisorOverride?: { provider: string; model: string; reasoningEffort?: string }
+  /** User-facing output language frozen when the panel armed this run. */
+  outputLanguage?: RunLanguage
   /** Last supervisor advice delivered (panel display). */
   lastAdvice?: string
   /**
@@ -50,9 +52,34 @@ export function initialLoopState(): LoopState {
   return { armed: false, budget: 0, round: 0, lastEvalCount: 0, noProgressRounds: 0, supervise: false }
 }
 
-/** Completed (non-pending) evaluations in a projected series. */
+/**
+ * Completed optimization evaluations in a projected series. Final
+ * verification and plugin replay remain in the record but do not consume the
+ * optimization budget, including when a stopped run is armed again.
+ */
 export function completedEvals(series: WireSeries): number {
-  return series.iterations.filter(p => p.pending !== true).length
+  return series.iterations.filter(p => p.pending !== true
+    && p.channel !== 'replay'
+    && !inWrapUpPhase(series.rounds, p.seq)).length
+}
+
+/** Human-readable language name used in model instructions. */
+export function runLanguageName(language: RunLanguage): string {
+  return language === 'zh' ? 'Chinese' : 'English'
+}
+
+/**
+ * Freeze the language of model-authored run records and replies. The
+ * directive rides the logged follow-up message, so replay reconstructs the
+ * same model-visible input even if the browser locale later changes.
+ * @param text - loop message carrying the action for the agent.
+ * @param language - language selected when the run was armed.
+ * @returns the message with its run-language requirement.
+ */
+export function withRunLanguage(text: string, language?: RunLanguage): string {
+  if (language === undefined) return text
+  return `${text}\n\nRUN LANGUAGE: Write every user-facing reply and every kernel_plan/kernel_env text field in ${runLanguageName(language)}. `
+    + 'Keep code, commands, identifiers, and protocol markers unchanged.'
 }
 
 /**

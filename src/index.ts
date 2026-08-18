@@ -44,12 +44,13 @@ import type { LoopOps } from './runtime.ts'
 import {
   HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, completedEvals,
   continuationText, decideContinuation, finalAuditText, initialLoopState, planStale,
-  reviewable, stagnationCount, supervisorDigest, supervisorSystem, unreviewedEvals, wrapUpText,
+  reviewable, runLanguageName, stagnationCount, supervisorDigest, supervisorSystem,
+  unreviewedEvals, withRunLanguage, wrapUpText,
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { syncPreset } from './preset.ts'
 import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH } from './wire.ts'
-import type { WireControl, WireModels, WireSeries } from './wire.ts'
+import type { RunLanguage, WireControl, WireModelInfo, WireModels, WireSeries } from './wire.ts'
 
 export const name = 'kernel-opt'
 export const inject = ['agents', 'sessions']
@@ -153,6 +154,8 @@ export interface Config {
     provider: string
     /** Model id on that provider. */
     model: string
+    /** Adapter-owned reasoning effort id; absent uses the model/provider default. */
+    reasoningEffort?: string
     temperature?: number
     /**
      * Output budget per review (default 16000). Sized for THINKING, not for
@@ -275,10 +278,17 @@ export function apply(ctx: Context, config: Config = {}): void {
    */
   const effectiveSupervisor = (
     state: LoopState | undefined,
-  ): { provider: string; model: string; source: 'session' | 'config' } | undefined => {
+  ): { provider: string; model: string; reasoningEffort?: string; source: 'session' | 'config' } | undefined => {
     if (state?.supervisorOverride !== undefined) return { ...state.supervisorOverride, source: 'session' }
     if (config.supervisor !== undefined) {
-      return { provider: config.supervisor.provider, model: config.supervisor.model, source: 'config' }
+      return {
+        provider: config.supervisor.provider,
+        model: config.supervisor.model,
+        ...(config.supervisor.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: config.supervisor.reasoningEffort }),
+        source: 'config',
+      }
     }
     return undefined
   }
@@ -319,6 +329,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         round: state?.round ?? 0,
         budget: state?.budget ?? 0,
         supervise: state?.supervise ?? false,
+        ...(state?.outputLanguage !== undefined ? { outputLanguage: state.outputLanguage } : {}),
         ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
         ...(supervisor !== undefined ? { supervisor } : {}),
       }
@@ -392,7 +403,11 @@ export function apply(ctx: Context, config: Config = {}): void {
             system: supervisorSystem(
               mode === 'headroom' ? HEADROOM_SYSTEM : SUPERVISOR_SYSTEM,
               {
-                ...(config.supervisor?.language !== undefined ? { language: config.supervisor.language } : {}),
+                ...(state.outputLanguage !== undefined
+                  ? { language: runLanguageName(state.outputLanguage) }
+                  : config.supervisor?.language !== undefined
+                    ? { language: config.supervisor.language }
+                    : {}),
                 ...(config.supervisor?.instructions !== undefined ? { instructions: config.supervisor.instructions } : {}),
               },
             ),
@@ -403,7 +418,11 @@ export function apply(ctx: Context, config: Config = {}): void {
             // Sampling knobs stay config-owned: an override picks the route,
             // not the review discipline.
             ...(config.supervisor?.temperature !== undefined ? { temperature: config.supervisor.temperature } : {}),
-            ...(thinking ? {} : { reasoningEffort: ReasoningEffortId('off') }),
+            ...(thinking
+              ? supervisor.reasoningEffort === undefined
+                ? {}
+                : { reasoningEffort: ReasoningEffortId(supervisor.reasoningEffort) }
+              : { reasoningEffort: ReasoningEffortId('off') }),
             maxTokens: config.supervisor?.maxTokens ?? 16_000,
             signal: AbortSignal.timeout(thinking ? 120_000 : 45_000),
           })
@@ -414,7 +433,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           return { reply, ...(finish !== undefined ? { finish } : {}) }
         }
         let { reply, finish } = await ask(true)
-        if (reply.trim().length === 0 && finish === 'max-tokens') {
+        if (reply.trim().length === 0 && finish === 'max-tokens' && supervisor.reasoningEffort !== 'off') {
           // Reasoning spends the same output budget as the answer, so a
           // reviewer can think until the cap and never speak — measured at
           // 4000 tokens on a 15-row digest. Raising the cap alone only moves
@@ -486,7 +505,10 @@ export function apply(ctx: Context, config: Config = {}): void {
             agent.followup(createUserMessage({
               content: [{
                 type: 'text',
-                text: challengeText(state.round, decision.evalsDone, state.budget, advice, finalizeHint, evalsPerTurn),
+                text: withRunLanguage(
+                  challengeText(state.round, decision.evalsDone, state.budget, advice, finalizeHint, evalsPerTurn),
+                  state.outputLanguage,
+                ),
               }],
               source: { kind: 'plugin', plugin: PLUGIN_ID },
             }))
@@ -499,7 +521,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           state.stopReason = challengeable && reviewed ? 'converged' : decision.reason
           if (reviewed) {
             agent.followup(createUserMessage({
-              content: [{ type: 'text', text: finalAuditText(advice, note) }],
+              content: [{ type: 'text', text: withRunLanguage(finalAuditText(advice, note), state.outputLanguage) }],
               source: { kind: 'plugin', plugin: PLUGIN_ID },
             }))
           }
@@ -528,8 +550,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         agent.followup(createUserMessage({
           content: [{
             type: 'text',
-            text: wrapUpText(decision.evalsDone, state.budget, decision.reason, finalizeHint,
-              advice, reviewed && advice === null, note),
+            text: withRunLanguage(
+              wrapUpText(decision.evalsDone, state.budget, decision.reason, finalizeHint,
+                advice, reviewed && advice === null, note),
+              state.outputLanguage,
+            ),
           }],
           source: { kind: 'plugin', plugin: PLUGIN_ID },
         }))
@@ -558,11 +583,14 @@ export function apply(ctx: Context, config: Config = {}): void {
       agent.followup(createUserMessage({
         content: [{
           type: 'text',
-          text: continuationText(
-            state.round, decision.evalsDone, state.budget, advice,
-            reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
-            series.plans.length > 0, evalsPerTurn, note, planStale(series, evalsPerTurn),
-            series.envs.length > 0,
+          text: withRunLanguage(
+            continuationText(
+              state.round, decision.evalsDone, state.budget, advice,
+              reviewed && advice === null, stagnationCount(series), finalizeHint, taskKnown,
+              series.plans.length > 0, evalsPerTurn, note, planStale(series, evalsPerTurn),
+              series.envs.length > 0,
+            ),
+            state.outputLanguage,
           ),
         }],
         source: { kind: 'plugin', plugin: PLUGIN_ID },
@@ -578,7 +606,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
 
     /** Arm (or re-arm) the loop for a session; shared by /kloop and the control route. */
-    const armLoop = (sessionId: string, budget: number): void => {
+    const armLoop = (sessionId: string, budget: number, outputLanguage?: RunLanguage): void => {
       const state = stateFor(sessionId)
       state.armed = true
       state.budget = budget
@@ -586,6 +614,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       state.lastEvalCount = 0
       state.noProgressRounds = 0
       delete state.stopReason
+      if (outputLanguage === undefined) delete state.outputLanguage
+      else state.outputLanguage = outputLanguage
       // A re-arm re-opens the question: an earlier run's finalize may be
       // challenged again under the new budget.
       delete state.challengedFinalizeSeq
@@ -647,21 +677,32 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.inject(['webServer'], (wctx) => {
     const buildControl = (sessionId: string, series: WireSeries): WireControl => {
       const state = loops.get(sessionId)
+      const evalsDone = completedEvals(series)
       return {
         loop: {
           armed: state?.armed ?? false,
           budget: state?.budget ?? 0,
           round: state?.round ?? 0,
-          evalsDone: completedEvals(series),
+          evalsDone,
+          evalsOverBudget: state !== undefined && state.budget > 0
+            ? Math.max(0, evalsDone - state.budget)
+            : 0,
           available: loopOps.arm !== undefined,
           defaultBudget,
+          ...(state?.outputLanguage !== undefined ? { outputLanguage: state.outputLanguage } : {}),
           ...(state?.stopReason !== undefined ? { stopReason: state.stopReason } : {}),
         },
         supervisor: {
           enabled: state?.supervise ?? false,
           configured: effectiveSupervisor(state) !== undefined,
           ...(config.supervisor !== undefined
-            ? { configRoute: { provider: config.supervisor.provider, model: config.supervisor.model } }
+            ? { configRoute: {
+                provider: config.supervisor.provider,
+                model: config.supervisor.model,
+                ...(config.supervisor.reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: config.supervisor.reasoningEffort }),
+              } }
             : {}),
           ...((): { effective?: WireControl['supervisor']['effective'] } => {
             const effective = effectiveSupervisor(state)
@@ -755,7 +796,12 @@ export function apply(ctx: Context, config: Config = {}): void {
               const budget = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 9999
                 ? raw
                 : defaultBudget
-              arm(sessionId, budget)
+              const rawLanguage = body['outputLanguage']
+              if (rawLanguage !== undefined && rawLanguage !== 'zh' && rawLanguage !== 'en') {
+                respond(400, { error: 'outputLanguage must be zh or en' })
+                return
+              }
+              arm(sessionId, budget, rawLanguage as RunLanguage | undefined)
             } else if (action === 'loop-stop') {
               stopLoop(sessionId)
             } else if (action === 'supervise-on') {
@@ -766,14 +812,25 @@ export function apply(ctx: Context, config: Config = {}): void {
               const state = stateFor(sessionId)
               const provider = typeof body['provider'] === 'string' ? body['provider'].trim() : ''
               const model = typeof body['model'] === 'string' ? body['model'].trim() : ''
+              const reasoningEffort = typeof body['reasoningEffort'] === 'string'
+                ? body['reasoningEffort'].trim()
+                : ''
               if (provider === '' && model === '') {
                 // Both empty = follow config again.
+                if (reasoningEffort !== '') {
+                  respond(400, { error: 'reasoningEffort needs an explicit provider and model' })
+                  return
+                }
                 delete state.supervisorOverride
               } else if (provider === '' || model === '') {
                 respond(400, { error: 'provider and model must both be given (or both empty to follow config)' })
                 return
               } else {
-                state.supervisorOverride = { provider, model }
+                state.supervisorOverride = {
+                  provider,
+                  model,
+                  ...(reasoningEffort === '' ? {} : { reasoningEffort }),
+                }
               }
             } else {
               respond(400, { error: `unknown action: ${action}` })
@@ -812,6 +869,35 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
         void (async () => {
           try {
+            const url = new URL(req.url ?? '/', 'http://dsh.internal')
+            const provider = url.searchParams.get('provider')?.trim() ?? ''
+            const model = url.searchParams.get('model')?.trim() ?? ''
+            if (provider !== '' || model !== '') {
+              if (provider === '' || model === '') {
+                respond(400, { error: 'provider and model query parameters must both be given' })
+                return
+              }
+              const resolved = await mctx.llm.resolveModelInfo(provider, model)
+              const info: WireModelInfo = {
+                provider: resolved.provider,
+                id: resolved.id,
+                name: resolved.name,
+                ...(resolved.reasoning === undefined
+                  ? {}
+                  : { reasoning: {
+                      efforts: resolved.reasoning.efforts.map(effort => ({
+                        id: effort.id,
+                        name: effort.name,
+                        ...(effort.description === undefined ? {} : { description: effort.description }),
+                      })),
+                      ...(resolved.reasoning.defaultEffort === undefined
+                        ? {}
+                        : { defaultEffort: resolved.reasoning.defaultEffort }),
+                    } }),
+              }
+              respond(200, info)
+              return
+            }
             const catalog: WireModels = { providers: [] }
             for (const provider of mctx.llm.listProviders().slice(0, 20)) {
               let models: { id: string; name: string }[] = []

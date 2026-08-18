@@ -11,7 +11,7 @@ import {
 } from '../src/projection.ts'
 import type { ProjectionEvent } from '../src/projection.ts'
 import { challengeText, continuationText, finalAuditText, wrapUpText } from '../src/loop.ts'
-import { inWrapUpPhase, latestRunStart, referenceDrift, unfinishedRun } from '../src/wire.ts'
+import { evaluationPhases, inWrapUpPhase, latestRunStart, referenceDrift, unfinishedRun } from '../src/wire.ts'
 import type { WireIteration, WireRound } from '../src/wire.ts'
 
 let seq = 0
@@ -727,6 +727,23 @@ test('inWrapUpPhase: evaluations after the wrap-up delivery are wrap-up phase', 
   const audited: WireRound[] = [r(1, 10), { seq: 70, audit: true }]
   assert.equal(inWrapUpPhase(audited, 75), true)
   assert.equal(inWrapUpPhase(audited, 60), false)
+})
+
+test('evaluationPhases: budget overshoot and wrap-up validation remain separate records', () => {
+  const iteration = (at: number, channel?: 'replay'): WireIteration => ({
+    seq: at,
+    tool: 'bash',
+    latencyMs: 1,
+    correct: true,
+    ...(channel === undefined ? {} : { channel }),
+  })
+  const rounds: WireRound[] = [{ seq: 10, round: 1 }, { seq: 50, wrapUp: true }]
+  assert.deepEqual(
+    evaluationPhases([
+      iteration(20), iteration(30), iteration(40), iteration(60), iteration(70, 'replay'),
+    ], rounds, 2),
+    ['optimization', 'optimization', 'over-budget', 'wrap-up', 'wrap-up'],
+  )
 })
 
 test('background-job trailers are collected, with the launching command as provenance', () => {

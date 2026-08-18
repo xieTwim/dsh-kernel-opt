@@ -176,6 +176,10 @@ export interface WireControl {
     round: number
     /** Completed evaluations at last projection. */
     evalsDone: number
+    /** Completed optimization evaluations beyond the armed budget. */
+    evalsOverBudget: number
+    /** Output language frozen when this loop run was armed from the panel. */
+    outputLanguage?: RunLanguage
     /** Why the loop disarmed, when it did. */
     stopReason?: string
     /** Whether the loop machinery is composed (commands/llm present). */
@@ -193,11 +197,13 @@ export interface WireControl {
      * picker's "default" option resolves to, shown even while a session
      * override is active.
      */
-    configRoute?: { provider: string; model: string }
+    configRoute?: { provider: string; model: string; reasoningEffort?: string }
     /** The route reviews would use, and where it came from. */
     effective?: {
       provider: string
       model: string
+      /** Explicit review effort, absent when the model/provider default applies. */
+      reasoningEffort?: string
       /** `'session'` = panel/command override for this session; `'config'` = plugin config. */
       source: 'session' | 'config'
     }
@@ -205,6 +211,9 @@ export interface WireControl {
     lastAdvice?: string
   }
 }
+
+/** Languages the Web client can freeze for one optimization run. */
+export type RunLanguage = 'zh' | 'en'
 
 /** Provider/model catalog served for the panel's supervisor picker. */
 export interface WireModels {
@@ -216,6 +225,17 @@ export interface WireModels {
     /** Models on that route; empty when discovery failed or none published. */
     models: { id: string; name: string }[]
   }[]
+}
+
+/** Adapter-owned reasoning choices for one exact supervisor route. */
+export interface WireModelInfo {
+  provider: string
+  id: string
+  name: string
+  reasoning?: {
+    efforts: { id: string; name: string; description?: string }[]
+    defaultEffort?: string
+  }
 }
 
 /** Series payload served at the series route for one session. */
@@ -358,6 +378,31 @@ export function inWrapUpPhase(rounds: readonly WireRound[], seq: number): boolea
   return phase
 }
 
+/** One evaluation row's relationship to the active optimization budget. */
+export type EvaluationPhase = 'optimization' | 'over-budget' | 'wrap-up'
+
+/**
+ * Classify evaluations without pretending turn-boundary overshoot is
+ * budgeted work. Wrap-up/replay rows never consume optimization budget;
+ * among the remaining completed rows, only the first `budget` do.
+ * @param iterations - evaluations in log order.
+ * @param rounds - loop messages that delimit wrap-up phases.
+ * @param budget - latest armed optimization-evaluation budget; zero means unknown.
+ * @returns one phase per evaluation, in input order.
+ */
+export function evaluationPhases(
+  iterations: readonly WireIteration[],
+  rounds: readonly WireRound[],
+  budget: number,
+): EvaluationPhase[] {
+  let completed = 0
+  return iterations.map((point) => {
+    if (point.channel === 'replay' || inWrapUpPhase(rounds, point.seq)) return 'wrap-up'
+    if (point.pending !== true) completed += 1
+    return budget > 0 && completed > budget ? 'over-budget' : 'optimization'
+  })
+}
+
 /**
  * Whether the log shows a loop run that never ended: the last loop message is
  * a continuation (not a wrap-up or closing audit) and nothing was finalized
@@ -390,7 +435,8 @@ export const PRESET_ID = 'kernel-opt'
 export const SERIES_PATH = '/plugins/kernel-opt/series'
 
 /**
- * Control route. POST `{ sessionId, action, budget?, provider?, model? }`
+ * Control route. POST `{ sessionId, action, budget?, outputLanguage?,
+ * provider?, model?, reasoningEffort? }`
  * with action one of `loop-arm` / `loop-stop` / `supervise-on` /
  * `supervise-off` / `supervise-use` (both provider+model set the session
  * override; both empty resets to config). GET `?sessionId=` returns the same

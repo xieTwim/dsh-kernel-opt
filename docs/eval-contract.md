@@ -42,11 +42,11 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 | 契约行 | `自报` | 模型可控的 stdout——每个点展示**产生它的命令行**，一眼可辨 `echo` 出来的假点；监督模型的 digest 里同样带命令行 |
 | finalize 复测 | `复测` | 插件自己重放命令得到——非模型转述 |
 
-**信任链以会话日志完整性为前提。** 它成立靠「写权限限制在 workspace 内 + 日志存放在 workspace 外」这对组合。若把会话 workspace 圈到 `~/.dsh` 或其上层（agent 因而能改写自己的日志），来源／复测的一切结论不再适用。
+**信任链以会话日志完整性为前提。** 它成立靠「写权限限制在 workspace 内 + 日志存放在 workspace 外」这对组合。若把会话 workspace 圈到 `~/.dsh` 或其上层（智能体因而能改写自己的日志），来源／复测的一切结论不再适用。
 
 ## finalize 复测：verify the verdict, not the signal
 
-模型调 `kernel_finalize {artifact_path}` 收尾时，若该 artifact 的最优测量来自自报级，插件在 agent 回合之外把记录过的那条命令**重放一次**，输出附在工具结果里——其中的契约行成为「复测」级最终数字。
+模型调 `kernel_finalize {artifact_path}` 收尾时，若该 artifact 的最优测量来自自报级，插件会在智能体回合之外把记录过的那条命令**重放一次**，输出附在工具结果里——其中的契约行成为「复测」级最终数字。
 
 **轨迹是自报的，最终数字是复测的。** 复测失败或关闭时，面板标注「最终数字未复测」。
 
@@ -83,7 +83,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 ## 一次评测一个点
 
-契约行按 payload 逐字在**整个会话内**去重，因为把同一行再取回来的路子比想象的多——真实一轮里 agent 一边跑后台 job、一边 `modal app logs <app> | grep KERNEL_EVAL` 轮询同一批输出，15 次评测因此变成 20 个点。
+契约行按 payload 逐字在**整个会话内**去重，因为把同一行再取回来的路子比想象的多——真实一轮里，智能体一边跑后台 job，一边用 `modal app logs <app> | grep KERNEL_EVAL` 轮询同一批输出，15 次评测因此变成 20 个点。
 
 同一行若既走过 job 又走过普通 shell，点的来源命令取**启动那次运行的命令**，而不是事后捞日志的命令。
 
@@ -97,4 +97,4 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 但**文档或脚本里整行写出契约、又被真程序打印出来**仍会产生幻影点；引用契约时写在句中即可避免。
 
-自报通道的点由 agent 转述，**可被伪造**——防线是来源命令行明牌 + 监督 + finalize 复测，不是不可伪造性。
+自报通道的点由智能体转述，**可被伪造**——防线是来源命令行明牌 + 监督 + finalize 复测，不是不可伪造性。

@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { DEFAULT_PROJECTION } from './projection.ts'
 import type { ProjectionConfig } from './projection.ts'
 import type { LoopState } from './loop.ts'
+import type { RunLanguage } from './wire.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -43,6 +44,8 @@ export interface ReplaySettings {
 export interface SupervisorRoute {
   provider: string
   model: string
+  /** Explicit reasoning effort, absent when the model/provider default applies. */
+  reasoningEffort?: string
   source: 'session' | 'config'
 }
 
@@ -53,6 +56,7 @@ export interface LoopStatus {
   budget: number
   supervise: boolean
   stopReason?: LoopState['stopReason']
+  outputLanguage?: RunLanguage
   supervisor?: SupervisorRoute
 }
 
@@ -70,13 +74,16 @@ export interface LoopOps {
    * drive it is not composed (`llm`), which is what lets both drivers refuse
    * with the same reason instead of arming a loop nothing advances.
    */
-  arm?: (sessionId: string, budget: number) => void
+  arm?: (sessionId: string, budget: number, outputLanguage?: RunLanguage) => void
   /** Disarm by human decision, cancelling the in-flight turn; false if not armed. */
   stop: (sessionId: string) => boolean
   /** Toggle supervision; returns an error string when no supervisor is configured. */
   setSupervise: (sessionId: string, enabled: boolean) => string | null
   /** Override this session's supervisor route; `undefined` follows plugin config again. */
-  setSupervisorRoute: (sessionId: string, route: { provider: string; model: string } | undefined) => void
+  setSupervisorRoute: (
+    sessionId: string,
+    route: { provider: string; model: string; reasoningEffort?: string } | undefined,
+  ) => void
   /** Current loop/supervisor state for a session (never creates one). */
   status: (sessionId: string) => LoopStatus
 }

@@ -29,7 +29,8 @@
 | `loop.defaultBudget` | `20` | `/kloop` 不带数字时的预算 |
 | `supervisor.provider` | 无 | 监督模型的 provider 路由，见 [`loop.md`](loop.md#监督模型的两层解析) |
 | `supervisor.model` | 无 | 监督模型 |
-| `supervisor.language` | 无 | 复审语言；不写则跟随 Agent |
+| `supervisor.reasoningEffort` | 模型默认值 | 监督模型的思考强度 id；支持值由模型适配器声明，也可在面板中选择 |
+| `supervisor.language` | 无 | 通过命令启动时的复审语言；面板启动会改用本轮固定的输出语言，不写则跟随智能体 |
 | `supervisor.instructions` | 无 | 本项目的加码 rubric，**追加**而非替换 |
 
 ## HTTP 路由
@@ -37,5 +38,5 @@
 | 路由 | 用途 |
 |---|---|
 | `GET …/series?sessionId=` | 即时投影 |
-| `POST …/control` | 驱动与 slash 命令同一份循环／监督状态（含 `supervise-use` 会话级换监督模型） |
-| `GET …/models` | 供面板选择器枚举 provider/model |
+| `POST …/control` | 驱动与 slash 命令同一份循环／监督状态（含本轮输出语言，以及 `supervise-use` 的会话级模型／思考强度覆盖） |
+| `GET …/models` | 枚举 provider/model；带 `provider` 与 `model` 查询参数时返回该模型适配器声明的思考强度 |

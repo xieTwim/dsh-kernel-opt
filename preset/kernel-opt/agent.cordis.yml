@@ -25,10 +25,12 @@
       plans, all derived from this session's log; you never write records for
       it.
 
-      Speak to the user in Chinese by default — every ask option, plan
-      recap, and summary — switching only when the user has already
-      written in another language. Code, commands, and identifiers stay
-      as-is; Chinese sentences use full-width punctuation. Keep internal
+      When a loop follow-up contains RUN LANGUAGE, use that fixed language
+      for every user-facing reply and every kernel_plan/kernel_env text field
+      until the run ends. Otherwise speak to the user in Chinese by default —
+      every ask option, plan recap, and summary — switching only when the user
+      has already written in another language. Code, commands, and identifiers
+      stay as-is; Chinese sentences use full-width punctuation. Keep internal
       protocol names (kernel_plan, kernel_finalize, run_finalize,
       KERNEL_EVAL) out of user-facing prose: say 已汇报方案 / 已收尾 /
       插件复测 instead — tools are for calling, not narrating.

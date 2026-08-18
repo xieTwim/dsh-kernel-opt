@@ -110,6 +110,8 @@ The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.age
 
 Or drive it entirely from the UI: the panel has a loop row and a supervision row, and the composer has a **⟳ start loop** launcher plus a live status strip. Both drive the same state as the slash commands.
 
+The launcher also fixes this run's output language (following the current interface by default) and exposes the supervisor model's adapter-declared reasoning efforts. Evaluation records are split into budgeted optimization work, same-turn budget overshoot, and wrap-up validation, so a `12/12` budget stays `12/12` even when the final turn returns one extra measurement.
+
 After every turn the loop reads the projected run state and decides: finalized → stop; budget spent or two rounds with no new evaluation → post **a wrap-up message first** (restore the best artifact, finalize the honest best, summarize), then disarm; otherwise post a continuation carrying budget progress, a stall count and the supervisor's advice.
 
 **A human stop always beats a machine continuation** — the stop button, `/kloop stop`, and aborting a turn in the composer all disarm immediately, without a wrap-up. Human messages always take priority: if the agent is not idle, the loop skips that round.

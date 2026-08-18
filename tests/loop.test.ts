@@ -3,9 +3,9 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
   HEADROOM_SYSTEM, SUPERVISOR_SYSTEM, adviceFromReply, challengeText, continuationText,
-  decideContinuation, finalAuditText,
+  completedEvals, decideContinuation, finalAuditText,
   initialLoopState, planStale, reviewable, stagnationCount, supervisorDigest,
-  supervisorSystem, unreviewedEvals, wrapUpText,
+  supervisorSystem, unreviewedEvals, withRunLanguage, wrapUpText,
 } from '../src/loop.ts'
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CONTINUE_TRAILER, LOOP_LINE_PREFIX,
@@ -78,6 +78,33 @@ test('decideContinuation: pending evaluations do not count toward budget', () =>
   const decision = decideContinuation(s, state, 2)
   assert.equal(decision.action, 'continue')
   assert.equal(decision.evalsDone, 1)
+})
+
+test('completedEvals: wrap-up validation and replay do not consume the optimization budget', () => {
+  const s = {
+    ...series([
+      done(20, 10),
+      done(40, 8),
+      done(60, 7),
+      { ...done(70, 7), channel: 'replay' as const },
+      done(100, 6),
+    ]),
+    rounds: [
+      { seq: 10, round: 1 },
+      { seq: 50, wrapUp: true },
+      { seq: 90, round: 1 },
+    ],
+  }
+  assert.equal(completedEvals(s), 3)
+})
+
+test('withRunLanguage: records one fixed user-facing language without changing protocol text', () => {
+  assert.equal(withRunLanguage('continue'), 'continue')
+  const chinese = withRunLanguage(`${LOOP_LINE_PREFIX}1]\n${CONTINUE_TRAILER}`, 'zh')
+  assert.ok(chinese.includes('in Chinese'))
+  assert.ok(chinese.includes(LOOP_LINE_PREFIX))
+  assert.ok(chinese.includes(CONTINUE_TRAILER))
+  assert.ok(withRunLanguage('wrap up', 'en').includes('in English'))
 })
 
 test('reviewable: false only while the log carries no evaluations and no plans', () => {
