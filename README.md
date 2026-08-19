@@ -36,7 +36,7 @@
 
 **dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
 
-The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, markers for what was profiled (▲), the best result so far (★) and the one it finalized on (⚑), the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment — DSH's native steering. When the model changes tack, it can compact its own context and keep going (`self_compact`).
+The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, markers for what was profiled (▲), the best result so far (★) and the one it finalized on (⚑), the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment, the same way you steer any DSH session. When the model changes tack, it can compact its own context and keep going.
 
 Everything on the panel is **projected from the session log** — nothing it shows is stored anywhere else, so a replayed session renders exactly like the live one.
 
@@ -72,7 +72,7 @@ dsh --profile web --dump-config | grep kernel-opt   # the plugin should be liste
 ## Quick Start
 
 1. **Install the plugin** and restart `dsh web`.
-2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness + median timing + fresh inputs + a mutation sentinel, with the reference timed once and frozen). It runs on Python + PyTorch and needs a CUDA GPU on whatever machine executes the benchmark.
+2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness, median timing, new input values per trial, and a check that catches a kernel replaying a cached answer, with the reference timed once and frozen). It runs on Python + PyTorch and needs a CUDA GPU on whatever machine executes the benchmark.
 3. **Start a session in Kernel-Opt mode** and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
 4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
 
@@ -105,15 +105,15 @@ Every point carries where it came from, and the panel says so in the open: a sel
 /supervise use deepseek-official/deepseek-v4-flash   # pick a reviewer for this session
 ```
 
-Or drive it entirely from the UI: the panel has a loop row and a supervision row, and the composer has a **⟳ start loop** launcher plus a live status strip. Both drive the same state as the slash commands.
+Or drive it entirely from the UI: start, stop and configure the loop from the panel, or from the launcher next to the message box, which also shows the round and budget while it runs. Both drive the same state as the commands.
 
-The launcher also fixes this run's output language (following the current interface by default) and exposes the supervisor model's adapter-declared reasoning efforts. Evaluation records are split into budgeted optimization work, same-turn budget overshoot, and wrap-up validation, so a `12/12` budget stays `12/12` even when the final turn returns one extra measurement.
+Starting a run also pins the language it reports in and picks the reviewer's reasoning effort from whatever that model supports. The budget counts optimization work only — a wrap-up measurement, or one extra evaluation the model squeezed into the same turn, is kept and shown separately rather than charged to it.
 
-After every turn the loop reads the projected run state and decides: finalized → stop; budget spent or two rounds with no new evaluation → post **a wrap-up message first** (restore the best artifact, finalize the honest best, summarize), then disarm; otherwise post a continuation carrying budget progress, a stall count and the supervisor's advice.
+After each turn the loop checks where the run stands. Once the model has finalized, it stops. When the budget runs out — or two rounds pass with no new evaluation — it asks for **a wrap-up first** (put the best version back, finalize on it, summarize) and only then stops. Otherwise it nudges the model onward, passing along how much budget is left, how long it has been stuck, and what the reviewer said.
 
-**A human stop always beats a machine continuation** — the stop button, `/kloop stop`, and aborting a turn in the composer all disarm immediately, without a wrap-up. Human messages always take priority: if the agent is not idle, the loop skips that round.
+**A human stop always beats an automatic continuation** — the stop button, `/kloop stop`, and aborting a turn all stop the loop immediately, with no wrap-up. Anything you type takes precedence over anything the loop would have sent.
 
-**Supervision** hands a second model the run's *digest* — budget discipline, correctness-first, method diversity, whether the plan matches the diffs, whether anything was profiled, whether each self-reported point's command line looks like a real evaluation. It does not review the kernel line by line. **Silence is not approval**: a failed, timed-out or empty review leaves that round with no review at all, and never blocks the loop.
+**Supervision** hands a second model a summary of the run — the budget, the plans, the evaluation table, and **the edits behind the recent rows**. It judges how the run is being conducted: correctness before speed, budget discipline, whether it has tried more than one family of ideas, whether anything was profiled, whether each self-reported point's command line looks like a real evaluation, and whether the diffs match the plan that claimed them. It reads the changes, not the whole kernel — measuring the kernel is the evaluator's job. **Silence is not approval**: a failed, timed-out or empty review leaves that round with no review at all, and never blocks the loop.
 
 → [`docs/loop.md`](docs/loop.md)
 
@@ -124,11 +124,11 @@ Written in Chinese.
 | Doc | What's in it |
 |---|---|
 | [`docs/eval-contract.md`](docs/eval-contract.md) | The contract in full: both channels, every field, the trust levels, the finalize re-run, the pooled-reference denominator, the de-duplication rules |
-| [`docs/mode.md`](docs/mode.md) | Kernel-Opt mode: the persona, the four tools, what the panel shows, the built-in evaluator, how the installed files are tracked |
-| [`docs/loop.md`](docs/loop.md) | The loop and supervision: how a round is decided, starting from an empty session, the two-layer supervisor resolution, the limits of the rubric |
-| [`docs/config.md`](docs/config.md) | Every config key, and the HTTP routes |
+| [`docs/mode.md`](docs/mode.md) | Kernel-Opt mode: what it tells the model to do, what it adds to the session, what the panel shows, the built-in evaluator, and what it installs |
+| [`docs/loop.md`](docs/loop.md) | The loop and supervision: how each round is decided, starting from an empty session, how the reviewer model is chosen, and what its review can and cannot catch |
+| [`docs/config.md`](docs/config.md) | Every config key, and the HTTP API |
 | [`docs/limits.md`](docs/limits.md) | Known limits — ordered by how badly each one can make you misread the panel |
-| [`docs/development.md`](docs/development.md) | Development, the two registration planes, the compatibility baseline and semver, CI |
+| [`docs/development.md`](docs/development.md) | Development, how the plugin registers itself, the supported host versions and semver, CI |
 
 ## Compatibility
 
