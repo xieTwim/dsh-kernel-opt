@@ -1,5 +1,5 @@
 <h1 align="center">dsh-kernel-opt</h1>
-<p align="center"><b>Watch a model optimize a kernel — live, inside DeepSeek Harness</b></p>
+<p align="center"><b>A DeepSeek Harness plugin for watching and steering a kernel-optimization run</b></p>
 <p align="center"><a href="README.md">简体中文</a> | English</p>
 
 <p align="center">
@@ -12,9 +12,9 @@
 <p align="center"><b>If you find this useful, please consider giving us a star 🌟</b></p>
 
 <p align="center">
-  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run on one NVIDIA B200: run controls with supervision switched on, above a speedup curve climbing from x1.00 to x22.1 over 12 optimization evaluations, three failed attempts drawn below the axis, the best point starred and finalized, and a note that the loop stopped because the reviewer confirmed no headroom was left." />
+  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run on one NVIDIA B200: run controls with supervision switched on, above a speedup curve rising from x1.00 to x22.1 over 12 optimization evaluations, three failed evaluations drawn below the axis, the best point starred and finalized, and a note that the loop stopped because the reviewer confirmed no headroom was left." />
   <br/>
-  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200 — 12 evaluations from ×1.00 to ×22.1 against a reference frozen at 1.0400 ms, three failures shown rather than hidden, and a final number the plugin re-measured itself: 47.3 µs against the 47.1 µs the run had reported.</i>
+  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200. 12 evaluations, ×1.00 to ×22.1, every one dividing by the same reference latency frozen at 1.0400 ms. Three failed evaluations are on the chart too. The last point is the plugin re-running the recorded command itself: 47.3 µs, against the 47.1 µs the run reported.</i>
 </p>
 
 ## News
@@ -39,9 +39,9 @@
 
 The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, markers for what was profiled (▲), the best result so far (★) and the one it finalized on (⚑), the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment, the same way you steer any DSH session. When the model changes tack, it can compact its own context and keep going.
 
-Everything on the panel is **projected from the session log** — nothing it shows is stored anywhere else, so a replayed session renders exactly like the live one.
+Everything on the panel is **projected from the session log**; the plugin keeps no second copy, so a replayed session renders exactly like the live one.
 
-**The GPU is wherever your benchmark command runs** — this machine, a container, a job submitted to a cluster. The plugin does not care and does not need one.
+**The GPU is wherever your benchmark command runs** — this machine, a container, a job submitted to a cluster. The plugin itself does not need one.
 
 ## Install
 
@@ -77,13 +77,13 @@ dsh --profile web --dump-config | grep kernel-opt   # the plugin should be liste
 3. **Start a session in Kernel-Opt mode** — it appears in the mode picker as 「算子优化模式」 — and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
 4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
 
-The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and brings up to date on each start — it leaves files you have edited alone, and `preset.install: false` turns the whole thing off. Everything the plugin adds, its tools and its commands, exists **only in that mode**, so your other sessions are untouched.
+The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and brings up to date on each start — it leaves files you have edited alone, and `preset.install: false` turns the whole thing off. Everything the plugin adds, its tools and its commands, exists **only in that mode**; other sessions do not load them.
 
 → [`docs/mode.md`](docs/mode.md)
 
 ## Bring Your Own Benchmark
 
-**The panel does not know, and does not adapt to, any benchmark.** Your own script, an off-the-shelf evaluator, a job on a remote box — it becomes a point on the curve as soon as it prints one line to stdout:
+**The panel assumes nothing about how you benchmark.** Your own script, an off-the-shelf evaluator, a job on a remote box — it becomes a point on the curve as soon as it prints one line to stdout:
 
 ```
 KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
