@@ -23,9 +23,9 @@
 **Table of Contents**
 
 - [What is dsh-kernel-opt?](#what-is-dsh-kernel-opt)
-- [The Evaluation Contract](#the-evaluation-contract)
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Bring Your Own Benchmark](#bring-your-own-benchmark)
 - [The Loop](#the-loop)
 - [Documentation](#documentation)
 - [Compatibility](#compatibility)
@@ -41,30 +41,6 @@ The model iterates — read, edit, benchmark, repeat — and an **evaluation tab
 Everything on the panel is **projected from the session log** — the plugin keeps no state of its own, so a replayed session renders exactly like the live one.
 
 **The GPU is wherever your benchmark command runs** — this machine, a container, a job submitted to a cluster. The plugin does not care and does not need one.
-
-## The Evaluation Contract
-
-**The panel does not know, and does not adapt to, any benchmark.** Any evaluation pipeline — your own script, an off-the-shelf evaluator, a remote runner — becomes a point on the curve as soon as its result reaches the session log in one of two shapes:
-
-**① A contract line.** Your script prints one line to stdout when it finishes:
-
-```
-KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
-```
-
-**② A tool result.** An evaluator that exists as a tool (MCP or registered) — the same JSON fields inside its result text go straight in.
-
-The two channels can be mixed. What separates them is **trust level, and the panel labels it in the open**:
-
-| Source | How the panel labels it | Why you can (or can't) trust it |
-|---|---|---|
-| Tool result | `tool` | Produced by a tool — the model cannot forge it |
-| Contract line | `agent-measured`, next to the command line that produced it | Model-controlled stdout — an `echo`-ed fake is visible at a glance |
-| Finalize re-run | `replayed` | The plugin replayed the command itself, outside the agent's turn |
-
-That last row is the point: when the model calls `kernel_finalize`, the plugin **re-runs the recorded command once, on its own**. The trajectory is self-reported; **the final number is re-measured.**
-
-→ Full field list, the pooled-reference denominator (and why a missing one costs you the whole run's comparability), and the de-duplication rules: [`docs/eval-contract.md`](docs/eval-contract.md)
 
 ## Install
 
@@ -96,6 +72,20 @@ dsh --profile web --dump-config | grep kernel-opt   # a bundle layer should appe
 The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and keeps in step with itself on every start. Its persona is the single source of the protocol, and the four tools and two commands exist **only in that mode** — an unrelated session pays nothing for them (3897 B of tool descriptions per turn, measured).
 
 → [`docs/mode.md`](docs/mode.md)
+
+## Bring Your Own Benchmark
+
+**The panel does not know, and does not adapt to, any benchmark.** Your own script, an off-the-shelf evaluator, a job on a remote box — it becomes a point on the curve as soon as it prints one line to stdout:
+
+```
+KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
+```
+
+An evaluator that exists as a **tool** (MCP or registered) needs no line at all — the same fields inside its result text go straight in.
+
+Every point carries where it came from, and the panel says so in the open: a self-reported point always displays the command that produced it, and when the model finalizes, the plugin **re-runs that command itself**. The trajectory is self-reported; the final number is re-measured.
+
+→ Every field, the trust levels, the pooled-reference denominator (and why a missing one costs the whole run's comparability), and the de-duplication rules: [`docs/eval-contract.md`](docs/eval-contract.md)
 
 ## The Loop
 
