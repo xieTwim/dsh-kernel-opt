@@ -1,146 +1,144 @@
 <h1 align="center">dsh-kernel-opt</h1>
-<p align="center"><b>Watch a model optimize a kernel — live, inside DeepSeek Harness</b></p>
+<p align="center"><b>在 DeepSeek Harness 里，实时看着模型把一个算子调快</b></p>
+<p align="center">简体中文 | <a href="README.en.md">English</a></p>
 
 <p align="center">
   <a href="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml"><img src="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml/badge.svg" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DSH-0.1.0--rc.6-blue?logo=github" alt="DSH 0.1.0-rc.6"></a>
-  <img src="https://img.shields.io/badge/docs-%E4%B8%AD%E6%96%87-lightgrey" alt="Docs in Chinese">
 </p>
 
-<p align="center"><b>If you find this useful, please consider giving us a star 🌟</b></p>
+<p align="center"><b>觉得有用的话，欢迎点个 star 🌟</b></p>
 
 <p align="center">
-  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run on one NVIDIA B200: run controls with supervision switched on, above a speedup curve climbing from x1.00 to x22.1 over 12 optimization evaluations, three failed attempts drawn below the axis, the best point starred and finalized, and a note that the loop stopped because the reviewer confirmed no headroom was left." />
+  <img src="assets/panel.png" width="820" alt="一轮跑完的「评测」页签，硬件是单卡 NVIDIA B200：上方是打开了监督的运行控制，下方的加速比曲线在 12 次优化评测里从 ×1.00 爬到 ×22.1，三次失败画在坐标轴下方，最优点带着 ★ 与 ⚑，运行控制那一行写着循环因监督确认无余量而收尾。" />
   <br/>
-  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200 — 12 evaluations from ×1.00 to ×22.1 against a reference frozen at 1.0400 ms, three failures shown rather than hidden, and a final number the plugin re-measured itself: 47.3 µs against the 47.1 µs the run had reported.</i>
+  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16，单卡 NVIDIA B200 —— 12 次评测从 ×1.00 爬到 ×22.1，全程除以冻结在 1.0400 ms 的同一个参考耗时；3 次失败照实画出来，没有藏；最终那个数是插件自己复测的：47.3 µs，对上这轮自报的 47.1 µs。</i>
 </p>
 
 ## News
 
-- 🚀 **[2026.08.17]** **dsh-kernel-opt is released** — the live evaluation panel, an optimization loop that runs to a budget and wraps up on its own, and optional second-model supervision.
+- 🚀 **[2026.08.17]** **dsh-kernel-opt 开源发布** —— 实时评测面板、跑到预算就自己收尾的优化循环，以及可选的第二模型监督。
 
-**Table of Contents**
+**目录**
 
-- [What is dsh-kernel-opt?](#what-is-dsh-kernel-opt)
-- [Install](#install)
-- [Quick Start](#quick-start)
-- [Bring Your Own Benchmark](#bring-your-own-benchmark)
-- [The Loop](#the-loop)
-- [Documentation](#documentation)
-- [Compatibility](#compatibility)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
+- [这是什么](#这是什么)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [接入你自己的评测](#接入你自己的评测)
+- [循环](#循环)
+- [文档](#文档)
+- [兼容性](#兼容性)
+- [许可](#许可)
+- [致谢](#致谢)
 
-## What is dsh-kernel-opt?
+## 这是什么
 
-**dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
+**dsh-kernel-opt 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的插件，把一次漫长的算子优化过程，变成人看得见、也随时插得上手的东西。**
 
-The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, markers for what was profiled (▲), the best result so far (★) and the one it finalized on (⚑), the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment, the same way you steer any DSH session. When the model changes tack, it can compact its own context and keep going.
+模型在那儿一轮轮地读、改、测，同一个会话里多出一个**「评测」页签**，实时显示：加速比曲线（越高越快）、每个点的正确性与 reward hack 状态、**每个数从哪来、能信到什么程度**、profile ▲ ／当前最优 ★ ／收尾 ⚑ 三种标记、模型当前的方案，以及监督模型的意见。任何时候都能打字插话改方向，和你平时用 DSH 一样。模型换思路时，它能自己压掉上下文接着跑。
 
-Everything on the panel is **projected from the session log** — nothing it shows is stored anywhere else, so a replayed session renders exactly like the live one.
+面板上的一切都是**从会话日志投影出来的**——它显示的东西没有一样另存在别处，所以回放一个会话，画面和当时实时看到的一模一样。
 
-**The GPU is wherever your benchmark command runs** — this machine, a container, a job submitted to a cluster. The plugin does not care and does not need one.
+**GPU 在哪，取决于你的评测命令在哪跑**——本机、容器、投到集群的作业都行。插件不关心，它自己也不需要 GPU。
 
-## Install
+## 安装
 
-**You need** DeepSeek Harness, and **pnpm on `PATH`** — `dsh plugin` forwards its arguments to pnpm. The panel is part of the DSH **web** UI, so the plugin installs into a web profile.
+**需要** DeepSeek Harness，以及 **`PATH` 里有 pnpm**——`dsh plugin` 是把参数原样转发给 pnpm 的。面板属于 DSH 的 **web** 界面，所以插件要装进 web profile。
 
-The plugin itself has nothing to build: `lib/` is committed, so it installs without a build step.
+插件本身不用编译：`lib/` 是提交进仓库的，装上就能用。
 
 ```sh
-# the repo is public — no credentials needed
+# 仓库是公开的，不需要凭据
 dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt"
 
-# or pin a commit, for a reproducible install
+# 或者钉住某个 commit，安装可复现
 dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt#<commit-sha>"
 
-# or a local checkout, for development
+# 或者装本地 checkout，开发时用
 dsh plugin --profile web add /path/to/dsh-kernel-opt
 ```
 
-No `dsh` yet? The same commands work through npx — `npx -p @deepseek-ai/dsh dsh plugin …`, then `npx -p @deepseek-ai/dsh dsh web`.
+还没有 `dsh`？上面的命令走 npx 一样能跑——`npx -p @deepseek-ai/dsh dsh plugin …`，然后 `npx -p @deepseek-ai/dsh dsh web`。
 
-To upgrade, run `add` again with a newer sha.
+升级就是换个新 sha 再 `add` 一次。
 
-Restart `dsh web`, then verify:
+重启 `dsh web`，然后验证：
 
 ```sh
-dsh --profile web --dump-config | grep kernel-opt   # the plugin should be listed
+dsh --profile web --dump-config | grep kernel-opt   # 应该能看到这个插件
 ```
 
-## Quick Start
+## 快速开始
 
-1. **Install the plugin** and restart `dsh web`.
-2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness, median timing, new input values per trial, and a check that catches a kernel replaying a cached answer, with the reference timed once and frozen). It runs on Python + PyTorch and needs a CUDA GPU on whatever machine executes the benchmark.
-3. **Start a session in Kernel-Opt mode** — it appears in the mode picker as 「算子优化模式」 — and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
-4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
+1. **装上插件**，重启 `dsh web`。
+2. **把算子放进工作目录。** 参考实现、输入数据、你自己的评测脚本**都是可选的**，什么形态都行——模型会自己盘点、自己接起来。没有参考实现时，拿到手的那版算子原样成为分母并冻结。连评测脚本都没有时，用**内置评测器**（正确性、中位数计时、每次换新输入值，外加一个抓「重放缓存答案」的检查，参考实现只计时一次然后冻结）。它跑在 Python + PyTorch 上，**评测所在的那台机器**要有 CUDA GPU。
+3. **新建一个「算子优化模式」的会话**，告诉它三件事：算子在哪、怎么评测、你的预算和硬件。或者直接 `/kloop 30` 交给循环。
+4. **打开会话顶部的「评测」页签**——曲线、状态、方案、监督都在那儿。随时打字就能改方向。
 
-The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and brings up to date on each start — it leaves files you have edited alone, and `preset.install: false` turns the whole thing off. Everything the plugin adds, its tools and its commands, exists **only in that mode**, so your other sessions are untouched.
+**「算子优化模式」**是插件写进 `~/.dsh/.agent-presets/kernel-opt/` 的一个 agent preset，每次启动都会让它跟上插件版本——你手动改过的文件它不动，`preset.install: false` 能整个关掉。插件加的那些工具和命令**只存在于这个模式里**，别的会话一点代价都不付。
 
 → [`docs/mode.md`](docs/mode.md)
 
-## Bring Your Own Benchmark
+## 接入你自己的评测
 
-**The panel does not know, and does not adapt to, any benchmark.** Your own script, an off-the-shelf evaluator, a job on a remote box — it becomes a point on the curve as soon as it prints one line to stdout:
+**面板不认识、也不迁就任何一种评测。** 你自己的脚本、现成的评测器、投到远端机器的作业——只要往 stdout 打一行，它就成了曲线上的一个点：
 
 ```
 KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ```
 
-**Required:** `artifact` (which file was measured) and `correct`. **Add `latency_ms`** whenever you measured one. **Optional:** `compiled`, `error`, `native_metrics` (a numeric map), `reward_hack_detected`, `advisory`, `workload_indices`. One evaluation per line, starting at column 1; anything may follow the JSON.
+**必需**：`artifact`（测的是哪个文件）和 `correct`。**测到延迟就带上 `latency_ms`**。**可选**：`compiled`、`error`、`native_metrics`（数值映射）、`reward_hack_detected`、`advisory`、`workload_indices`。一行一个评测，从行首开始，JSON 后面跟别的字符没关系。
 
-An evaluator that exists as a **tool** (MCP or registered) needs no line at all — the same fields inside its result text go straight in. Any tool whose name contains `kernel_evaluate` is collected by default; anything else goes in the `benchTools` config.
+评测器本身就是个**工具**（MCP 或注册工具）的话，连这行都不用打——它结果文本里的同名字段直接进面板。名字里含 `kernel_evaluate` 的工具默认收录，其余的写进 `benchTools` 配置。
 
-Every point carries where it came from, and the panel says so in the open: a self-reported point always displays the command that produced it, and when the model finalizes, the plugin **re-runs that command itself**. The trajectory is self-reported; the final number is re-measured — when it can be. Replay can be switched off, and a recorded command over 300 characters is not replayable; the panel then marks the final number as never re-measured.
+每个点都带着自己的来源，面板明着标出来：自报的点永远显示**产生它的那条命令**；模型收尾时，插件会**自己把那条命令重跑一遍**。**过程是模型自报的，最终那个数是复测出来的**——在能复测的前提下。复测可以关掉，记录下来的命令超过 300 字符也没法复测，这时面板会标明最终数字未经复测。
 
-→ Every field, the trust levels, the pooled-reference denominator (and why a missing one costs the whole run's comparability), and the de-duplication rules: [`docs/eval-contract.md`](docs/eval-contract.md)
+→ 全部字段、信任级、统一分母（以及少了它会赔上整轮的可比性）、去重规则：[`docs/eval-contract.md`](docs/eval-contract.md)
 
-## The Loop
+## 循环
 
 ```sh
-/kloop            # start; default budget 20 evaluations (/kloop 30 to set it)
-/kloop stop       # stop  (/kloop status to inspect)
-/supervise on     # turn on second-model review
-/supervise use deepseek-official/deepseek-v4-flash   # pick a reviewer for this session
+/kloop            # 启动；默认预算 20 次评测（/kloop 30 可指定）
+/kloop stop       # 停止（/kloop status 看状态）
+/supervise on     # 打开第二模型复审
+/supervise use deepseek-official/deepseek-v4-flash   # 为本会话指定复审模型
 ```
 
-Or drive it entirely from the UI: start, stop and configure the loop from the panel, or from the launcher next to the message box, which also shows the round and budget while it runs. Both drive the same state as the commands.
+也可以完全在界面里操作：在面板上、或者在输入框旁边的启动器里开关和配置循环，循环跑起来后那里还会显示轮次与预算进度。两条路驱动的是同一份状态。
 
-Starting a run also pins the language it reports in and picks the reviewer's reasoning effort from whatever that model supports. The budget counts optimization work only — a wrap-up measurement, or one extra evaluation the model squeezed into the same turn, is kept and shown separately rather than charged to it.
+启动一轮时还会钉住这轮的输出语言，并从复审模型**实际支持**的档位里挑思考强度。预算**只算优化评测**——收尾时的验证、以及模型在同一个 turn 里多测出来的那次，都会保留并单独显示，不记在预算头上。
 
-After each turn the loop checks where the run stands. Once the model has finalized, it stops. When the budget runs out — or two rounds pass with no new evaluation — it asks for **a wrap-up first** (put the best version back, finalize on it, summarize) and only then stops. Otherwise it nudges the model onward, passing along how much budget is left, how long it has been stuck, and what the reviewer said.
+每个 turn 结束后，循环看一眼当前进展。模型已经收尾了，就停。预算用完、或者连着两轮没有新评测，就**先要一次收尾**（把最优版本装回去、在它上面 finalize、做个总结），然后才停。其余情况就推模型继续，并把还剩多少预算、卡了多久、复审说了什么一并带过去。
 
-**A human stop always beats an automatic continuation** — the stop button, `/kloop stop`, and aborting a turn all stop the loop immediately, with no wrap-up. Anything you type takes precedence over anything the loop would have sent.
+**人的停止永远压过机器的续跑**——停止按钮、`/kloop stop`、以及中断一个 turn，都会立刻停掉循环，不做收尾。你打的任何字，优先级都高于循环本来要发的东西。
 
-**Supervision** hands a second model a summary of the run — the budget, the plans, the evaluation table, and **the edits behind the recent rows**. It judges how the run is being conducted: correctness before speed, budget discipline, whether it has tried more than one family of ideas, whether anything was profiled, whether each self-reported point's command line looks like a real evaluation, and whether the diffs match the plan that claimed them. It reads the changes, not the whole kernel — measuring the kernel is the evaluator's job. **Silence is not approval**: a failed, timed-out or empty review leaves that round with no review at all, and never blocks the loop.
+**监督**是把一份运行摘要交给第二个模型——预算、方案、评测表，**外加最近几行背后的真实改动**。它判的是这轮**是怎么跑的**：正确性有没有排在速度前面、预算花得合不合理、有没有试过不止一族方法、有没有 profile 过、每个自报点的命令行像不像真在做评测、diff 和它自称的方案对不对得上。**它读改动，不读整份算子**——算子对不对、快不快，那是评测器用实测回答的问题。**沉默不算通过**：复审失败、超时、或者一个字没答，那一轮就不留复审记录，也永远不会卡住循环。
 
 → [`docs/loop.md`](docs/loop.md)
 
-## Documentation
+## 文档
 
-Written in Chinese.
-
-| Doc | What's in it |
+| 文档 | 内容 |
 |---|---|
-| [`docs/eval-contract.md`](docs/eval-contract.md) | The contract in full: both channels, every field, the trust levels, the finalize re-run, the pooled-reference denominator, the de-duplication rules |
-| [`docs/mode.md`](docs/mode.md) | Kernel-Opt mode: what it tells the model to do, what it adds to the session, what the panel shows, the built-in evaluator, and what it installs |
-| [`docs/loop.md`](docs/loop.md) | The loop and supervision: how each round is decided, starting from an empty session, how the reviewer model is chosen, and what its review can and cannot catch |
-| [`docs/config.md`](docs/config.md) | Every config key, and the HTTP API |
-| [`docs/limits.md`](docs/limits.md) | Known limits — ordered by how badly each one can make you misread the panel |
-| [`docs/development.md`](docs/development.md) | Development, how the plugin registers itself, the supported host versions and semver, CI |
+| [`docs/eval-contract.md`](docs/eval-contract.md) | 评测契约全文：两条通道、全部字段、信任级、finalize 复测、统一分母、去重规则 |
+| [`docs/mode.md`](docs/mode.md) | 算子优化模式：它让模型做什么、往会话里加了什么、面板显示什么、内置评测器、以及它装了哪些文件 |
+| [`docs/loop.md`](docs/loop.md) | 循环与监督：每一轮怎么判、空会话怎么起、复审模型怎么选、复审能查出和查不出什么 |
+| [`docs/config.md`](docs/config.md) | 全部配置项，以及 HTTP 接口 |
+| [`docs/limits.md`](docs/limits.md) | 已知边界——按「会不会让你读错面板」排序 |
+| [`docs/development.md`](docs/development.md) | 开发、插件怎么注册自己、支持的宿主版本与 semver、CI |
 
-## Compatibility
+## 兼容性
 
-Tested against DeepSeek Harness **0.1.0-rc.6**. It uses host APIs introduced by the 2026-08-11 rename (`httpServer→webServer`, `compact→compaction`), so **an older host cannot load it**. Peer ranges are declared against the individual DSH packages rather than `@deepseek-ai/dsh` as a whole — the policy is in [`docs/development.md`](docs/development.md#peer-范围为什么是两段式).
+在 DeepSeek Harness **0.1.0-rc.6** 上测过。它用到了 2026-08-11 那次改名引入的宿主 API（`httpServer→webServer`、`compact→compaction`），所以**更旧的宿主装不上**。peer 范围是对 DSH 的各个分包分别声明的，不是对着 `@deepseek-ai/dsh` 整体——原因见 [`docs/development.md`](docs/development.md#peer-范围为什么是两段式)。
 
-## License
+## 许可
 
-MIT — see [`LICENSE`](LICENSE).
+MIT，见 [`LICENSE`](LICENSE)。
 
-## Acknowledgments
+## 致谢
 
-- **[AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)** — the plugin's built-in evaluator (`preset/kernel-opt/evaluator/bench.py`) is derived from the benchmark script AKO4ALL ships.
-- **[KernelBench](https://github.com/ScalingIntelligence/KernelBench)** — whose core evaluation logic AKO4ALL's script inlines, and which therefore reaches here too.
+- **[AKO4ALL](https://github.com/TongmingLAIC/AKO4ALL)** —— 插件的内置评测器（`preset/kernel-opt/evaluator/bench.py`）由 AKO4ALL 附带的那份评测脚本改写而来。
+- **[KernelBench](https://github.com/ScalingIntelligence/KernelBench)** —— AKO4ALL 的脚本内联了它的核心评测逻辑，因此它也一路传到了这里。
 
-Both are MIT; their notices are reproduced verbatim in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and at the top of the file itself.
+两者都是 MIT；许可声明原样收录在 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 与文件头部。
