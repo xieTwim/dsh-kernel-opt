@@ -11,9 +11,9 @@
 <p align="center"><b>If you find this useful, please consider giving us a star 🌟</b></p>
 
 <p align="center">
-  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run: a run-control card (evaluation budget, output language, supervision toggle, supervisor model, reasoning effort) above a speedup curve climbing from x0.748 to x581 over 15 optimization evaluations, with the best point starred, the finalized point flagged, one profiler mark and two marks for points clamped to the axis floor." />
+  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run on one NVIDIA B200: run controls with supervision switched on, above a speedup curve climbing from x1.00 to x22.1 over 12 optimization evaluations, three failed attempts drawn below the axis, the best point starred and finalized, and a note that the loop stopped because the reviewer confirmed no headroom was left." />
   <br/>
-  <i>One finished run: 15 optimization evaluations from ×0.748 to ×581, one of them profiled, the honest best finalized.</i>
+  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200 — 12 evaluations from ×1.00 to ×22.1 against a reference frozen at 1.0400 ms, three failures shown rather than hidden, and a final number the plugin re-measured itself: 47.3 µs against the 47.1 µs the run had reported.</i>
 </p>
 
 ## News
