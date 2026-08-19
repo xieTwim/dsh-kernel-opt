@@ -1,4 +1,4 @@
-# The 89 tests, the two typecheck passes, and the dual-half build — the same
+# The tests, the two typecheck passes, and the dual-half build — the same
 # `pnpm run check` the deployment procedure runs, so a green tick here means
 # what a local one means.
 #

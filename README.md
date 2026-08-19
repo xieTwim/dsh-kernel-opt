@@ -2,7 +2,7 @@
 <p align="center"><b>Watch a model optimize a kernel — live, inside DeepSeek Harness</b></p>
 
 <p align="center">
-  <a href="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml"><img src="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml"><img src="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml/badge.svg" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DSH-0.1.0--rc.6-blue?logo=github" alt="DSH 0.1.0-rc.6"></a>
   <img src="https://img.shields.io/badge/docs-%E4%B8%AD%E6%96%87-lightgrey" alt="Docs in Chinese">
@@ -18,7 +18,7 @@
 
 ## News
 
-- 🚀 **[2026.08.17]** **dsh-kernel-opt is released** — the live evaluation panel, the `/kloop` optimization loop, and optional second-model supervision.
+- 🚀 **[2026.08.17]** **dsh-kernel-opt is released** — the live evaluation panel, an optimization loop that runs to a budget and wraps up on its own, and optional second-model supervision.
 
 **Table of Contents**
 
@@ -36,40 +36,47 @@
 
 **dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
 
-The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, profiling ▲ / first-best ★ / finalize ⚑ markers, the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment — DSH's native steering. When the model changes tack, it can compact its own context and keep going (`self_compact`).
+The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, markers for what was profiled (▲), the best result so far (★) and the one it finalized on (⚑), the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment — DSH's native steering. When the model changes tack, it can compact its own context and keep going (`self_compact`).
 
-Everything on the panel is **projected from the session log** — the plugin keeps no state of its own, so a replayed session renders exactly like the live one.
+Everything on the panel is **projected from the session log** — nothing it shows is stored anywhere else, so a replayed session renders exactly like the live one.
 
 **The GPU is wherever your benchmark command runs** — this machine, a container, a job submitted to a cluster. The plugin does not care and does not need one.
 
 ## Install
 
-Build output ships with the repo (`lib/` is committed), so there is nothing to build and no toolchain beyond Node:
+**You need** DeepSeek Harness, and **pnpm on `PATH`** — `dsh plugin` forwards its arguments to pnpm. The panel is part of the DSH **web** UI, so the plugin installs into a web profile.
+
+The plugin itself has nothing to build: `lib/` is committed, so it installs without a build step.
 
 ```sh
-# from git, pinned to a commit (the repo is public — no credentials needed)
-dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt#<sha>"
+# the repo is public — no credentials needed
+dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt"
+
+# or pin a commit, for a reproducible install
+dsh plugin --profile web add "github:xieTwim/dsh-kernel-opt#<commit-sha>"
 
 # or a local checkout, for development
 dsh plugin --profile web add /path/to/dsh-kernel-opt
 ```
 
-Upgrading = `add` again with a newer sha.
+No `dsh` yet? The same commands work through npx — `npx -p @deepseek-ai/dsh dsh plugin …`, then `npx -p @deepseek-ai/dsh dsh web`.
+
+To upgrade, run `add` again with a newer sha.
 
 Restart `dsh web`, then verify:
 
 ```sh
-dsh --profile web --dump-config | grep kernel-opt   # a bundle layer should appear
+dsh --profile web --dump-config | grep kernel-opt   # the plugin should be listed
 ```
 
 ## Quick Start
 
 1. **Install the plugin** and restart `dsh web`.
-2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness + median timing + fresh inputs + a mutation sentinel, with the reference timed once and frozen).
+2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness + median timing + fresh inputs + a mutation sentinel, with the reference timed once and frozen). It runs on Python + PyTorch and needs a CUDA GPU on whatever machine executes the benchmark.
 3. **Start a session in Kernel-Opt mode** and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
 4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
 
-The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and keeps in step with itself on every start. Its persona is the single source of the protocol, and the four tools and two commands exist **only in that mode** — an unrelated session pays nothing for them (3897 B of tool descriptions per turn, measured).
+The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and brings up to date on each start — it leaves files you have edited alone, and `preset.install: false` turns the whole thing off. Everything the plugin adds, its tools and its commands, exists **only in that mode**, so your other sessions are untouched.
 
 → [`docs/mode.md`](docs/mode.md)
 
@@ -81,9 +88,11 @@ The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.age
 KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 ```
 
-An evaluator that exists as a **tool** (MCP or registered) needs no line at all — the same fields inside its result text go straight in.
+**Required:** `artifact` (which file was measured) and `correct`. **Add `latency_ms`** whenever you measured one. **Optional:** `compiled`, `error`, `native_metrics` (a numeric map), `reward_hack_detected`, `advisory`, `workload_indices`. One evaluation per line, starting at column 1; anything may follow the JSON.
 
-Every point carries where it came from, and the panel says so in the open: a self-reported point always displays the command that produced it, and when the model finalizes, the plugin **re-runs that command itself**. The trajectory is self-reported; the final number is re-measured.
+An evaluator that exists as a **tool** (MCP or registered) needs no line at all — the same fields inside its result text go straight in. Any tool whose name contains `kernel_evaluate` is collected by default; anything else goes in the `benchTools` config.
+
+Every point carries where it came from, and the panel says so in the open: a self-reported point always displays the command that produced it, and when the model finalizes, the plugin **re-runs that command itself**. The trajectory is self-reported; the final number is re-measured — when it can be. Replay can be switched off, and a recorded command over 300 characters is not replayable; the panel then marks the final number as never re-measured.
 
 → Every field, the trust levels, the pooled-reference denominator (and why a missing one costs the whole run's comparability), and the de-duplication rules: [`docs/eval-contract.md`](docs/eval-contract.md)
 
@@ -104,7 +113,7 @@ After every turn the loop reads the projected run state and decides: finalized �
 
 **A human stop always beats a machine continuation** — the stop button, `/kloop stop`, and aborting a turn in the composer all disarm immediately, without a wrap-up. Human messages always take priority: if the agent is not idle, the loop skips that round.
 
-**Supervision** hands a second model the run's *digest* — budget discipline, correctness-first, method diversity, whether the plan matches the diffs, whether anything was profiled, whether each self-reported point's command line looks like a real evaluation. It does not review the kernel line by line. **Silence is not approval**: a failed, timed-out or empty review is recorded as "not reviewed this round" and never blocks the loop.
+**Supervision** hands a second model the run's *digest* — budget discipline, correctness-first, method diversity, whether the plan matches the diffs, whether anything was profiled, whether each self-reported point's command line looks like a real evaluation. It does not review the kernel line by line. **Silence is not approval**: a failed, timed-out or empty review leaves that round with no review at all, and never blocks the loop.
 
 → [`docs/loop.md`](docs/loop.md)
 
@@ -123,7 +132,7 @@ Written in Chinese.
 
 ## Compatibility
 
-`@deepseek-ai/dsh` **0.1.0-rc.6**. Uses the `ctx.webServer` / `ctx.compaction` / `sessionId` props, so it is **incompatible with hosts older than the 2026-08-11 rename** (`httpServer→webServer`, `compact→compaction`). The peer range is deliberately two-segment — see [`docs/development.md`](docs/development.md#peer-范围为什么是两段式).
+Tested against DeepSeek Harness **0.1.0-rc.6**. It uses host APIs introduced by the 2026-08-11 rename (`httpServer→webServer`, `compact→compaction`), so **an older host cannot load it**. Peer ranges are declared against the individual DSH packages rather than `@deepseek-ai/dsh` as a whole — the policy is in [`docs/development.md`](docs/development.md#peer-范围为什么是两段式).
 
 ## License
 
