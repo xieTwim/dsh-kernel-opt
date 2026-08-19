@@ -73,7 +73,7 @@ dsh --profile web --dump-config | grep kernel-opt   # the plugin should be liste
 
 1. **Install the plugin** and restart `dsh web`.
 2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness, median timing, new input values per trial, and a check that catches a kernel replaying a cached answer, with the reference timed once and frozen). It runs on Python + PyTorch and needs a CUDA GPU on whatever machine executes the benchmark.
-3. **Start a session in Kernel-Opt mode** and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
+3. **Start a session in Kernel-Opt mode** — it appears in the mode picker as 「算子优化模式」 — and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
 4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
 
 The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and brings up to date on each start — it leaves files you have edited alone, and `preset.install: false` turns the whole thing off. Everything the plugin adds, its tools and its commands, exists **only in that mode**, so your other sessions are untouched.
