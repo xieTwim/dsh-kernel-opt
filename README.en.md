@@ -14,7 +14,7 @@
 <p align="center">
   <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run on one NVIDIA B200: run controls with supervision switched on, above a speedup curve rising from x1.00 to x22.1 over 12 optimization evaluations, three failed evaluations drawn below the axis, the best point starred and finalized, and a note that the loop stopped because the reviewer confirmed no headroom was left." />
   <br/>
-  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200. 12 evaluations, ×1.00 to ×22.1, every one dividing by the same reference latency frozen at 1.0400 ms. Three failed evaluations are on the chart too. The last point is the plugin re-running the recorded command itself: 47.3 µs, against the 47.1 µs the run reported.</i>
+  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200. 12 evaluations, ×1.00 to ×22.1, every one dividing by the same reference latency frozen at 1.0400 ms.</i>
 </p>
 
 ## News
@@ -37,7 +37,9 @@
 
 **dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
 
-The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time: the speed curve (higher is faster), each point's correctness and reward-hack status, **where each point came from and how far it can be trusted**, markers for what was profiled (▲), the best result so far (★) and the one it finalized on (⚑), the model's current approach, and the supervisor's notes. You can cut in and redirect at any moment, the same way you steer any DSH session. When the model changes tack, it can compact its own context and keep going.
+The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time, the speed curve (higher is faster), each point's correctness and reward-hack status, the model's current approach and the supervisor's notes, with ▲ ★ ⚑ marking what was profiled, the best result so far, and the point it finalized on. **Each point also carries where it came from and how far it can be trusted** — see the contract below.
+
+You can cut in and redirect at any moment, the same way you steer any DSH session. When the model changes tack, it can compact its own context and keep going.
 
 Everything on the panel is **projected from the session log**; the plugin keeps no second copy, so a replayed session renders exactly like the live one.
 
@@ -74,7 +76,7 @@ dsh --profile web --dump-config | grep kernel-opt   # the plugin should be liste
 
 1. **Install the plugin** and restart `dsh web`.
 2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness, median timing, new input values per trial, and a check that catches a kernel replaying a cached answer, with the reference timed once and frozen). It runs on Python + PyTorch and needs a CUDA GPU on whatever machine executes the benchmark.
-3. **Start a session in Kernel-Opt mode** — it appears in the mode picker as 「算子优化模式」 — and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
+3. **Start a session in Kernel-Opt mode** — it appears in the mode picker as 「算子优化模式」 — and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it straight to the loop from the launcher next to the message box.
 4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
 
 The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and brings up to date on each start — it leaves files you have edited alone, and `preset.install: false` turns the whole thing off. Everything the plugin adds, its tools and its commands, exists **only in that mode**; other sessions do not load them.
@@ -99,22 +101,21 @@ Every point carries where it came from, and the panel says so in the open: a sel
 
 ## The Loop
 
+When the model finishes a turn, the loop pushes it onward until the budget runs out or it wraps up.
+
+**Drive it from the UI**: the evaluation tab carries a loop row and a supervision row; in a session with nothing in it yet the tab has not appeared, so use the launcher next to the message box, which offers the same options.
+
+The budget counts optimization work only — a wrap-up measurement, or one extra evaluation squeezed into the same turn, is kept and shown separately. When the budget runs out, or two rounds pass with no new evaluation, the loop asks for a wrap-up first (put the best version back, finalize on it, summarize) and then stops. **You can cut in at any point**: the stop button and aborting a turn both take effect immediately with no wrap-up, and anything you type outranks what the loop would have sent.
+
+**Supervision** hands a second model a summary of the run together with the real edits behind the recent rows, and asks it to judge **how the run is being conducted**: budget discipline, whether more than one family of ideas was tried, whether anything was profiled, whether each self-reported command line looks like a real evaluation, and whether the diffs match the plan. It does not read the whole kernel — whether the kernel is fast is the evaluator's question, answered by measurement. **A review with no verdict is not approval**: one that fails, times out or comes back empty leaves no record and never blocks the loop.
+
+The same state is also driven by slash commands, and three things need them: naming a reviewer model the dropdown cannot enumerate, changing supervision while the loop runs (that row is locked in the UI), and putting the action in a message for a script to send.
+
 ```sh
-/kloop            # start; default budget 20 evaluations (/kloop 30 to set it)
-/kloop stop       # stop  (/kloop status to inspect)
-/supervise on     # turn on second-model review
-/supervise use deepseek-official/deepseek-v4-flash   # pick a reviewer for this session
+/kloop [n]                          # start, default budget 20 evaluations; stop, status
+/supervise on                       # turn on second-model review
+/supervise use <provider>/<model>   # name a reviewer for this session by hand
 ```
-
-Or drive it entirely from the UI: start, stop and configure the loop from the panel, or from the launcher next to the message box, which also shows the round and budget while it runs. Both drive the same state as the commands.
-
-Starting a run also pins the language it reports in and picks the reviewer's reasoning effort from whatever that model supports. The budget counts optimization work only — a wrap-up measurement, or one extra evaluation the model squeezed into the same turn, is kept and shown separately rather than charged to it.
-
-After each turn the loop checks where the run stands. Once the model has finalized, it stops. When the budget runs out — or two rounds pass with no new evaluation — it asks for **a wrap-up first** (put the best version back, finalize on it, summarize) and only then stops. Otherwise it nudges the model onward, passing along how much budget is left, how long it has been stuck, and what the reviewer said.
-
-**A human stop always beats an automatic continuation** — the stop button, `/kloop stop`, and aborting a turn all stop the loop immediately, with no wrap-up. Anything you type takes precedence over anything the loop would have sent.
-
-**Supervision** hands a second model a summary of the run — the budget, the plans, the evaluation table, and **the edits behind the recent rows**. It judges how the run is being conducted: correctness before speed, budget discipline, whether it has tried more than one family of ideas, whether anything was profiled, whether each self-reported point's command line looks like a real evaluation, and whether the diffs match the plan that claimed them. It reads the changes, not the whole kernel — measuring the kernel is the evaluator's job. **Silence is not approval**: a failed, timed-out or empty review leaves that round with no review at all, and never blocks the loop.
 
 → [`docs/loop.md`](docs/loop.md)
 
