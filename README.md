@@ -10,13 +10,11 @@
 
 <p align="center"><b>If you find this useful, please consider giving us a star 🌟</b></p>
 
-<!-- TODO(screenshot): drop assets/panel.png here — the 评测 tab mid-run.
 <p align="center">
-  <img src="assets/panel.png" alt="The 评测 tab during a run: a rising speed curve with per-point provenance badges, the ★ best marker and ⚑ finalize marker, loop and supervision controls, the model's current approach card, and the expandable iteration table." width="820" />
+  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run: a run-control card (evaluation budget, output language, supervision toggle, supervisor model, reasoning effort) above a speedup curve climbing from x0.748 to x581 over 15 optimization evaluations, with the best point starred, the finalized point flagged, one profiler mark and two marks for points clamped to the axis floor." />
   <br/>
-  <i>The panel during a live run — every point carries where it came from and how far it can be trusted.</i>
+  <i>One finished run: 15 optimization evaluations from ×0.748 to ×581, one of them profiled, the honest best finalized.</i>
 </p>
--->
 
 ## News
 
@@ -58,11 +56,11 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 The two channels can be mixed. What separates them is **trust level, and the panel labels it in the open**:
 
-| Source | Badge | Why you can (or can't) trust it |
+| Source | How the panel labels it | Why you can (or can't) trust it |
 |---|---|---|
-| Tool result | *(none)* | Produced by a tool — the model cannot forge it |
-| Contract line | `自报` *(self-reported)* | Model-controlled stdout — so every point **displays the command line that produced it**; an `echo`-ed fake is visible at a glance |
-| Finalize re-run | `复测` *(re-measured)* | The plugin replayed the command itself, outside the agent's turn |
+| Tool result | `tool` | Produced by a tool — the model cannot forge it |
+| Contract line | `agent-measured`, next to the command line that produced it | Model-controlled stdout — an `echo`-ed fake is visible at a glance |
+| Finalize re-run | `replayed` | The plugin replayed the command itself, outside the agent's turn |
 
 That last row is the point: when the model calls `kernel_finalize`, the plugin **re-runs the recorded command once, on its own**. The trajectory is self-reported; **the final number is re-measured.**
 
@@ -93,7 +91,7 @@ dsh --profile web --dump-config | grep kernel-opt   # a bundle layer should appe
 1. **Install the plugin** and restart `dsh web`.
 2. **Put the kernel in your working directory.** A reference, input data and your own benchmark script are all optional, in any form — the model takes inventory and wires them up. With no reference, the original kernel as received becomes the denominator, frozen. With no benchmark at all, the **built-in evaluator** is used (correctness + median timing + fresh inputs + a mutation sentinel, with the reference timed once and frozen).
 3. **Start a session in Kernel-Opt mode** and give it three things: where the kernel is, how to evaluate it, and your budget / hardware. Or hand it to the loop with `/kloop 30`.
-4. **Open the 评测 tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
+4. **Open the Evaluations tab** at the top of the session — curve, status, approach, supervision. Type any time to steer.
 
 The **Kernel-Opt mode** is an agent preset the plugin installs into `~/.dsh/.agent-presets/kernel-opt/` and keeps in step with itself on every start. Its persona is the single source of the protocol, and the four tools and two commands exist **only in that mode** — an unrelated session pays nothing for them (3897 B of tool descriptions per turn, measured).
 
@@ -126,12 +124,12 @@ Written in Chinese.
 
 | Doc | What's in it |
 |---|---|
-| [`docs/eval-contract.md`](docs/eval-contract.md) | 评测契约全文：两条通道、全字段、信任级、finalize 复测、分母与 pooled reference、去重规则 |
-| [`docs/mode.md`](docs/mode.md) | 算子优化模式：persona、四个工具、面板内容、内置评测器、落盘的所有权跟踪 |
-| [`docs/loop.md`](docs/loop.md) | 循环与监督：续跑判定、空会话启动、监督模型两层解析、rubric 边界 |
-| [`docs/config.md`](docs/config.md) | 全部配置 key 与 HTTP 路由 |
-| [`docs/limits.md`](docs/limits.md) | 已知边界——按「会不会让你读错面板」排序 |
-| [`docs/development.md`](docs/development.md) | 开发、两个注册平面的架构、兼容基线与 semver、CI |
+| [`docs/eval-contract.md`](docs/eval-contract.md) | The contract in full: both channels, every field, the trust levels, the finalize re-run, the pooled-reference denominator, the de-duplication rules |
+| [`docs/mode.md`](docs/mode.md) | Kernel-Opt mode: the persona, the four tools, what the panel shows, the built-in evaluator, how the installed files are tracked |
+| [`docs/loop.md`](docs/loop.md) | The loop and supervision: how a round is decided, starting from an empty session, the two-layer supervisor resolution, the limits of the rubric |
+| [`docs/config.md`](docs/config.md) | Every config key, and the HTTP routes |
+| [`docs/limits.md`](docs/limits.md) | Known limits — ordered by how badly each one can make you misread the panel |
+| [`docs/development.md`](docs/development.md) | Development, the two registration planes, the compatibility baseline and semver, CI |
 
 ## Compatibility
 
