@@ -772,9 +772,10 @@ export function project(
   const envs: WireEnv[] = []
   const profileSeqs: number[] = []
   const rounds: WireRound[] = []
-  const finalizedIds = new Set<string>()
+  /** Evaluator id named by a finalize call → the seq of that call. */
+  const finalizedIds = new Map<string, number>()
   /** Artifacts named by finalize calls (`artifact_path`); their best point is the pick. */
-  const finalizedArtifacts: string[] = []
+  const finalizedArtifacts: { artifact: string, seq: number }[] = []
   /** callId → pending bench iteration awaiting its result. */
   const pendingBench = new Map<string, WireIteration>()
   /** callId → shell-call provenance awaiting its result (trailer scan). */
@@ -858,9 +859,11 @@ export function project(
       if (matchesTool(call.name, config.finalizeTools)) {
         const args = parseResultJson(call.argumentsJson)
         const id = args?.['evaluation_id']
-        if (typeof id === 'string') finalizedIds.add(id)
+        if (typeof id === 'string') finalizedIds.set(id, event.seq)
         const artifactRaw = args?.['artifact_path'] ?? args?.['artifact']
-        if (typeof artifactRaw === 'string' && artifactRaw.length > 0) finalizedArtifacts.push(artifactRaw)
+        if (typeof artifactRaw === 'string' && artifactRaw.length > 0) {
+          finalizedArtifacts.push({ artifact: artifactRaw, seq: event.seq })
+        }
         pendingFinalize.set(call.callId, { name: call.name })
         continue
       }
@@ -1040,13 +1043,30 @@ export function project(
     }
   }
 
+  // Each mark carries the seq of the finalize call that made it. A run can
+  // finalize more than once — the loop's `challengeFinalize` exists to make
+  // that happen, overruling an early "done" and letting the run continue —
+  // and every mark survives in the projection. Without the call's own seq
+  // there is no way to tell which of them is the LATEST word, and a reader
+  // asking what the run finalized on would get whichever point sits earliest
+  // in the log. Marking twice keeps the later call.
+  const mark = (point: WireIteration, seq: number): void => {
+    point.finalized = true
+    if (point.finalizeSeq === undefined || seq > point.finalizeSeq) point.finalizeSeq = seq
+  }
+
   for (const point of iterations) {
-    if (point.evaluationId !== undefined && finalizedIds.has(point.evaluationId)) point.finalized = true
+    if (point.evaluationId === undefined) continue
+    const seq = finalizedIds.get(point.evaluationId)
+    // Marked whatever its verdict: the run DID finalize on this, and hiding
+    // that would be its own kind of lie. Whether it can be CLAIMED is a
+    // separate question, answered by `runHeadline`.
+    if (seq !== undefined) mark(point, seq)
   }
 
   // Artifact-named finalizes (the self-reported channel has no evaluator ids):
   // the best honest measurement of that artifact is the wrap-up pick.
-  for (const artifact of finalizedArtifacts) {
+  for (const { artifact, seq } of finalizedArtifacts) {
     let best: WireIteration | undefined
     for (const point of iterations) {
       if (point.channel === 'replay') continue
@@ -1054,7 +1074,7 @@ export function project(
       if (!eligibleBest(point)) continue
       if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) best = point
     }
-    if (best !== undefined) best.finalized = true
+    if (best !== undefined) mark(best, seq)
   }
 
   let bestIndex: number | null = null

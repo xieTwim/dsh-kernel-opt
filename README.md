@@ -133,7 +133,7 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 ## 兼容性
 
-在 DeepSeek Harness **0.1.0-rc.6 到 0.1.2-rc.1** 上实测可加载，开发依赖钉在 `0.1.1-rc.2`（npm dist-tag `latest`）。一份构建装进任意一版：0.1.2 改掉的整段日志读取器由插件自己按宿主实际有哪个来选。
+**两端都实测过**：DeepSeek Harness `0.1.0-rc.6` 与 `0.1.2-rc.1`（dist-tag `next`）都能加载，开发依赖钉在 `0.1.1-rc.2`（dist-tag `latest`）。一份构建装进任意一版：0.1.2 改掉的整段日志读取器由插件自己按宿主实际有哪个来选。peer 范围比这个区间宽（它收下 `<0.2` 的正式版），那是「认为能装」，不是「装过」。
 
 插件用到了 2026-08-11 那次改名引入的宿主 API（`httpServer→webServer`、`compact→compaction`），**更旧的宿主无法加载**。peer 范围是对 DSH 的各个分包分别声明的，而不是对 `@deepseek-ai/dsh` 整体，也不是一段——宿主每开一条 `0.1.x-rc` 线就要补一段，原因见 [`docs/development.md`](docs/development.md#peer-范围为什么是四段式)。
 

@@ -171,6 +171,7 @@ const zh = {
   'hero.from': '{reference} → {latency}',
   'hero.faster': '最高测得 {label}，来自 {artifact}——本轮没有选它收尾',
   'hero.rejected': '{count} 个候选未通过验证',
+  'hero.unclaimable': '⚠ 本轮收尾选定的是 {artifact}，但那次评测没有通过验证——上面报的是本轮验证过的最佳结果，不是收尾选定的那个',
   'hero.passed': '正确性通过',
   'hero.noHack': '未检出作弊',
   'hero.pending': '评测进行中',
@@ -319,6 +320,7 @@ const en = {
   'hero.from': '{reference} → {latency}',
   'hero.faster': 'Fastest measured {label}, from {artifact} — not the version this run picked',
   'hero.rejected': '{count} candidates failed verification',
+  'hero.unclaimable': '⚠ This run finalized on {artifact}, but that evaluation did not pass verification — the number above is the run\u2019s best VERIFIED result, not the version it picked',
   'hero.passed': 'Correctness passed',
   'hero.noHack': 'No reward hack detected',
   'hero.pending': 'Evaluation in flight',
@@ -518,6 +520,28 @@ function useSeries(sessionId: string): { series: WireSeries | null; refetch: () 
   return { series, refetch: () => setTick(n => n + 1) }
 }
 
+/**
+ * Whether the reader has asked for reduced motion.
+ *
+ * The stylesheet's media query covers every CSS animation here, but the one
+ * SMIL animation on the plot is outside CSS's reach entirely — so the
+ * preference has to be readable from JavaScript too, or the guarantee is only
+ * true of the animations that happened to be written in CSS.
+ * @returns whether motion should be suppressed, live as the preference changes.
+ */
+function useReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    setReduce(query.matches)
+    const onChange = (): void => { setReduce(query.matches) }
+    query.addEventListener('change', onChange)
+    return () => { query.removeEventListener('change', onChange) }
+  }, [])
+  return reduce
+}
+
 /** Stable-enough identity of one plotted evaluation across polls. */
 function arrivalKey(point: WireIteration, index: number): string {
   // The latency is part of the identity on purpose: a pending call that comes
@@ -527,30 +551,40 @@ function arrivalKey(point: WireIteration, index: number): string {
 }
 
 /**
- * The evaluations that appeared since the previous poll.
+ * The evaluations that appeared since the previous poll, for this session.
  *
- * Empty on first mount, always. Opening a finished session — or replaying one
- * — must render the settled picture, not perform twelve arrivals that
- * happened last week: the panel's claim is that a replay looks like the live
- * run looked, and animating history is the one way to break that while
- * appearing to honour it.
+ * Empty on first sight of a session, always. Opening a finished session — or
+ * replaying one — must render the settled picture, not perform twelve
+ * arrivals that happened last week: the panel's claim is that a replay looks
+ * like the live run looked, and animating history is the one way to break
+ * that while appearing to honour it.
+ *
+ * Keyed by session for the same reason. The component survives a switch in
+ * the sidebar, so a set that carried over would classify every row of the
+ * newly opened session as fresh and animate a finished run end to end — the
+ * exact failure the first-sight rule exists to prevent, arriving through the
+ * one path that does not remount.
+ * @param sessionId - session the projection belongs to.
  * @param iterations - the current projection.
  * @returns arrival keys to animate this frame.
  */
-function useArrivals(iterations: readonly WireIteration[]): ReadonlySet<string> {
-  const seen = useRef<Set<string> | null>(null)
+function useArrivals(sessionId: string, iterations: readonly WireIteration[]): ReadonlySet<string> {
+  const seen = useRef<{ sessionId: string, keys: Set<string> } | null>(null)
   const [arrived, setArrived] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => {
     const keys = iterations.map((point, index) => arrivalKey(point, index))
     const known = seen.current
-    if (known === null) {
-      seen.current = new Set(keys)
+    if (known === null || known.sessionId !== sessionId) {
+      seen.current = { sessionId, keys: new Set(keys) }
+      // A switch may leave the previous session's arrivals marked; clearing
+      // is what keeps a stale key from animating a row it does not name.
+      setArrived(new Set())
       return
     }
-    const fresh = keys.filter(key => !known.has(key))
-    for (const key of keys) known.add(key)
+    const fresh = keys.filter(key => !known.keys.has(key))
+    for (const key of keys) known.keys.add(key)
     if (fresh.length > 0) setArrived(new Set(fresh))
-  }, [iterations])
+  }, [sessionId, iterations])
   return arrived
 }
 
@@ -588,7 +622,8 @@ function Chart(props: {
   driftNote: (drift: { min: number, max: number, ratio: number, count: number }) => string
 }): ReactNode {
   const { series, bestLabel, legend, markLabels, statusLabel, axisShort, axisWhy, axisHint, driftNote } = props
-  const arrivals = useArrivals(series.iterations)
+  const arrivals = useArrivals(series.sessionId, series.iterations)
+  const reduceMotion = useReducedMotion()
   // A run that finalized has a pick; before that, the best point is what
   // the headline quotes, so it is what the plot names.
   const hasFinalPick = series.iterations.some(p => p.finalized === true && p.channel !== 'replay')
@@ -738,8 +773,16 @@ function Chart(props: {
           return (
             <g key={`${String(p.seq)}-${String(i)}`}>
               <title>{tip}</title>
-              <circle cx={cx} cy={cy} r={4.5} fill="none" stroke={color} strokeWidth={2}>
-                {status === 'pending'
+              <circle
+                cx={cx} cy={cy} r={4.5} fill="none" stroke={color} strokeWidth={2}
+                // SMIL, not CSS — so `prefers-reduced-motion` cannot reach it
+                // from the stylesheet, and the media query that switches
+                // everything else off would leave exactly this one running
+                // while the docs said otherwise. Read the preference here and
+                // simply do not emit the element.
+                style={status === 'pending' && reduceMotion ? { opacity: 0.55 } : undefined}
+              >
+                {status === 'pending' && !reduceMotion
                   ? <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite" />
                   : null}
               </circle>
@@ -1030,7 +1073,13 @@ function Hero(props: {
           : null}
       </div>
       <div style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 22 }}>
-        <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.passed')}</div>
+        {/* Read off the claim rather than assumed from its presence. The
+            claim is eligible by construction, so these always show — which
+            is the point: if that invariant ever breaks, the panel goes quiet
+            here instead of printing "passed" over a failure. */}
+        {claim.correct === true
+          ? <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.passed')}</div>
+          : null}
         {claim.rewardHack !== true
           ? <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.noHack')}</div>
           : null}
@@ -1055,6 +1104,22 @@ function Hero(props: {
               {t('hero.faster', {
                 label: `×${fasterRatio.toPrecision(3)}`,
                 artifact: faster.artifactPath !== undefined ? baseName(faster.artifactPath) : '—',
+              })}
+            </div>
+          )
+        : null}
+      {/* The run finalized on something it cannot claim. The number above is
+          then the running best — verified, and correctly labelled as the
+          best rather than as a submission — but the finalize itself is the
+          more interesting fact, and dropping it would leave the panel quietly
+          disagreeing with a session log that plainly says the run ended. */}
+      {headline.unclaimablePick !== undefined
+        ? (
+            <div style={{ flexBasis: '100%', fontSize: 13, lineHeight: '20px', color: COLOR.bad }}>
+              {t('hero.unclaimable', {
+                artifact: headline.unclaimablePick.artifactPath !== undefined
+                  ? baseName(headline.unclaimablePick.artifactPath)
+                  : '—',
               })}
             </div>
           )

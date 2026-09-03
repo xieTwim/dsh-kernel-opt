@@ -37,6 +37,13 @@ export interface WireIteration {
   pending?: boolean
   /** This evaluation was later selected by a finalize call. */
   finalized?: boolean
+  /**
+   * Session-log seq of the finalize call that selected it — the latest one,
+   * when several did. Present exactly when {@link WireIteration.finalized}
+   * is, and the only thing that orders two picks in a run that finalized
+   * twice (which `challengeFinalize` is built to cause).
+   */
+  finalizeSeq?: number
   /** Blocking build-gate findings forwarded from the evaluator. */
   blocking?: string[]
   /** Advisory build-gate findings forwarded from the evaluator. */
@@ -306,7 +313,14 @@ export function samePath(a: string, b: string): boolean {
  */
 export function eligibleBest(point: WireIteration): point is WireIteration & { latencyMs: number } {
   return point.correct === true && point.rewardHack !== true
-    && point.error === undefined && point.latencyMs !== undefined
+    && point.error === undefined
+    // Positive, not merely present. A zero or negative latency is not a very
+    // fast kernel, it is a broken measurement — and it propagates: the axis
+    // maps 1/latency, so zero puts a point at infinity and takes the whole
+    // y domain to NaN with it, and the headline divides the reference by it.
+    // The contract accepts any finite number, so this is reachable from a
+    // user's own evaluator, not just from a bug in ours.
+    && point.latencyMs !== undefined && point.latencyMs > 0
 }
 
 /** What the panel's headline states, and what it must not leave out. */
@@ -320,6 +334,12 @@ export interface RunHeadline {
    * measured something quicker than the version it shipped.
    */
   fasterMeasured?: WireIteration
+  /**
+   * The run's latest finalize pick when it is one the run cannot claim: a
+   * wrong answer, a flagged reward hack, a failed evaluation, or a version
+   * that was never timed. Present only in that case, and never as the claim.
+   */
+  unclaimablePick?: WireIteration
   /** Evaluations that returned a verdict the run cannot claim. */
   rejected: number
 }
@@ -348,7 +368,25 @@ export function runHeadline(
 ): RunHeadline {
   const best = bestIndex === null ? undefined : iterations[bestIndex]
   // The replay row re-measures the pick rather than being a pick of its own.
-  const final = iterations.find(p => p.finalized === true && p.channel !== 'replay')
+  const picks = iterations.filter(p => p.finalized === true && p.channel !== 'replay')
+  // The LATEST pick, ordered by the finalize call that made it rather than by
+  // where its evaluation sits in the log — a second finalize routinely names
+  // an earlier evaluation, so log position ranks the two picks wrong. And
+  // only among picks the run can actually stand behind: `evaluation_id`
+  // finalize marks whatever id it was given, so a run that finalized on a
+  // failed evaluation would otherwise put that failure under the word
+  // "passed" in the largest type on the panel.
+  const claimable = picks.filter(eligibleBest)
+  const final = claimable.reduce<WireIteration | undefined>(
+    (latest, p) => (latest === undefined || (p.finalizeSeq ?? 0) > (latest.finalizeSeq ?? 0) ? p : latest),
+    undefined,
+  )
+  // A run that finalized, but on nothing it can claim. Falling back to the
+  // running best is right — that number IS verified — but silently doing so
+  // would hide the more interesting fact, so the pick comes back too.
+  const unclaimable = final === undefined && picks.length > 0
+    ? picks.reduce((latest, p) => ((p.finalizeSeq ?? 0) > (latest.finalizeSeq ?? 0) ? p : latest))
+    : undefined
   const claim = final ?? best
   const rejected = iterations.filter(p => p.pending !== true && !eligibleBest(p)).length
   return {
@@ -359,6 +397,7 @@ export function runHeadline(
       && best.latencyMs < claim.latencyMs
       ? { fasterMeasured: best }
       : {}),
+    ...(unclaimable !== undefined ? { unclaimablePick: unclaimable } : {}),
     rejected,
   }
 }

@@ -50,7 +50,7 @@
   "scripts": {
     "build": "tsdown --config ./tsdown.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "test": "node --experimental-strip-types --test tests/projection.test.ts tests/loop.test.ts tests/chart.test.ts tests/preset.test.ts tests/popover.test.ts",
+    "test": "node --experimental-strip-types --test tests/projection.test.ts tests/loop.test.ts tests/chart.test.ts tests/preset.test.ts tests/popover.test.ts tests/headline.test.ts",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "peerDependencies": {

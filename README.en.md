@@ -136,7 +136,7 @@ Written in Chinese.
 
 ## Compatibility
 
-Loads on DeepSeek Harness **0.1.0-rc.6 through 0.1.2-rc.1**, verified on both ends; development pins `0.1.1-rc.2` (npm dist-tag `latest`). One build fits every host in that span: the whole-log reader 0.1.2 replaced is selected at runtime from whichever one the host carries.
+**Verified at both ends**: DeepSeek Harness `0.1.0-rc.6` and `0.1.2-rc.1` (dist-tag `next`) both load it; development pins `0.1.1-rc.2` (dist-tag `latest`). One build fits either: the whole-log reader 0.1.2 replaced is selected at runtime from whichever one the host carries. The peer range is deliberately wider than that interval — it also admits the stable releases below `0.2` — which is what we believe will load, not what we have loaded.
 
 It uses host APIs introduced by the 2026-08-11 rename (`httpServer→webServer`, `compact→compaction`), so **an older host cannot load it**. Peer ranges are declared against the individual DSH packages rather than `@deepseek-ai/dsh` as a whole, and in four segments rather than one — each `0.1.x-rc` line the host opens needs its own. The policy is in [`docs/development.md`](docs/development.md#peer-范围为什么是四段式).
 
