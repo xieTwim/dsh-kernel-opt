@@ -28,14 +28,21 @@ export function formatLatency(ms: number): string {
  * Chart geometry constants (viewBox units).
  *
  * `b` is deeper than the axis needs because the gutter under the plot is a
- * working row, not margin: unmeasured points, the profiler ▲, and the
- * slowest-point label all live there. `h - b` is what every drawn y is
- * anchored to, so growing the two together adds gutter without moving the
- * plot by a pixel.
+ * working row, not margin: unmeasured points, the profiler ▲, the label of
+ * the point the headline quotes, and the slowest-point label all live there,
+ * on three rows. `h - b` is what every drawn y is anchored to, so growing the
+ * two together adds gutter without moving the plot by a pixel.
+ *
+ * `w` tracks the panel's own content width for one reason: the SVG is drawn
+ * at `width: 100%`, so the viewBox scales to fit and takes every font size
+ * with it. At 640 units in a 1140px column, an 11-unit label rendered near
+ * 20px — the chart's small print came out larger than the panel's body text,
+ * which is how a considered type scale turns into an accident. Keeping the
+ * units near the rendered pixels makes the numbers here mean what they say.
  */
-export const CHART = { w: 640, h: 212, l: 56, r: 16, t: 16, b: 38 }
+export const CHART = { w: 1140, h: 372, l: 78, r: 26, t: 24, b: 68 }
 /** Minimum vertical clearance between two axis-gutter labels (viewBox units). */
-export const AXIS_GAP = 13
+export const AXIS_GAP = 18
 
 export interface ChartModel {
   /** x in viewBox units per iteration index. */
@@ -148,8 +155,8 @@ export function chartModel(measured: readonly WireIteration[], count: number): C
   const innerW = CHART.w - CHART.l - CHART.r
   const innerH = CHART.h - CHART.t - CHART.b
   const denom = Math.max(1, count - 1)
-  // Horizontal inset keeps first/last points (and their ★/⚑ marks) off the
-  // frame edges.
+  // Horizontal inset keeps the first and last points, and the drop line that
+  // may hang off one of them, clear of the frame edges.
   const xPad = 14
   const referenceMs = referenceLatency(measured)
   return {

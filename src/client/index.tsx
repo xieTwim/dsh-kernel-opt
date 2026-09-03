@@ -181,7 +181,7 @@ const zh = {
   'chart.rejectedDot': '未通过验证',
   'chart.best': '新最佳',
   'chart.final': '收尾选定',
-  'chart.bestFinal': '最佳，且收尾选定',
+  'chart.bestFinal': '最佳 · 收尾选定',
   'audit.title': '完整审计记录',
   'audit.hint': '评测环境、方案汇报历史、监督记录、逐次评测明细',
 } satisfies Record<string, string>
@@ -328,7 +328,7 @@ const en = {
   'chart.rejectedDot': 'Failed verification',
   'chart.best': 'New best',
   'chart.final': 'Wrap-up pick',
-  'chart.bestFinal': 'Best, and the wrap-up pick',
+  'chart.bestFinal': 'Best · wrap-up pick',
   'audit.title': 'Full audit record',
   'audit.hint': 'Environment, plan history, supervision log, per-evaluation detail',
 } satisfies Record<LocaleKey, string>
@@ -386,7 +386,7 @@ const PANEL_CSS = `
 }
 @keyframes kernelOptHalo {
   from { opacity: .55; r: 4 }
-  to { opacity: 0; r: 16 }
+  to { opacity: 0; r: 22 }
 }
 @media (prefers-reduced-motion: reduce) {
   [style*="kernelOptPulse"], .kernel-opt-arrive { animation: none !important }
@@ -516,6 +516,42 @@ function useSeries(sessionId: string): { series: WireSeries | null; refetch: () 
   return { series, refetch: () => setTick(n => n + 1) }
 }
 
+/** Stable-enough identity of one plotted evaluation across polls. */
+function arrivalKey(point: WireIteration, index: number): string {
+  // The latency is part of the identity on purpose: a pending call that comes
+  // back measured is the moment the result LANDS, and that deserves the same
+  // acknowledgement as a brand-new row.
+  return `${String(point.seq)}-${String(index)}-${point.latencyMs === undefined ? 'pending' : String(point.latencyMs)}`
+}
+
+/**
+ * The evaluations that appeared since the previous poll.
+ *
+ * Empty on first mount, always. Opening a finished session — or replaying one
+ * — must render the settled picture, not perform twelve arrivals that
+ * happened last week: the panel's claim is that a replay looks like the live
+ * run looked, and animating history is the one way to break that while
+ * appearing to honour it.
+ * @param iterations - the current projection.
+ * @returns arrival keys to animate this frame.
+ */
+function useArrivals(iterations: readonly WireIteration[]): ReadonlySet<string> {
+  const seen = useRef<Set<string> | null>(null)
+  const [arrived, setArrived] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => {
+    const keys = iterations.map((point, index) => arrivalKey(point, index))
+    const known = seen.current
+    if (known === null) {
+      seen.current = new Set(keys)
+      return
+    }
+    const fresh = keys.filter(key => !known.has(key))
+    for (const key of keys) known.add(key)
+    if (fresh.length > 0) setArrived(new Set(fresh))
+  }, [iterations])
+  return arrived
+}
+
 /** Status classification of one iteration for color and label. */
 function statusOf(point: WireIteration): 'pending' | 'ok' | 'wrong' | 'hack' | 'error' {
   if (point.pending === true) return 'pending'
@@ -540,6 +576,8 @@ function Chart(props: {
   /** Legend copy for the three things the plot draws. */
   legend: { candidate: string, best: string, rejected: string }
   statusLabel: (status: ReturnType<typeof statusOf>) => string
+  /** Copy for the one labelled point on the plot. */
+  markLabels: { best: string, final: string, bestFinal: string }
   /** One-line axis rule, always shown under a × axis. */
   axisShort: string
   /** Link copy opening the pooled-denominator explanation. */
@@ -547,7 +585,11 @@ function Chart(props: {
   axisHint: (mode: 'speedup' | 'latency') => string
   driftNote: (drift: { min: number, max: number, ratio: number, count: number }) => string
 }): ReactNode {
-  const { series, bestLabel, legend, statusLabel, axisShort, axisWhy, axisHint, driftNote } = props
+  const { series, bestLabel, legend, markLabels, statusLabel, axisShort, axisWhy, axisHint, driftNote } = props
+  const arrivals = useArrivals(series.iterations)
+  // A run that finalized has a pick; before that, the best point is what
+  // the headline quotes, so it is what the plot names.
+  const hasFinalPick = series.iterations.some(p => p.finalized === true && p.channel !== 'replay')
   const bestSoFarLabel = legend.best
   const { iterations, profileSeqs, bestIndex } = series
   const model = useMemo(() => chartModel(iterations, iterations.length), [iterations])
@@ -612,13 +654,13 @@ function Chart(props: {
       <line x1={CHART.l} y1={CHART.t} x2={CHART.l} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       <line x1={CHART.l} y1={CHART.h - CHART.b} x2={CHART.w - CHART.r} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
       {Math.abs(CHART.t - bestY) >= AXIS_GAP
-        ? <text x={CHART.l - 6} y={CHART.t + 4} textAnchor="end" fontSize={12} fill={COLOR.dim}>{model.label(model.fast)}</text>
+        ? <text x={CHART.l - 8} y={CHART.t + 5} textAnchor="end" fontSize={13} fill={COLOR.dim}>{model.label(model.fast)}</text>
         : null}
       {Math.abs(CHART.h - CHART.b - bestY) >= AXIS_GAP
-        ? <text x={CHART.l - 6} y={CHART.h - CHART.b} textAnchor="end" fontSize={12} fill={COLOR.dim}>{model.label(model.slow)}</text>
+        ? <text x={CHART.l - 8} y={CHART.h - CHART.b} textAnchor="end" fontSize={13} fill={COLOR.dim}>{model.label(model.slow)}</text>
         : null}
       {model.log
-        ? <text x={CHART.l - 6} y={(CHART.t + CHART.h - CHART.b) / 2 + 14} textAnchor="end" fontSize={11} fill={COLOR.caption}>log</text>
+        ? <text x={CHART.l - 8} y={(CHART.t + CHART.h - CHART.b) / 2 + 16} textAnchor="end" fontSize={12} fill={COLOR.caption}>log</text>
         : null}
 
       {/* horizontal gridlines (mid one labeled) */}
@@ -629,7 +671,7 @@ function Chart(props: {
           <g key={`g${String(f)}`}>
             <line x1={CHART.l} x2={CHART.w - CHART.r} y1={gy} y2={gy} stroke={COLOR.border} strokeWidth={1} strokeDasharray="2 5" opacity={0.55} />
             {f === 0.5 && Math.abs(gy - bestY) >= AXIS_GAP
-              ? <text x={CHART.l - 6} y={gy + 4} textAnchor="end" fontSize={10} fill={COLOR.caption}>{model.label(value)}</text>
+              ? <text x={CHART.l - 8} y={gy + 4} textAnchor="end" fontSize={12} fill={COLOR.caption}>{model.label(value)}</text>
               : null}
           </g>
         )
@@ -653,13 +695,13 @@ function Chart(props: {
         ? (
             <g>
               <title>{bestSoFarLabel}</title>
-              <path d={bestPath} fill="none" stroke={COLOR.ok} strokeWidth={2} opacity={0.85} />
+              <path d={bestPath} fill="none" stroke={COLOR.ok} strokeWidth={2.5} opacity={0.9} />
             </g>
           )
         : null}
       {best?.latencyMs !== undefined
         ? (
-            <text x={CHART.l - 6} y={bestY + 4} textAnchor="end" fontSize={12} fontWeight={600} fill={COLOR.ok}>
+            <text x={CHART.l - 8} y={bestY + 5} textAnchor="end" fontSize={14} fontWeight={600} fill={COLOR.ok}>
               {model.label(best.latencyMs, best.speedup)}
             </text>
           )
@@ -670,7 +712,7 @@ function Chart(props: {
           is what the agent TRIED, the staircase is what the run can claim,
           and a dip here now reads as an experiment rather than a loss. */}
       {linePoints.length > 0
-        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.4} opacity={0.65} />
+        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.8} opacity={0.6} />
         : null}
 
       {/* points */}
@@ -694,7 +736,7 @@ function Chart(props: {
           return (
             <g key={`${String(p.seq)}-${String(i)}`}>
               <title>{tip}</title>
-              <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.5}>
+              <circle cx={cx} cy={cy} r={4.5} fill="none" stroke={color} strokeWidth={2}>
                 {status === 'pending'
                   ? <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite" />
                   : null}
@@ -705,18 +747,46 @@ function Chart(props: {
         const cy = model.y(p.latencyMs)
         const isBest = bestIndex === i
         const clamped = model.clamped(p.latencyMs)
+        const fresh = arrivals.has(arrivalKey(p, i))
         return (
           // seq is NOT unique: one shell call printing two contract lines
           // gives two iterations the same seq. Index disambiguates.
           <g key={`${String(p.seq)}-${String(i)}`}>
             <title>{tip}</title>
+            {/* One expanding ring when a measurement becomes the new best.
+                It fires on the state CHANGE, not on a timer, and never on
+                mount — so it marks the event a viewer would otherwise have to
+                catch by watching the axis label. */}
+            {fresh && isBest
+              ? (
+                  <circle
+                    className="kernel-opt-halo"
+                    cx={cx} cy={cy} r={6} fill="none" stroke={COLOR.ok} strokeWidth={2.5}
+                    style={{ animation: 'kernelOptHalo 900ms ease-out forwards' }}
+                  />
+                )
+              : null}
             {status === 'ok'
-              ? <circle cx={cx} cy={cy} r={3.5} fill={color} />
-              : <circle cx={cx} cy={cy} r={3.5} fill="none" stroke={color} strokeWidth={1.8} />}
+              ? (
+                  <circle
+                    className={fresh ? 'kernel-opt-arrive' : undefined}
+                    cx={cx} cy={cy} r={isBest || finalPick ? 6.5 : 4.5} fill={color}
+                    stroke={isBest || finalPick ? COLOR.halo : undefined}
+                    strokeWidth={isBest || finalPick ? 2 : undefined}
+                    style={fresh ? { animation: 'kernelOptArrive 200ms ease-out', transformOrigin: `${cx}px ${cy}px` } : undefined}
+                  />
+                )
+              : (
+                  <circle
+                    className={fresh ? 'kernel-opt-arrive' : undefined}
+                    cx={cx} cy={cy} r={4.5} fill="none" stroke={color} strokeWidth={2.2}
+                    style={fresh ? { animation: 'kernelOptArrive 200ms ease-out', transformOrigin: `${cx}px ${cy}px` } : undefined}
+                  />
+                )}
             {/* ↓ marks a point below the focus domain, pinned to the bottom
                 edge — on a better-is-up axis the outliers are the slow ones. */}
             {clamped
-              ? <text x={cx} y={CHART.h - CHART.b - 10} textAnchor="middle" fontSize={9} fill={COLOR.caption}>↓</text>
+              ? <text x={cx} y={CHART.h - CHART.b - 11} textAnchor="middle" fontSize={11} fill={COLOR.caption}>↓</text>
               : null}
             {/* How far below the domain the slowest point actually sits.
                 It rides in the gutter under its own point, not beside it
@@ -729,9 +799,9 @@ function Chart(props: {
               ? (
                   <text
                     x={Math.min(Math.max(cx, CHART.l + 18), CHART.w - CHART.r - 18)}
-                    y={CHART.h - CHART.b + 30}
+                    y={CHART.h - CHART.b + 50}
                     textAnchor="middle"
-                    fontSize={11}
+                    fontSize={12}
                     fill={COLOR.dim}
                     stroke={COLOR.halo}
                     strokeWidth={3}
@@ -741,24 +811,46 @@ function Chart(props: {
                   </text>
                 )
               : null}
-            {/* ★ where the best result was FIRST reached; ⚑ on the finalized
-                pick. Better-is-up puts the best point AT the top of the
-                domain, where a mark riding above it would leave the frame —
-                so the pair flips under the point when the room is not there. */}
-            {isBest
-              ? <text x={cx} y={cy - 21 >= CHART.t ? cy - 8 : cy + 15} textAnchor="middle" fontSize={13} fill={COLOR.ok}>★</text>
-              : null}
-            {finalPick
+            {/* Exactly ONE point on the plot carries a written label, and it
+                is the one the headline above quotes: the wrap-up pick when
+                the run made one, the best measurement while it is still
+                running. Both used to be marked, with ★ and ⚑ — two glyphs a
+                reader had to look up, on a chart where the staircase and the
+                gutter label already say where "best" is. A legend of symbols
+                is the cost of marking everything; naming one thing is
+                cheaper to read and it is the thing being claimed. */}
+            {(finalPick || (isBest && !hasFinalPick))
               ? (
-                  <text
-                    x={cx}
-                    y={cy - 21 >= CHART.t ? cy - (isBest ? 21 : 8) : cy + (isBest ? 28 : 15)}
-                    textAnchor="middle"
-                    fontSize={12}
-                    fill={COLOR.curve}
-                  >
-                    ⚑
-                  </text>
+                  <g>
+                    {/* A drop line to the gutter, and the words down there.
+                        In-plot text has to dodge whatever the data does, and
+                        this label names the point at the TOP of the domain —
+                        exactly where the two series and their dots converge,
+                        so every in-plot position ran across something for
+                        some run shape. Anchoring it to the point's own x in
+                        the empty band below the axis makes the collision
+                        structurally impossible, and the drop line keeps the
+                        association exact even when the x is clamped for
+                        frame. Same reasoning the clamp label already uses. */}
+                    <line
+                      x1={cx} x2={cx} y1={cy + 8} y2={CHART.h - CHART.b}
+                      stroke={finalPick ? COLOR.curve : COLOR.ok}
+                      strokeWidth={1} strokeDasharray="2 3" opacity={0.5}
+                    />
+                    <text
+                      x={Math.min(Math.max(cx, CHART.l + 60), CHART.w - CHART.r - 60)}
+                      y={CHART.h - CHART.b + 32}
+                      textAnchor="middle"
+                      fontSize={13}
+                      fontWeight={500}
+                      fill={finalPick ? COLOR.curve : COLOR.ok}
+                      stroke={COLOR.halo}
+                      strokeWidth={3.5}
+                      paintOrder="stroke"
+                    >
+                      {finalPick && isBest ? markLabels.bestFinal : finalPick ? markLabels.final : markLabels.best}
+                    </text>
+                  </g>
                 )
               : null}
           </g>
@@ -767,7 +859,7 @@ function Chart(props: {
 
       {/* profiler marks */}
       {profileXs.map((x, i) => (
-        <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 13} textAnchor="middle" fontSize={10} fill={COLOR.caption}>▲</text>
+        <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 15} textAnchor="middle" fontSize={12} fill={COLOR.caption}>▲</text>
       ))}
     </svg>
     {/* Legend. The plot now carries two lines rather than one, and two lines
@@ -1556,8 +1648,15 @@ export function KernelOptTab(
   )
 
   return (
+    // `width: 100%` is load-bearing, not belt-and-braces. The host wraps a
+    // view in a `display: contents` div, so this element is a direct flex
+    // item of the view area with `flex: 0 1 auto` — it sizes to its CONTENT.
+    // Without the width it settled wherever the longest caption happened to
+    // fall, which meant the chart's size was decided by a sentence, and the
+    // max-width below was never reached at all.
     <div style={{
-      padding: '20px 20px 28px', maxWidth: 1200, margin: '0 auto',
+      padding: '20px 20px 28px', width: '100%', maxWidth: 1200, margin: '0 auto',
+      boxSizing: 'border-box',
       display: 'flex', flexDirection: 'column', gap: 16,
       fontFamily: 'system-ui', color: COLOR.text,
     }}>
@@ -1801,6 +1900,11 @@ export function KernelOptTab(
                   rejected: t('chart.rejectedDot'),
                 }}
                 statusLabel={status => t(`status.${status}`)}
+                markLabels={{
+                  best: t('chart.best'),
+                  final: t('chart.final'),
+                  bestFinal: t('chart.bestFinal'),
+                }}
                 axisShort={t('axis.short')}
                 axisWhy={t('axis.why')}
                 axisHint={mode => t(mode === 'speedup' ? 'axis.hintSpeedup' : 'axis.hintLatency')}
