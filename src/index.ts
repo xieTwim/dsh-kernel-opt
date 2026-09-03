@@ -5,7 +5,7 @@
  * the only data source: kernel evaluations (evaluator tool results, or
  * `KERNEL_EVAL=` contract trailers in shell output), profiler calls,
  * finalize picks, and the model's own `kernel_plan` reports are projected
- * out of `session.events` per query and served as JSON for the browser panel
+ * out of the session log per query and served as JSON for the browser panel
  * — no plugin-side derived state to drift or leak, and replayed sessions
  * render identically.
  *
@@ -38,7 +38,7 @@ import type {} from '@deepseek-ai/dsh-agent-presets'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { hasUserTask, project } from './projection.ts'
+import { hasUserTask, project, sessionLog } from './projection.ts'
 import { KernelOptRuntime, resolveProjection } from './runtime.ts'
 import type { LoopOps } from './runtime.ts'
 import {
@@ -473,7 +473,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       // A queued user turn or still-running work owns the session; the next
       // turn end re-triggers this checkpoint.
       if (agent.status !== 'idle') return
-      const series = project(sessionId, session.events, projection)
+      const series = project(sessionId, sessionLog(session), projection)
       const decision = decideContinuation(series, state, maxNoProgress)
       if (decision.action === 'stop') {
         // The agent finalized. Who gets to end the run depends on whether
@@ -579,7 +579,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       // workspace inventory (the user may have staged the task as files)
       // instead of "continue" over nothing.
       const taskKnown = series.iterations.length > 0 || series.plans.length > 0
-        || hasUserTask(session.events)
+        || hasUserTask(sessionLog(session))
       agent.followup(createUserMessage({
         content: [{
           type: 'text',
@@ -670,8 +670,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     })()
   })
 
-  // Series + control routes — the series is a pure projection of
-  // session.events per query; the control route drives the same in-memory
+  // Series + control routes — the series is a pure projection of the session
+  // log per query; the control route drives the same in-memory
   // loop state as the slash commands. register() returns the route disposer,
   // so each registration rides an effect.
   ctx.inject(['webServer'], (wctx) => {
@@ -733,7 +733,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             respond(404, { error: 'unknown session' })
             return
           }
-          const series = project(rawId, session.events, projection)
+          const series = project(rawId, sessionLog(session), projection)
           respond(200, { ...series, control: buildControl(rawId, series) })
         } catch (error) {
           respond(500, { error: error instanceof Error ? error.message : String(error) })
@@ -760,7 +760,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               respond(rawId === '' ? 400 : 404, { error: rawId === '' ? 'sessionId query parameter required' : 'unknown session' })
               return
             }
-            const series = project(rawId, session.events, projection)
+            const series = project(rawId, sessionLog(session), projection)
             respond(200, { control: buildControl(rawId, series) })
           } catch (error) {
             respond(500, { error: error instanceof Error ? error.message : String(error) })
@@ -836,7 +836,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               respond(400, { error: `unknown action: ${action}` })
               return
             }
-            const series = project(sessionId, session.events, projection)
+            const series = project(sessionId, sessionLog(session), projection)
             const control = buildControl(sessionId, series)
             if (error !== null) {
               respond(409, { error, control })

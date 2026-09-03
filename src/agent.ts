@@ -29,7 +29,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-commands'
-import { project } from './projection.ts'
+import { project, sessionLog } from './projection.ts'
 import { REPLAY_LINE_PREFIX, samePath } from './wire.ts'
 import type { WireIteration } from './wire.ts'
 import type { LoopOps } from './runtime.ts'
@@ -196,7 +196,7 @@ export function apply(ctx: Context): void {
       if (session === undefined) return `${ack} (session not found; not replayed)`
       const runtime = ctx.kernelOptRuntime
       if (!runtime.replay.enabled) return `${ack} Replay disabled by config; the final number stays self-reported.`
-      const series = project(agent.id, session.events, runtime.projection)
+      const series = project(agent.id, sessionLog(session), runtime.projection)
       let best: WireIteration | undefined
       for (const point of series.iterations) {
         if (point.channel !== 'shell') continue

@@ -727,6 +727,34 @@ function roundSlice(event: ProjectionEvent): WireRound | null {
   return round
 }
 
+/** A host session, seen through whichever whole-log accessor it carries. */
+export interface SessionLogSource {
+  /** The whole-log getter, through DSH 0.1.1. */
+  readonly events?: readonly ProjectionEvent[]
+  /** Its 0.1.2 replacement; the no-argument call is the same read. */
+  readonly snapshotEvents?: () => readonly ProjectionEvent[]
+}
+
+/**
+ * The session's complete log, across the two host shapes that expose it.
+ *
+ * DSH 0.1.2 removed the `events` getter in favour of `snapshotEvents(from?,
+ * to?)`, whose no-argument call reads the same range. Neither is
+ * interchangeable with the same release's `ownEvents()`: the panel promises a
+ * projection of the COMPLETE history, so a forked or replayed session must
+ * still project the events it inherited.
+ *
+ * This stays a branch rather than a version floor because the machine that
+ * RUNS a kernel session is rarely the machine that builds this plugin — one
+ * build has to load on whichever host is already installed there.
+ * @param session - the host session object.
+ * @returns the log in seq order, empty when the host exposes neither.
+ */
+export function sessionLog(session: SessionLogSource): readonly ProjectionEvent[] {
+  if (typeof session.snapshotEvents === 'function') return session.snapshotEvents()
+  return session.events ?? []
+}
+
 /**
  * Project a session's events into the panel series.
  * @param sessionId - session the events came from (echoed on the wire).

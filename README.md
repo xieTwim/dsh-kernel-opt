@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml"><img src="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml/badge.svg" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
-  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DSH-0.1.0--rc.6-blue?logo=github" alt="DSH 0.1.0-rc.6"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DSH-0.1.0--rc.6%20%E2%80%94%200.1.2--rc.1-blue?logo=github" alt="DSH 0.1.0-rc.6 — 0.1.2-rc.1"></a>
 </p>
 
 <p align="center"><b>觉得有用的话，欢迎点个 star 🌟</b></p>
@@ -131,7 +131,9 @@ KERNEL_EVAL={"artifact":"solution/kernel.py","latency_ms":1.23,"correct":true}
 
 ## 兼容性
 
-在 DeepSeek Harness **0.1.0-rc.6** 上测试。插件用到了 2026-08-11 那次改名引入的宿主 API（`httpServer→webServer`、`compact→compaction`），**更旧的宿主无法加载**。peer 范围是对 DSH 的各个分包分别声明的，而不是对 `@deepseek-ai/dsh` 整体，原因见 [`docs/development.md`](docs/development.md#peer-范围为什么是两段式)。
+在 DeepSeek Harness **0.1.0-rc.6 到 0.1.2-rc.1** 上实测可加载，开发依赖钉在 `0.1.1-rc.2`（npm dist-tag `latest`）。一份构建装进任意一版：0.1.2 改掉的整段日志读取器由插件自己按宿主实际有哪个来选。
+
+插件用到了 2026-08-11 那次改名引入的宿主 API（`httpServer→webServer`、`compact→compaction`），**更旧的宿主无法加载**。peer 范围是对 DSH 的各个分包分别声明的，而不是对 `@deepseek-ai/dsh` 整体，也不是一段——宿主每开一条 `0.1.x-rc` 线就要补一段，原因见 [`docs/development.md`](docs/development.md#peer-范围为什么是四段式)。
 
 ## 许可
 

@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml"><img src="https://github.com/xieTwim/dsh-kernel-opt/actions/workflows/ci.yml/badge.svg" alt="check"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
-  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DSH-0.1.0--rc.6-blue?logo=github" alt="DSH 0.1.0-rc.6"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/DSH-0.1.0--rc.6%20%E2%80%94%200.1.2--rc.1-blue?logo=github" alt="DSH 0.1.0-rc.6 — 0.1.2-rc.1"></a>
   <img src="https://img.shields.io/badge/docs-%E4%B8%AD%E6%96%87-lightgrey" alt="Docs in Chinese">
 </p>
 
@@ -134,7 +134,9 @@ Written in Chinese.
 
 ## Compatibility
 
-Tested against DeepSeek Harness **0.1.0-rc.6**. It uses host APIs introduced by the 2026-08-11 rename (`httpServer→webServer`, `compact→compaction`), so **an older host cannot load it**. Peer ranges are declared against the individual DSH packages rather than `@deepseek-ai/dsh` as a whole — the policy is in [`docs/development.md`](docs/development.md#peer-范围为什么是两段式).
+Loads on DeepSeek Harness **0.1.0-rc.6 through 0.1.2-rc.1**, verified on both ends; development pins `0.1.1-rc.2` (npm dist-tag `latest`). One build fits every host in that span: the whole-log reader 0.1.2 replaced is selected at runtime from whichever one the host carries.
+
+It uses host APIs introduced by the 2026-08-11 rename (`httpServer→webServer`, `compact→compaction`), so **an older host cannot load it**. Peer ranges are declared against the individual DSH packages rather than `@deepseek-ai/dsh` as a whole, and in four segments rather than one — each `0.1.x-rc` line the host opens needs its own. The policy is in [`docs/development.md`](docs/development.md#peer-范围为什么是四段式).
 
 ## License
 
