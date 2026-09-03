@@ -39,6 +39,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { hasUserTask, project, sessionLog } from './projection.ts'
+import { referenceLatency } from './chart.ts'
 import { KernelOptRuntime, resolveProjection } from './runtime.ts'
 import type { LoopOps } from './runtime.ts'
 import {
@@ -49,7 +50,7 @@ import {
 } from './loop.ts'
 import type { LoopState } from './loop.ts'
 import { syncPreset } from './preset.ts'
-import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH } from './wire.ts'
+import { CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH, runHeadline } from './wire.ts'
 import type { RunLanguage, WireControl, WireModelInfo, WireModels, WireSeries } from './wire.ts'
 
 export const name = 'kernel-opt'
@@ -75,7 +76,7 @@ export interface Config {
   profileTools?: string[]
   /** Profiler executables recognised on a shell command line (▲ markers). */
   profileCommands?: string[]
-  /** Tool names treated as finalize picks (★ marker via `evaluation_id`). */
+  /** Tool names treated as finalize picks (the wrap-up pick, via `evaluation_id`). */
   finalizeTools?: string[]
   /** Tool names treated as structured artifact changes (default `write`/`edit`). */
   changeTools?: string[]
@@ -678,7 +679,26 @@ export function apply(ctx: Context, config: Config = {}): void {
     const buildControl = (sessionId: string, series: WireSeries): WireControl => {
       const state = loops.get(sessionId)
       const evalsDone = completedEvals(series)
+      // The result, carried on the LIGHT route. The composer strip shows the
+      // number while the reader is watching the conversation rather than the
+      // panel, and that seat polls this route precisely so it does not drag
+      // the whole iteration table along twice a second — so the two or three
+      // fields it needs ride here rather than being a reason to fetch the
+      // series.
+      const headline = runHeadline(series.iterations, series.bestIndex)
+      const claim = headline.claim
+      const reference = referenceLatency(series.iterations)
+      const ratio = claim?.latencyMs === undefined
+        ? undefined
+        : claim.speedup ?? (reference !== undefined ? reference / claim.latencyMs : undefined)
       return {
+        ...(claim?.latencyMs !== undefined
+          ? { result: {
+              latencyMs: claim.latencyMs,
+              finalized: headline.finalized,
+              ...(ratio !== undefined ? { speedup: ratio } : {}),
+            } }
+          : {}),
         loop: {
           armed: state?.armed ?? false,
           budget: state?.budget ?? 0,

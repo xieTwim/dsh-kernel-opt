@@ -167,6 +167,18 @@ export interface WireRound {
 
 /** Loop + supervisor control state for the panel. */
 export interface WireControl {
+  /**
+   * The run's current result, resolved by {@link runHeadline} — absent until
+   * one eligible evaluation lands. Carried on the light control route so the
+   * composer strip can show the number without fetching the whole series.
+   */
+  result?: {
+    latencyMs: number
+    /** Reported by that evaluation, else pooled over the run. */
+    speedup?: number
+    /** Whether this is the wrap-up pick rather than the running best. */
+    finalized: boolean
+  }
   loop: {
     /** Whether the kernel loop re-drives this session at turn settle. */
     armed: boolean
@@ -283,9 +295,9 @@ export function samePath(a: string, b: string): boolean {
  * Four conditions, all disqualifying: a wrong answer, a flagged reward hack,
  * a failed evaluation, and a point that was never timed. Stated here because
  * three places now decide it — the projection picking `bestIndex`, the same
- * projection resolving which measurement of a finalized artifact carries the
- * ⚑, and the chart drawing a best-so-far line. A private copy in any of them
- * would eventually let the panel draw a best the ★ never stood on.
+ * projection resolving which measurement of a finalized artifact is the
+ * wrap-up pick, and the chart drawing a best-so-far line. A private copy
+ * would eventually let the panel draw a best no evaluation ever reached.
  *
  * Narrows `latencyMs`, so a caller that passes the guard can compare
  * latencies without re-testing the field it just tested.
@@ -317,7 +329,7 @@ export interface RunHeadline {
  *
  * The claim is the FINALIZE PICK when the run made one, not the fastest row.
  * Those two genuinely differ: `bestIndex` ranges over every artifact the run
- * ever timed, while the ⚑ lands on the best measurement of the artifact the
+ * ever timed, while the wrap-up pick is the best measurement of the artifact the
  * agent actually chose — so a run that explored `experiments/fast.py` and
  * shipped `kernel.py` has a fastest row it is not claiming. Headlining the
  * fastest row there would advertise a number nobody can install.

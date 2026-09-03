@@ -35,7 +35,7 @@ export interface ProjectionConfig {
    * (a CPU box, an unsupported accelerator), so absence is weak evidence.
    */
   readonly profileCommands: readonly string[]
-  /** Match list for finalize calls (their `evaluation_id` marks a point ★). */
+  /** Match list for finalize calls (their `evaluation_id` marks the wrap-up pick). */
   readonly finalizeTools: readonly string[]
   /** Exact name of the plan tool. */
   readonly planTool: string
@@ -773,7 +773,7 @@ export function project(
   const profileSeqs: number[] = []
   const rounds: WireRound[] = []
   const finalizedIds = new Set<string>()
-  /** Artifacts named by finalize calls (`artifact_path`), best point gets ⚑. */
+  /** Artifacts named by finalize calls (`artifact_path`); their best point is the pick. */
   const finalizedArtifacts: string[] = []
   /** callId → pending bench iteration awaiting its result. */
   const pendingBench = new Map<string, WireIteration>()
@@ -1045,7 +1045,7 @@ export function project(
   }
 
   // Artifact-named finalizes (the self-reported channel has no evaluator ids):
-  // the best honest measurement of that artifact carries the ⚑.
+  // the best honest measurement of that artifact is the wrap-up pick.
   for (const artifact of finalizedArtifacts) {
     let best: WireIteration | undefined
     for (const point of iterations) {

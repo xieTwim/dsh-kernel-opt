@@ -4,7 +4,7 @@
  * 「评测」 session tab (`conversation.view` slot): polls the Node half's
  * series route and renders the live optimization picture — latency curve over
  * evaluations (log scale when the journey is wide), correctness/reward-hack
- * status per point, profiler ▲ and finalize ★ marks, the model's latest
+ * status per point, a best-so-far staircase and the wrap-up pick, the model's latest
  * `kernel_plan`, and an iteration table. Pure projection of the session log;
  * a replayed session renders identically.
  * @module
@@ -165,6 +165,7 @@ const zh = {
   'lang.tip': '启动时根据界面语言确定；本轮运行期间保持不变。',
   'axis.short': '↑ 越高越快 · 未通过验证的候选不计入最佳',
   'axis.why': '为什么曲线和表格的加速比不完全一致？',
+  'row.best': '最佳',
   'hero.running': '当前最佳',
   'hero.final': '提交候选',
   'hero.from': '{reference} → {latency}',
@@ -312,6 +313,7 @@ const en = {
   'lang.tip': 'Resolved from the interface language when the run starts, then kept fixed for that run.',
   'axis.short': '↑ Higher is faster · candidates that failed verification never count toward best',
   'axis.why': 'Why do the curve and the table report slightly different speedups?',
+  'row.best': 'best',
   'hero.running': 'Best so far',
   'hero.final': 'Submission candidate',
   'hero.from': '{reference} → {latency}',
@@ -569,7 +571,7 @@ const STATUS_COLOR: Record<ReturnType<typeof statusOf>, string> = {
   error: COLOR.bad,
 }
 
-/** Optimization curve with per-point status, best line, profile ▲ and finalize ★. */
+/** Optimization curve: candidate series, best-so-far staircase, profile ▲, one named point. */
 function Chart(props: {
   series: WireSeries
   bestLabel: string
@@ -720,10 +722,10 @@ function Chart(props: {
         const status = statusOf(p)
         const color = STATUS_COLOR[status]
         const cx = model.x(i)
-        // The ⚑ marks the finalize PICK only; the replay row re-measures that
+        // The pick is the finalize call's own choice; the replay row re-measures that
         // same final version and carries its own 复测 badge in the table.
         const finalPick = p.finalized === true && p.channel !== 'replay'
-        const marks = `${bestIndex === i ? ' ★' : ''}${finalPick ? ' ⚑' : ''}`
+        const marks = `${bestIndex === i ? ` · ${markLabels.best}` : ''}${finalPick ? ` · ${markLabels.final}` : ''}`
         // The tooltip carries the RAW numbers of that evaluation: its own
         // latency and, when the evaluator gave one, its own reported speedup
         // — not the pooled value the axis is drawn from.
@@ -2193,9 +2195,9 @@ export function KernelOptTab(
                               </span>
                             )
                           : null}
-                        {isBest ? <span style={{ flex: 'none', color: COLOR.ok }} title={t('tip.best')}>★</span> : null}
+                        {isBest ? <span style={{ flex: 'none', color: COLOR.ok, fontWeight: 500 }} title={t('tip.best')}>{t('row.best')}</span> : null}
                         {p.finalized === true && p.channel !== 'replay'
-                          ? <span style={{ flex: 'none', color: COLOR.curve }} title={t('tip.final')}>⚑ {t('table.final')}</span>
+                          ? <span style={{ flex: 'none', color: COLOR.curve, fontWeight: 500 }} title={t('tip.final')}>{t('table.final')}</span>
                           : null}
                         <span
                           style={{ flex: 'none', color: STATUS_COLOR[status], fontWeight: 500 }}
@@ -2430,13 +2432,34 @@ export function ChatLoopStrip(
         border: `1px solid ${COLOR.curve}`, borderRadius: 12,
         background: COLOR.tip, color: COLOR.text,
       }}>
+        <span style={{
+          flex: 'none', width: 7, height: 7, borderRadius: 999,
+          background: COLOR.curve, animation: 'kernelOptPulse 1.6s ease-in-out infinite',
+        }} />
         <span style={{ color: COLOR.curve, fontWeight: 500 }}>
-          ⟳ {t('loop.armed', {
+          {t('rail.running', {
             round: control.loop.round,
             done: Math.min(control.loop.evalsDone, control.loop.budget),
             budget: control.loop.budget,
           })}
         </span>
+        {/* The number, on the screen the reader is actually looking at.
+            A run takes many minutes, and for almost all of them the
+            conversation is what is on screen — the curve lives one tab away.
+            Without this the chat says the agent is busy and nothing else,
+            and the only evidence that the work is going anywhere is in a
+            tab nobody is looking at. */}
+        {control.result !== undefined
+          ? (
+              <span style={{ color: COLOR.ok, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                {t(control.result.finalized ? 'hero.final' : 'hero.running')}
+                {' '}
+                {control.result.speedup !== undefined
+                  ? `×${control.result.speedup.toPrecision(3)}`
+                  : formatLatency(control.result.latencyMs)}
+              </span>
+            )
+          : null}
         {control.loop.evalsOverBudget > 0
           ? <span style={{ color: COLOR.warn }}>{t('loop.overBudget', { count: control.loop.evalsOverBudget })}</span>
           : null}
