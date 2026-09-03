@@ -278,6 +278,80 @@ export function samePath(a: string, b: string): boolean {
 }
 
 /**
+ * Whether an evaluation may count as the run's best.
+ *
+ * Four conditions, all disqualifying: a wrong answer, a flagged reward hack,
+ * a failed evaluation, and a point that was never timed. Stated here because
+ * three places now decide it — the projection picking `bestIndex`, the same
+ * projection resolving which measurement of a finalized artifact carries the
+ * ⚑, and the chart drawing a best-so-far line. A private copy in any of them
+ * would eventually let the panel draw a best the ★ never stood on.
+ *
+ * Narrows `latencyMs`, so a caller that passes the guard can compare
+ * latencies without re-testing the field it just tested.
+ * @param point - one projected evaluation.
+ * @returns whether it is a result the run can claim.
+ */
+export function eligibleBest(point: WireIteration): point is WireIteration & { latencyMs: number } {
+  return point.correct === true && point.rewardHack !== true
+    && point.error === undefined && point.latencyMs !== undefined
+}
+
+/** What the panel's headline states, and what it must not leave out. */
+export interface RunHeadline {
+  /** The result the run stands behind; absent until one eligible point lands. */
+  claim?: WireIteration
+  /** Whether {@link RunHeadline.claim} is a finalize pick rather than the running best. */
+  finalized: boolean
+  /**
+   * The fastest eligible measurement, when it is NOT the claim — the run
+   * measured something quicker than the version it shipped.
+   */
+  fasterMeasured?: WireIteration
+  /** Evaluations that returned a verdict the run cannot claim. */
+  rejected: number
+}
+
+/**
+ * Resolve the one number the panel prints largest.
+ *
+ * The claim is the FINALIZE PICK when the run made one, not the fastest row.
+ * Those two genuinely differ: `bestIndex` ranges over every artifact the run
+ * ever timed, while the ⚑ lands on the best measurement of the artifact the
+ * agent actually chose — so a run that explored `experiments/fast.py` and
+ * shipped `kernel.py` has a fastest row it is not claiming. Headlining the
+ * fastest row there would advertise a number nobody can install.
+ *
+ * When they differ, {@link RunHeadline.fasterMeasured} carries the other one
+ * so the panel can print both. Losing that would be the more attractive bug:
+ * a headline that quietly reports the shipped version while a faster row sits
+ * in the table reads, to anyone who scrolls, like the panel got caught.
+ * @param iterations - the projected evaluations.
+ * @param bestIndex - the projection's own best-point index.
+ * @returns the headline model.
+ */
+export function runHeadline(
+  iterations: readonly WireIteration[],
+  bestIndex: number | null,
+): RunHeadline {
+  const best = bestIndex === null ? undefined : iterations[bestIndex]
+  // The replay row re-measures the pick rather than being a pick of its own.
+  const final = iterations.find(p => p.finalized === true && p.channel !== 'replay')
+  const claim = final ?? best
+  const rejected = iterations.filter(p => p.pending !== true && !eligibleBest(p)).length
+  return {
+    ...(claim !== undefined ? { claim } : {}),
+    finalized: final !== undefined,
+    ...(best !== undefined && claim !== undefined && best !== claim
+      && best.latencyMs !== undefined && claim.latencyMs !== undefined
+      && best.latencyMs < claim.latencyMs
+      ? { fasterMeasured: best }
+      : {}),
+    rejected,
+  }
+}
+
+/**
  * The reference latency each evaluation actually divided by, recovered as
  * `latency × speedup`. A frozen denominator repeats one value; an evaluator
  * that re-times its reference per evaluation returns a slightly different one

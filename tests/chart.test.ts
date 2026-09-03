@@ -5,7 +5,8 @@
  */
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { CHART, chartModel, formatLatency, referenceLatency } from '../src/chart.ts'
+import { CHART, bestSoFar, chartModel, formatLatency, referenceLatency } from '../src/chart.ts'
+import { eligibleBest } from '../src/wire.ts'
 import type { WireIteration } from '../src/wire.ts'
 
 let seq = 0
@@ -109,4 +110,46 @@ test('latency formatting spans µs to s', () => {
   assert.equal(formatLatency(0.453), '453µs')
   assert.equal(formatLatency(20.4), '20.40ms')
   assert.equal(formatLatency(2000), '2.00s')
+})
+
+/** One evaluation with an explicit verdict, for the eligibility rule. */
+function verdict(latencyMs: number | undefined, fields: Partial<WireIteration>): WireIteration {
+  seq += 1
+  const out: WireIteration = { seq, tool: 'bash', channel: 'shell', correct: true, ...fields }
+  if (latencyMs !== undefined) out.latencyMs = latencyMs
+  return out
+}
+
+test('best-so-far only ever moves forward, and only over eligible points', () => {
+  const points = [
+    verdict(2.0, {}),                                  // first valid → 2.0
+    verdict(1.0, {}),                                  // faster      → 1.0
+    verdict(0.5, { correct: false }),                  // wrong answer, however fast
+    verdict(0.4, { rewardHack: true }),                // flagged as gaming the bench
+    verdict(0.3, { error: 'evaluator crashed' }),      // no verdict on the kernel
+    verdict(undefined, {}),                            // never timed
+    verdict(3.0, {}),                                  // a slower candidate
+    verdict(0.8, {}),                                  // a real improvement → 0.8
+  ]
+  assert.deepEqual(
+    [...bestSoFar(points)],
+    [2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.8],
+  )
+})
+
+test('best-so-far is undefined until the first eligible evaluation', () => {
+  const points = [verdict(0.5, { correct: false }), verdict(undefined, {}), verdict(2.0, {})]
+  assert.deepEqual([...bestSoFar(points)], [undefined, undefined, 2.0])
+  assert.deepEqual([...bestSoFar([])], [])
+})
+
+test('the best-so-far line cannot outrun the projection\'s own best', () => {
+  // The two derivations share `eligibleBest`; this pins the consequence, which
+  // is what a reader of the chart actually depends on.
+  const points = [verdict(2.0, {}), verdict(0.9, { rewardHack: true }), verdict(1.2, {})]
+  const line = bestSoFar(points)
+  const claimable = points.filter(eligibleBest).map(p => p.latencyMs)
+  const floor = Math.min(...claimable)
+  assert.equal(line[line.length - 1], floor)
+  assert.ok(claimable.every(l => l !== 0.9), 'a flagged point is never claimable')
 })

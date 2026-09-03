@@ -9,7 +9,7 @@ import type { WireChange, WireEnv, WireIteration, WirePlan, WireRound, WireSerie
 import {
   AUDIT_CLOSE_LINE, AUDIT_LINE_PREFIX, CHALLENGE_LINE, CONTINUE_TRAILER, EVAL_TRAILER_PREFIX,
   LOOP_LINE_PREFIX, REPLAY_LINE_PREFIX, REVIEW_HEADER, REVIEW_OK_LINE,
-  WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, samePath,
+  WRAPUP_CLOSE_LINE, WRAPUP_LINE_PREFIX, eligibleBest, samePath,
 } from './wire.ts'
 
 /** Structural slice of a logged session event the projection reads. */
@@ -1051,8 +1051,7 @@ export function project(
     for (const point of iterations) {
       if (point.channel === 'replay') continue
       if (point.artifactPath === undefined || !samePath(point.artifactPath, artifact)) continue
-      if (point.correct !== true || point.rewardHack === true || point.error !== undefined) continue
-      if (point.latencyMs === undefined) continue
+      if (!eligibleBest(point)) continue
       if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) best = point
     }
     if (best !== undefined) best.finalized = true
@@ -1061,9 +1060,7 @@ export function project(
   let bestIndex: number | null = null
   for (let i = 0; i < iterations.length; i += 1) {
     const point = iterations[i]
-    if (point === undefined) continue
-    if (point.correct !== true || point.rewardHack === true || point.error !== undefined) continue
-    if (point.latencyMs === undefined) continue
+    if (point === undefined || !eligibleBest(point)) continue
     const best = bestIndex === null ? undefined : iterations[bestIndex]
     if (best?.latencyMs === undefined || point.latencyMs < best.latencyMs) bestIndex = i
   }

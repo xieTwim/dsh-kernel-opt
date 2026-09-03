@@ -15,7 +15,7 @@
  */
 
 import type { WireIteration } from './wire.ts'
-import { impliedReferences } from './wire.ts'
+import { eligibleBest, impliedReferences } from './wire.ts'
 
 /** Human latency: µs under 1 ms, ms under 1 s, s above. */
 export function formatLatency(ms: number): string {
@@ -61,6 +61,28 @@ export interface ChartModel {
   label: (latencyMs: number, reported?: number) => string
   /** The run's pooled reference latency, when it has one. */
   referenceMs?: number
+}
+
+/**
+ * The running best latency after each evaluation, `undefined` until the first
+ * eligible one lands.
+ *
+ * This is what turns the curve from one line into two. Read alone, the
+ * chronological series says a run that explores lost ground whenever a
+ * candidate comes back slower; beside a monotone best-so-far it says the
+ * opposite and truer thing — the agent spends evaluations on candidates that
+ * may fail, and the number it will stand behind only ever moves forward.
+ * @param measured - the evaluations in log order.
+ * @returns one entry per input evaluation, in the same order.
+ */
+export function bestSoFar(measured: readonly WireIteration[]): readonly (number | undefined)[] {
+  const out: (number | undefined)[] = []
+  let best: number | undefined
+  for (const point of measured) {
+    if (eligibleBest(point) && (best === undefined || point.latencyMs < best)) best = point.latencyMs
+    out.push(best)
+  }
+  return out
 }
 
 /** Nearest-rank quantile of an ascending-sorted array. */

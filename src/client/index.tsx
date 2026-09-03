@@ -21,13 +21,13 @@ import type { LocaleId } from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  RunLanguage, WireChange, WireControl, WireEnv, WireIteration, WireModelInfo, WireModels,
-  WirePlan, WireRound, WireSeries,
+  RunHeadline, RunLanguage, WireChange, WireControl, WireEnv, WireIteration, WireModelInfo,
+  WireModels, WirePlan, WireRound, WireSeries,
 } from '../wire.ts'
-import { AXIS_GAP, CHART, chartModel, formatLatency } from '../chart.ts'
+import { AXIS_GAP, CHART, bestSoFar, chartModel, formatLatency, referenceLatency } from '../chart.ts'
 import {
   CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH,
-  evaluationPhases, latestRunStart, referenceDrift, samePath, unfinishedRun,
+  evaluationPhases, latestRunStart, referenceDrift, runHeadline, samePath, unfinishedRun,
 } from '../wire.ts'
 import { placePopover } from './popover.ts'
 import type { PopoverPlacement } from './popover.ts'
@@ -100,7 +100,6 @@ const zh = {
   'ctl.start': '启动循环',
   'ctl.stop': '停止循环',
   'ctl.budget': '优化评测上限',
-  'ctl.title': '运行控制',
   'advice.title': '监督记录',
   'advice.waiting': '监督已开启。每次开始下一轮优化前，监督模型都会复审当前进展，并将结果交给智能体；复审记录会显示在这里。',
   'advice.round': '第 {n} 次复审',
@@ -164,6 +163,27 @@ const zh = {
   'lang.zh': '中文',
   'lang.en': 'English',
   'lang.tip': '启动时根据界面语言确定；本轮运行期间保持不变。',
+  'axis.short': '↑ 越高越快 · 未通过验证的候选不计入最佳',
+  'axis.why': '为什么曲线和表格的加速比不完全一致？',
+  'hero.running': '当前最佳',
+  'hero.final': '提交候选',
+  'hero.from': '{reference} → {latency}',
+  'hero.faster': '最高测得 {label}，来自 {artifact}——本轮没有选它收尾',
+  'hero.rejected': '{count} 个候选未通过验证',
+  'hero.passed': '正确性通过',
+  'hero.noHack': '未检出作弊',
+  'hero.pending': '评测进行中',
+  'rail.running': '第 {round} 轮 · 已完成 {done}/{budget} 次优化评测',
+  'rail.settings': '运行设置',
+  'rail.collapse': '收起',
+  'chart.candidate': '本轮结果',
+  'chart.bestLine': '截至本轮最佳',
+  'chart.rejectedDot': '未通过验证',
+  'chart.best': '新最佳',
+  'chart.final': '收尾选定',
+  'chart.bestFinal': '最佳，且收尾选定',
+  'audit.title': '完整审计记录',
+  'audit.hint': '评测环境、方案汇报历史、监督记录、逐次评测明细',
 } satisfies Record<string, string>
 /** Panel locale key union. */
 type LocaleKey = keyof typeof zh
@@ -227,7 +247,6 @@ const en = {
   'ctl.start': 'Start loop',
   'ctl.stop': 'Stop loop',
   'ctl.budget': 'Optimization evaluation limit',
-  'ctl.title': 'Run controls',
   'advice.title': 'Supervision log',
   'advice.waiting': 'Supervision on: before each continuation the supervisor reviews progress first; its conclusions and advice are handed to the agent and recorded here.',
   'advice.round': 'review {n}',
@@ -291,6 +310,27 @@ const en = {
   'lang.zh': '中文',
   'lang.en': 'English',
   'lang.tip': 'Resolved from the interface language when the run starts, then kept fixed for that run.',
+  'axis.short': '↑ Higher is faster · candidates that failed verification never count toward best',
+  'axis.why': 'Why do the curve and the table report slightly different speedups?',
+  'hero.running': 'Best so far',
+  'hero.final': 'Submission candidate',
+  'hero.from': '{reference} → {latency}',
+  'hero.faster': 'Fastest measured {label}, from {artifact} — not the version this run picked',
+  'hero.rejected': '{count} candidates failed verification',
+  'hero.passed': 'Correctness passed',
+  'hero.noHack': 'No reward hack detected',
+  'hero.pending': 'Evaluation in flight',
+  'rail.running': 'Round {round} · {done}/{budget} optimization evaluations done',
+  'rail.settings': 'Run settings',
+  'rail.collapse': 'Hide',
+  'chart.candidate': 'Candidate',
+  'chart.bestLine': 'Best so far',
+  'chart.rejectedDot': 'Failed verification',
+  'chart.best': 'New best',
+  'chart.final': 'Wrap-up pick',
+  'chart.bestFinal': 'Best, and the wrap-up pick',
+  'audit.title': 'Full audit record',
+  'audit.hint': 'Environment, plan history, supervision log, per-evaluation detail',
 } satisfies Record<LocaleKey, string>
 
 /** Poll cadence — the panel is a dashboard, not a ticker. */
@@ -323,6 +363,47 @@ const COLOR = {
 
 /** Elevated-surface shadow (host menu dropdowns use shadow-lv3). */
 const MENU_SHADOW = 'var(--dsw-shadow-lv3, 0 8px 24px rgba(0,0,0,.14))'
+
+/**
+ * The panel's one stylesheet, for the rules inline `style` objects cannot
+ * express — keyframes, and the reduced-motion opt-out that has to switch them
+ * off.
+ *
+ * Every animation here is a ONE-SHOT acknowledgement of an artifact that just
+ * appeared in the log, or the single ambient pulse that says a run is still
+ * going. Nothing loops to look busy: on a panel whose whole argument is that
+ * the picture is a projection of the record, motion with no event behind it
+ * is decoration that reads as data.
+ */
+const PANEL_CSS = `
+@keyframes kernelOptPulse {
+  0%, 100% { opacity: 1 }
+  50% { opacity: .3 }
+}
+@keyframes kernelOptArrive {
+  from { opacity: 0; transform: scale(.75) }
+  to { opacity: 1; transform: scale(1) }
+}
+@keyframes kernelOptHalo {
+  from { opacity: .55; r: 4 }
+  to { opacity: 0; r: 16 }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="kernelOptPulse"], .kernel-opt-arrive { animation: none !important }
+  .kernel-opt-halo { display: none }
+}
+`
+
+/** Attach {@link PANEL_CSS} once per document, whichever panel mounts first. */
+function installPanelStyles(): void {
+  if (typeof document === 'undefined') return
+  const id = 'kernel-opt-panel-css'
+  if (document.getElementById(id) !== null) return
+  const style = document.createElement('style')
+  style.id = id
+  style.textContent = PANEL_CSS
+  document.head.append(style)
+}
 
 /** Session-scoped polling hook for the panel series (+ manual refetch). */
 /** One-shot fetch of the supervisor model catalog (picker options). */
@@ -456,11 +537,18 @@ const STATUS_COLOR: Record<ReturnType<typeof statusOf>, string> = {
 function Chart(props: {
   series: WireSeries
   bestLabel: string
+  /** Legend copy for the three things the plot draws. */
+  legend: { candidate: string, best: string, rejected: string }
   statusLabel: (status: ReturnType<typeof statusOf>) => string
+  /** One-line axis rule, always shown under a × axis. */
+  axisShort: string
+  /** Link copy opening the pooled-denominator explanation. */
+  axisWhy: string
   axisHint: (mode: 'speedup' | 'latency') => string
   driftNote: (drift: { min: number, max: number, ratio: number, count: number }) => string
 }): ReactNode {
-  const { series, bestLabel, statusLabel, axisHint, driftNote } = props
+  const { series, bestLabel, legend, statusLabel, axisShort, axisWhy, axisHint, driftNote } = props
+  const bestSoFarLabel = legend.best
   const { iterations, profileSeqs, bestIndex } = series
   const model = useMemo(() => chartModel(iterations, iterations.length), [iterations])
   const drift = useMemo(() => referenceDrift(iterations), [iterations])
@@ -490,6 +578,27 @@ function Chart(props: {
     const frac = before < 0 ? 0 : before === after ? 1 : 0.5
     return model.x(Math.max(0, before)) + (model.x(after) - model.x(Math.max(0, before))) * frac
   })
+
+  // The best-so-far staircase, as an explicit step path: horizontal until an
+  // eligible evaluation beats the standing best, then vertical at the point
+  // that beat it. Drawn as steps rather than a smoothed line because that is
+  // literally what the quantity does — the claim holds at one value until a
+  // measurement replaces it, and a diagonal would draw improvement during
+  // evaluations that produced none.
+  const bestLine = bestSoFar(iterations)
+  let bestPath = ''
+  let previousBest: number | undefined
+  for (let i = 0; i < iterations.length; i += 1) {
+    const value = bestLine[i]
+    if (value === undefined) continue
+    const px = model.x(i)
+    const py = model.y(value)
+    if (bestPath === '') bestPath = `M ${px.toFixed(1)} ${py.toFixed(1)}`
+    else if (value === previousBest) bestPath += ` L ${px.toFixed(1)} ${py.toFixed(1)}`
+    // A new best: hold the old level up to this x, then step up to it.
+    else bestPath += ` L ${px.toFixed(1)} ${model.y(previousBest ?? value).toFixed(1)} L ${px.toFixed(1)} ${py.toFixed(1)}`
+    previousBest = value
+  }
 
   return (
     <>
@@ -526,33 +635,42 @@ function Chart(props: {
         )
       })}
 
-      {/* Best dashed line, labeled in the AXIS GUTTER rather than inside the
-          plot. In-plot labels have to dodge whatever the data happens to do —
-          and the best line is exactly where points cluster, so every in-plot
-          position collides for some run shape. Outside the plot area the
-          collision is structurally impossible; only sibling AXIS labels can
-          clash, and those yield above (the best value is the one worth
-          reading). Colour ties it to the line; the chip above the chart
-          carries the word. */}
-      {best?.latencyMs !== undefined
+      {/* The best-so-far staircase, and the run's best value labeled in the
+          AXIS GUTTER rather than inside the plot. In-plot labels have to
+          dodge whatever the data happens to do — and the best level is
+          exactly where points cluster, so every in-plot position collides for
+          some run shape. Outside the plot area the collision is structurally
+          impossible; only sibling AXIS labels can clash, and those yield
+          above (the best value is the one worth reading).
+
+          The staircase replaced a single flat dashed line at the final best.
+          The flat line stated the outcome and said nothing about the search:
+          drawn across the whole width from the first evaluation, it implied
+          the run had been that fast all along. The steps say when each
+          improvement actually arrived, which is the same data and the true
+          shape of it. */}
+      {bestPath !== ''
         ? (
             <g>
-              <title>{`${bestLabel} ${formatLatency(best.latencyMs)}`}</title>
-              <line
-                x1={CHART.l} x2={CHART.w - CHART.r}
-                y1={bestY} y2={bestY}
-                stroke={COLOR.ok} strokeWidth={1} strokeDasharray="4 4" opacity={0.6}
-              />
-              <text x={CHART.l - 6} y={bestY + 4} textAnchor="end" fontSize={12} fontWeight={500} fill={COLOR.ok}>
-                {model.label(best.latencyMs, best.speedup)}
-              </text>
+              <title>{bestSoFarLabel}</title>
+              <path d={bestPath} fill="none" stroke={COLOR.ok} strokeWidth={2} opacity={0.85} />
             </g>
           )
         : null}
+      {best?.latencyMs !== undefined
+        ? (
+            <text x={CHART.l - 6} y={bestY + 4} textAnchor="end" fontSize={12} fontWeight={600} fill={COLOR.ok}>
+              {model.label(best.latencyMs, best.speedup)}
+            </text>
+          )
+        : null}
 
-      {/* curve through measured points */}
+      {/* The chronological candidate series. Thinner and dimmer than the
+          staircase above it, which is the point of drawing both: this line
+          is what the agent TRIED, the staircase is what the run can claim,
+          and a dip here now reads as an experiment rather than a loss. */}
       {linePoints.length > 0
-        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.6} opacity={0.9} />
+        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.4} opacity={0.65} />
         : null}
 
       {/* points */}
@@ -652,24 +770,63 @@ function Chart(props: {
         <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 13} textAnchor="middle" fontSize={10} fill={COLOR.caption}>▲</text>
       ))}
     </svg>
-    {/* What the axis is measuring. Needed in both modes for opposite reasons:
-        a × axis has to say the number is not the evaluator's per-row ratio,
-        and a latency axis has to say its numbers now DECREASE upward.
-        The latency axis is also an ANOMALY, not a second normal mode: the
-        protocol asks every evaluation for a denominator, so reaching this
-        branch means a run's ratios went missing between the evaluator and
-        here. It carries a warning's colour to match — a dim caption is how
-        this went unread for a whole run. */}
-    <div
-      style={{
-        padding: '4px 8px 2px',
-        fontSize: 11,
-        lineHeight: '16px',
-        color: model.referenceMs !== undefined ? COLOR.caption : COLOR.warn,
-      }}
-    >
-      {axisHint(model.referenceMs !== undefined ? 'speedup' : 'latency')}
+    {/* Legend. The plot now carries two lines rather than one, and two lines
+        with no key is a puzzle: a viewer who has to work out which is which
+        spends the attention the chart was supposed to save. Three entries
+        only — the marks inside the plot are labeled where they sit. */}
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center',
+      padding: '6px 8px 0', fontSize: 12, lineHeight: '18px', color: COLOR.caption,
+    }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 14, height: 0, borderTop: `2px solid ${COLOR.ok}` }} />
+        {legend.best}
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 14, height: 0, borderTop: `1.5px solid ${COLOR.curve}`, opacity: 0.7 }} />
+        {legend.candidate}
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: 999, border: `1.5px solid ${COLOR.bad}`,
+        }} />
+        {legend.rejected}
+      </span>
     </div>
+    {/* What the axis is measuring.
+
+        In the normal (×) mode this is one line, and the paragraph explaining
+        why the curve's denominator differs from the table's is one click
+        behind it. Four lines of 11px grey under a chart is the size at which
+        a caption stops being read at all — and it is the caption that has to
+        survive a screen recording, where small grey text is the first thing
+        compression eats.
+
+        The latency mode keeps its full sentence and a warning's colour: it is
+        an ANOMALY, not a second normal mode. The protocol asks every
+        evaluation for a denominator, so reaching that branch means a run's
+        ratios went missing between the evaluator and here, and a dim caption
+        is exactly how that went unread for a whole run once already. */}
+    {model.referenceMs !== undefined
+      ? (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'baseline',
+            padding: '4px 8px 2px', fontSize: 12, lineHeight: '18px', color: COLOR.caption,
+          }}>
+            <span>{axisShort}</span>
+            <span
+              style={{ cursor: 'help', color: COLOR.curve }}
+              title={axisHint('speedup')}
+            >
+              {axisWhy}
+            </span>
+          </div>
+        )
+      : (
+          <div style={{ padding: '4px 8px 2px', fontSize: 12, lineHeight: '18px', color: COLOR.warn }}>
+            {axisHint('latency')}
+          </div>
+        )}
     {/* The pooled axis keeps the CURVE readable when the evaluator re-timed its
         reference, but it cannot make the per-row ratios agree with each other,
         and the table prints those verbatim. Say so where the ratios are, so a
@@ -702,6 +859,114 @@ const cardStyle: CSSProperties = {
   borderRadius: 12,
   background: COLOR.tip,
   padding: '14px 16px',
+}
+
+/**
+ * The result surface: the one card that reads as raised rather than outlined.
+ * Detail sections stay border-only, so the hierarchy survives the contrast
+ * loss of video compression, where a 1px border and a 2px border are the
+ * same border.
+ */
+const heroCardStyle: CSSProperties = {
+  border: `1px solid ${COLOR.borderL2}`,
+  borderRadius: 16,
+  background: COLOR.inputBg,
+  boxShadow: 'var(--dsw-shadow-lv1, 0 1px 3px rgba(0,0,0,.06))',
+  padding: '18px 22px',
+}
+
+/** Last path segment — the artifact's identity, without the run's directory layout. */
+function baseName(path: string): string {
+  return path.split('/').filter(s => s.length > 0).pop() ?? path
+}
+
+/**
+ * The run's result, at the size a meeting room reads.
+ *
+ * Everything here was already on the panel; what changes is rank. The number
+ * a viewer came for used to be a 13px chip between two other chips, which is
+ * the size the panel gave "3 profiles" — so the screen led with its controls
+ * and buried its conclusion. The verification column beside it is deliberate
+ * company: a large speedup with nothing next to it is a claim, and the whole
+ * argument of this plugin is that a number arrives with its checks attached.
+ */
+function Hero(props: {
+  headline: RunHeadline
+  referenceMs: number | undefined
+  pendingCount: number
+  t: T
+}): ReactNode {
+  const { headline, referenceMs, pendingCount, t } = props
+  const claim = headline.claim
+  if (claim?.latencyMs === undefined) return null
+  // The point's OWN reported ratio wins over the pooled estimate, so the
+  // headline never disagrees with the row the reader can scroll to.
+  const ratio = claim.speedup ?? (referenceMs !== undefined ? referenceMs / claim.latencyMs : undefined)
+  const faster = headline.fasterMeasured
+  const fasterRatio = faster?.latencyMs === undefined
+    ? undefined
+    : faster.speedup ?? (referenceMs !== undefined ? referenceMs / faster.latencyMs : undefined)
+  return (
+    <div style={{ ...heroCardStyle, display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
+      <div style={{ flex: '1 1 320px', minWidth: 260 }}>
+        <div style={{ fontSize: 13, color: COLOR.caption, marginBottom: 2 }}>
+          {t(headline.finalized ? 'hero.final' : 'hero.running')}
+        </div>
+        <div style={{
+          fontSize: 60, lineHeight: '70px', fontWeight: 600, letterSpacing: '-0.02em',
+          color: COLOR.ok, fontVariantNumeric: 'tabular-nums',
+        }}>
+          {ratio !== undefined ? `×${ratio.toPrecision(3)}` : formatLatency(claim.latencyMs)}
+        </div>
+        {/* Where it started and where it landed. The ratio alone is abstract;
+            two latencies make it a physical fact about a machine. */}
+        {referenceMs !== undefined
+          ? (
+              <div style={{ fontSize: 15, color: COLOR.dim, fontVariantNumeric: 'tabular-nums' }}>
+                {t('hero.from', { reference: formatLatency(referenceMs), latency: formatLatency(claim.latencyMs) })}
+              </div>
+            )
+          : null}
+        {claim.artifactPath !== undefined
+          ? (
+              <div style={{ fontSize: 13, color: COLOR.caption, marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
+                {baseName(claim.artifactPath)}
+              </div>
+            )
+          : null}
+      </div>
+      <div style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 22 }}>
+        <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.passed')}</div>
+        {claim.rewardHack !== true
+          ? <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.noHack')}</div>
+          : null}
+        {headline.rejected > 0
+          ? (
+              <div style={{ fontSize: 14, color: COLOR.caption }}>
+                {t('hero.rejected', { count: headline.rejected })}
+              </div>
+            )
+          : null}
+        {pendingCount > 0
+          ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('hero.pending')}</div>
+          : null}
+      </div>
+      {/* A faster row the run did not ship. Printing only the shipped number
+          would be defensible and would still read, to anyone who scrolls to
+          the table, as though the panel had been caught hiding the better
+          one. Naming it costs a line and settles the question. */}
+      {faster !== undefined && fasterRatio !== undefined
+        ? (
+            <div style={{ flexBasis: '100%', fontSize: 13, lineHeight: '20px', color: COLOR.warn }}>
+              {t('hero.faster', {
+                label: `×${fasterRatio.toPrecision(3)}`,
+                artifact: faster.artifactPath !== undefined ? baseName(faster.artifactPath) : '—',
+              })}
+            </div>
+          )
+        : null}
+    </div>
+  )
 }
 
 /** Chip-shaped select for the supervisor model picker. */
@@ -1225,6 +1490,10 @@ export function KernelOptTab(
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const [expandedReview, setExpandedReview] = useState<number | null>(null)
   const [planHistory, setPlanHistory] = useState(false)
+  /** Run settings, folded out of the rail; opened on demand. */
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  /** The audit sections (environment, plans, supervision, table), folded. */
+  const [auditOpen, setAuditOpen] = useState(false)
 
   /** Drive the control route, then re-pull so the panel reflects it now. */
   const post = async (action: string, extra?: Record<string, unknown>): Promise<void> => {
@@ -1278,33 +1547,46 @@ export function KernelOptTab(
       : reason
 
   const empty = iterations.length === 0 && plans.length === 0
+  // The headline and the axis share one reference estimate, so the big number
+  // and the gutter labels can never quote different denominators.
+  const pooledReference = useMemo(() => referenceLatency(iterations), [iterations])
+  const headline = useMemo(
+    () => runHeadline(iterations, series?.bestIndex ?? null),
+    [iterations, series?.bestIndex],
+  )
 
   return (
     <div style={{
-      padding: '20px 20px 28px', maxWidth: 860, margin: '0 auto',
-      display: 'flex', flexDirection: 'column', gap: 20,
+      padding: '20px 20px 28px', maxWidth: 1200, margin: '0 auto',
+      display: 'flex', flexDirection: 'column', gap: 16,
       fontFamily: 'system-ui', color: COLOR.text,
     }}>
-      {/* Run controls live in a card like everything else: naked rows above a
-          column of cards gave the page two visual languages, and the reader
-          had no block boundary between "what I can change" and "what the run
-          produced". The result chips are data, so they head the chart card
-          below rather than trailing the controls here. */}
-      <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{t('ctl.title')}</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {/* The run rail: ONE line, because on a screen someone is watching this
+          block competes with the result for first read and must lose. It used
+          to be a titled card carrying five controls and two caption
+          paragraphs above the number the reader came for — a page whose
+          largest object is its settings reads as a thing you configure, not a
+          thing that produced something. Everything removed from here is one
+          click away below, and nothing is removed while it is actionable:
+          budget and start stay in the rail when idle, stop stays when armed. */}
+      <div style={{ ...cardStyle, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', minHeight: 28 }}>
           {control?.loop.armed === true
             ? (
                 <>
-                  <span style={{ fontSize: 13, color: COLOR.curve, fontWeight: 500 }}>
-                    ⟳ {t('loop.armed', {
+                  <span style={{
+                    flex: 'none', width: 8, height: 8, borderRadius: 999,
+                    background: COLOR.curve, animation: 'kernelOptPulse 1.6s ease-in-out infinite',
+                  }} />
+                  <span style={{ fontSize: 14, color: COLOR.curve, fontWeight: 500 }}>
+                    {t('rail.running', {
                       round: control.loop.round,
                       done: Math.min(control.loop.evalsDone, control.loop.budget),
                       budget: control.loop.budget,
                     })}
                   </span>
                   {control.loop.evalsOverBudget > 0
-                    ? <span style={{ fontSize: 12, color: COLOR.warn }}>{t('loop.overBudget', { count: control.loop.evalsOverBudget })}</span>
+                    ? <span style={{ fontSize: 13, color: COLOR.warn }}>{t('loop.overBudget', { count: control.loop.evalsOverBudget })}</span>
                     : null}
                   <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void post('loop-stop') }}>
                     ■ {t('ctl.stop')}
@@ -1325,17 +1607,6 @@ export function KernelOptTab(
                     style={inputStyle}
                     onChange={(event) => { setBudgetDraft(event.target.value) }}
                   />
-                  <span style={{ ...rowLabelStyle, marginLeft: 6 }}>{t('pop.language')}</span>
-                  <select
-                    value={languageDraft}
-                    title={t('lang.tip')}
-                    style={selectStyle}
-                    onChange={(event) => { setLanguageDraft(event.target.value as 'auto' | RunLanguage) }}
-                  >
-                    <option value="auto">{t('lang.auto', { language: t(`lang.${currentRunLanguage}`) })}</option>
-                    <option value="zh">{t('lang.zh')}</option>
-                    <option value="en">{t('lang.en')}</option>
-                  </select>
                   <button
                     type="button"
                     style={primaryBtnStyle}
@@ -1351,7 +1622,7 @@ export function KernelOptTab(
                   </button>
                   {control.loop.stopReason !== undefined
                     ? (
-                        <span style={{ fontSize: 12, color: COLOR.caption }}>
+                        <span style={{ fontSize: 13, color: COLOR.caption }}>
                           {t('loop.stopped', { reason: reasonLabel(control.loop.stopReason) })}
                         </span>
                       )
@@ -1359,10 +1630,53 @@ export function KernelOptTab(
                 </>
               )
             : null}
+          <span style={{ flex: 1 }} />
+          {control !== undefined
+            ? (
+                <span
+                  style={{ fontSize: 13, color: COLOR.curve, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  onClick={() => { setSettingsOpen(value => !value) }}
+                >
+                  {settingsOpen ? `${t('rail.collapse')} ▴` : `${t('rail.settings')} ▾`}
+                </span>
+              )
+            : null}
         </div>
-        {control !== undefined
+        {/* An armed run that lost its state (host restart) leaves the log's
+            last word as a continuation and no finalize. That is a fact about
+            the DATA on screen, not a setting, so it stays in the rail while
+            the settings it sat among fold away. */}
+        {control?.loop.armed === false && control.loop.stopReason === undefined
+          && unfinishedRun(rounds, iterations)
           ? (
-              <>
+              <div style={{ fontSize: 13, lineHeight: '19px', color: COLOR.warn }}>
+                {t('loop.interrupted')}
+              </div>
+            )
+          : null}
+        {settingsOpen && control !== undefined
+          ? (
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 8,
+                paddingTop: 8, borderTop: `1px solid ${COLOR.border}`,
+              }}>
+                {control.loop.armed === false && control.loop.available
+                  ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <span style={rowLabelStyle}>{t('pop.language')}</span>
+                        <select
+                          value={languageDraft}
+                          title={t('lang.tip')}
+                          style={selectStyle}
+                          onChange={(event) => { setLanguageDraft(event.target.value as 'auto' | RunLanguage) }}
+                        >
+                          <option value="auto">{t('lang.auto', { language: t(`lang.${currentRunLanguage}`) })}</option>
+                          <option value="zh">{t('lang.zh')}</option>
+                          <option value="en">{t('lang.en')}</option>
+                        </select>
+                      </div>
+                    )
+                  : null}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                   <span style={rowLabelStyle}>{t('pop.supervise')}</span>
                   <SuperviseToggle
@@ -1409,21 +1723,22 @@ export function KernelOptTab(
                       </div>
                     )
                   : null}
-                {/* An armed run that lost its state (host restart) leaves the
-                    log's last word as a continuation and no finalize: say so,
-                    instead of handing back an unfinished curve in silence. */}
-                {control.loop.armed === false && control.loop.stopReason === undefined
-                  && unfinishedRun(rounds, iterations)
-                  ? (
-                      <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.warn }}>
-                        {t('loop.interrupted')}
-                      </div>
-                    )
-                  : null}
-              </>
+              </div>
             )
           : null}
       </div>
+
+      {/* The result, before anything that explains it. */}
+      {empty
+        ? null
+        : (
+            <Hero
+              headline={headline}
+              referenceMs={pooledReference}
+              pendingCount={pendingCount}
+              t={t}
+            />
+          )}
 
       {/* Evaluations that ran in a background job: their contract line reached
           the log but not this panel, so an empty curve here would otherwise
@@ -1449,46 +1764,45 @@ export function KernelOptTab(
           )
         : null}
 
-      {/* curve, headed by the run's result chips — they summarise what the
-          chart plots, so they belong to its block, not to the controls. */}
+      {/* The curve, over a quiet metadata line. These counts used to be
+          pills, the same shape and weight the panel gave its best result —
+          which is how "3 profiles" came to look as important as "×60.7".
+          They are context for the chart, so they read as context: one line,
+          caption weight, separators instead of borders. The result they used
+          to sit beside is the hero above. */}
       {iterations.length > 0
         ? (
             <div style={{ ...cardStyle, padding: '14px 10px 8px' }}>
               <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-                padding: '0 6px', marginBottom: 10,
+                display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center',
+                padding: '0 8px', marginBottom: 10,
+                fontSize: 13, lineHeight: '20px', color: COLOR.caption,
               }}>
-                <span style={chipStyle} title={t('tip.iters')}>
-                  {t('chips.iterations', { count: optimizationEvals })}
-                </span>
+                <span title={t('tip.iters')}>{t('chips.iterations', { count: optimizationEvals })}</span>
                 {overBudgetEvals > 0
-                  ? <span style={{ ...chipStyle, color: COLOR.warn }} title={t('tip.overBudget')}>{t('chips.overBudget', { count: overBudgetEvals })}</span>
+                  ? <span style={{ color: COLOR.warn }} title={t('tip.overBudget')}>· {t('chips.overBudget', { count: overBudgetEvals })}</span>
                   : null}
                 {wrapUpChecks > 0
-                  ? <span style={{ ...chipStyle, color: COLOR.caption }} title={t('tip.wrapup')}>{t('chips.wrapup', { count: wrapUpChecks })}</span>
-                  : null}
-                {best?.latencyMs !== undefined
-                  ? (
-                      <span style={{ ...chipStyle, color: COLOR.ok, borderColor: COLOR.ok, fontWeight: 500 }}>
-                        {t('chips.best', { latency: formatLatency(best.latencyMs) })}
-                        {best.speedup !== undefined ? ` · ×${best.speedup.toPrecision(3)}` : ''}
-                      </span>
-                    )
+                  ? <span title={t('tip.wrapup')}>· {t('chips.wrapup', { count: wrapUpChecks })}</span>
                   : null}
                 {series !== null && series.profileSeqs.length > 0
-                  ? <span style={chipStyle}>{t('chips.profiles', { count: series.profileSeqs.length })}</span>
+                  ? <span>· {t('chips.profiles', { count: series.profileSeqs.length })}</span>
                   : null}
                 {hackCount > 0
-                  ? <span style={{ ...chipStyle, color: COLOR.warn, borderColor: COLOR.warn }}>{t('chips.hacks', { count: hackCount })}</span>
-                  : null}
-                {pendingCount > 0
-                  ? <span style={{ ...chipStyle, color: COLOR.caption }}>{t('chips.pending')}</span>
+                  ? <span style={{ color: COLOR.warn, fontWeight: 500 }}>· {t('chips.hacks', { count: hackCount })}</span>
                   : null}
               </div>
               <Chart
                 series={series as WireSeries}
                 bestLabel={t('axis.best')}
+                legend={{
+                  candidate: t('chart.candidate'),
+                  best: t('chart.bestLine'),
+                  rejected: t('chart.rejectedDot'),
+                }}
                 statusLabel={status => t(`status.${status}`)}
+                axisShort={t('axis.short')}
+                axisWhy={t('axis.why')}
                 axisHint={mode => t(mode === 'speedup' ? 'axis.hintSpeedup' : 'axis.hintLatency')}
                 driftNote={d => t('axis.drift', {
                   count: d.count,
@@ -1500,9 +1814,6 @@ export function KernelOptTab(
             </div>
           )
         : null}
-
-      {/* the machine behind the numbers (hidden while the panel is empty) */}
-      {empty ? null : <EnvCard env={env} t={t} />}
 
       {/* latest plan (hidden while empty — the guidance block covers it) */}
       {empty
@@ -1580,9 +1891,38 @@ export function KernelOptTab(
       </div>
           )}
 
+      {/* Everything below is the evidence behind the picture above, and it is
+          folded — not because it matters less, but because all of it at once
+          is why a reader stops at the chart. The current plan stays out here
+          with the curve: it is what the agent is trying RIGHT NOW, which is
+          the live half of the story, while the environment, the supervision
+          log and the per-evaluation record are what a reader consults after
+          the number has landed. The label says "audit record" rather than
+          "details" — the density is this plugin's argument, and one click is
+          the right price for it. */}
+      {empty
+        ? null
+        : (
+            <div
+              style={{
+                display: 'flex', alignItems: 'baseline', gap: 8,
+                padding: '2px 4px', cursor: 'pointer',
+              }}
+              onClick={() => { setAuditOpen(value => !value) }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600, color: COLOR.curve }}>
+                {auditOpen ? '▾' : '▸'} {t('audit.title')}
+              </span>
+              <span style={{ fontSize: 12, color: COLOR.caption }}>{t('audit.hint')}</span>
+            </div>
+          )}
+
+      {/* the machine behind the numbers */}
+      {empty || !auditOpen ? null : <EnvCard env={env} t={t} />}
+
       {/* supervision log — parsed back from the continuation messages, so it
           survives restarts and replays with the rest of the projection. */}
-      {reviewedRounds.length > 0 || earlierReviews > 0 || control?.supervisor.enabled === true
+      {auditOpen && (reviewedRounds.length > 0 || earlierReviews > 0 || control?.supervisor.enabled === true)
         ? (
             <div style={cardStyle}>
               <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('advice.title')}</div>
@@ -1657,7 +1997,7 @@ export function KernelOptTab(
         : null}
 
       {/* iteration table */}
-      {iterations.length > 0
+      {auditOpen && iterations.length > 0
         ? (
             <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
               <div style={{ padding: '11px 16px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
@@ -2031,6 +2371,7 @@ function kernelOptRelevant(series: WireSeries): boolean {
 export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
   const runLocale = (): RunLocaleInjected => ({ getLocale: () => ctx.locale.getSnapshot().active })
+  installPanelStyles()
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'kernel-opt: dictionaries')
   ctx.slots.inject('conversation.view', () => {
     let hold: (() => void) | undefined
