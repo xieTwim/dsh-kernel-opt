@@ -14,6 +14,8 @@
 2. 怎么评测（或让它用内置评测器）
 3. 预算／卡信息
 
+**接了 AKO 平台时只要任务名。** 会话里有 `mcp__ako__*` 工具，persona 就把平台当作任务来源和评测器：先 `kernel_describe` 拿规则与参考实现路径（`reference_path`），每次测量都走 `kernel_evaluate`，收尾用 `run_finalize`；内置评测器与本地 bench 循环都不再启用。第一条消息一句「优化 40_LayerNorm」即可。
+
 该模式的会话「评测」Tab **常显示**（不等第一次评测）。
 
 ## 这个模式独有的操纵杆
