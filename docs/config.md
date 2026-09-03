@@ -20,7 +20,7 @@
 | `jobTools` | `['job_output']` | 后台任务读取器，**照常计点**：跑得久到要放后台的 bench 仍然是 bench |
 | `profileTools` | `['kernel_profile']` | 记为 ▲ 标记的 profiler **工具**名（注册工具／MCP 评测器才有；自组装评测入口的形态下不会触发） |
 | `profileCommands` | `ncu`／`nsys`／`nvprof`／`rocprof*`／`omniperf`／`vtune`／`perf`／`xctrace`／`instruments`／`sample` 等 | 记为 ▲ 标记的 profiler **命令**名，按 shell 命令行**可执行位置**的 token 匹配，且必须带参数（路径前缀算；`time.perf_counter`、`python sample.py`、`ncu --help` 都不算） |
-| `finalizeTools` | `['run_finalize', 'kernel_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标 ⚑，`artifact_path` 参数把该 artifact 最优诚实点标 ⚑ |
+| `finalizeTools` | `['run_finalize', 'kernel_finalize']` | finalize 工具名：`evaluation_id` 参数把对应点标为收尾选定，`artifact_path` 参数把该 artifact 的最优诚实点标为收尾选定（面板据此决定顶部大字报哪一个数） |
 | `changeTools` | `['write', 'edit']` | 计为「该轮改动」的结构化文件工具名，与评测的 artifact 匹配后挂到该行 |
 | `replay.enabled` | `true` | finalize 复测开关 |
 | `replay.timeoutSec` | `900` | 复测命令超时（秒） |

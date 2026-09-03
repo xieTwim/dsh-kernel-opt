@@ -37,7 +37,9 @@
 
 **dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
 
-The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows, in real time, the speed curve (higher is faster), each point's correctness and reward-hack status, the model's current approach and the supervisor's notes, with ▲ ★ ⚑ marking what was profiled, the best result so far, and the point it finalized on. **Each point also carries where it came from and how far it can be trusted** — see the contract below.
+The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session leads with **the result the run currently stands behind**, over two lines: **candidate**, what the model measured each round, and **best so far**, a staircase that only steps up when a result passes verification. Candidates that failed sit below the axis and never count toward best. Under the chart is the model's current approach; the environment, the supervisor's notes and the per-evaluation record fold into a **full audit record**.
+
+**Each point carries where it came from and how far it can be trusted** — see the contract below.
 
 You can cut in and redirect at any moment, the same way you steer any DSH session. When the model changes tack, it can compact its own context and keep going.
 
