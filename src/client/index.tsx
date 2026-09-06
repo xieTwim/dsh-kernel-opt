@@ -4,7 +4,7 @@
  * 「评测」 session tab (`conversation.view` slot): polls the Node half's
  * series route and renders the live optimization picture — latency curve over
  * evaluations (log scale when the journey is wide), correctness/reward-hack
- * status per point, a best-so-far staircase and the wrap-up pick, the model's latest
+ * status per point, the wrap-up pick, the model's latest
  * `kernel_plan`, and an iteration table. Pure projection of the session log;
  * a replayed session renders identically.
  * @module
@@ -24,11 +24,12 @@ import type {
   RunHeadline, RunLanguage, WireChange, WireControl, WireEnv, WireIteration, WireModelInfo,
   WireModels, WirePlan, WireRound, WireSeries,
 } from '../wire.ts'
-import { AXIS_GAP, CHART, bestSoFar, chartModel, formatLatency, referenceLatency } from '../chart.ts'
+import { CHART, chartModel, formatLatency, referenceLatency } from '../chart.ts'
 import {
   CONTROL_PATH, MODELS_PATH, PRESET_ID, SERIES_PATH,
   evaluationPhases, latestRunStart, referenceDrift, runHeadline, samePath, unfinishedRun,
 } from '../wire.ts'
+import { PANEL_CSS } from './styles.ts'
 import { placePopover } from './popover.ts'
 import type { PopoverPlacement } from './popover.ts'
 
@@ -163,8 +164,8 @@ const zh = {
   'lang.zh': '中文',
   'lang.en': 'English',
   'lang.tip': '启动时根据界面语言确定；本轮运行期间保持不变。',
-  'axis.short': '↑ 越高越快 · 未通过验证的候选不计入最佳',
-  'axis.why': '为什么曲线和表格的加速比不完全一致？',
+  'axis.short': '越高越快',
+  'axis.why': '指标说明',
   'row.best': '最佳',
   'hero.running': '当前最佳',
   'hero.final': '提交候选',
@@ -178,14 +179,49 @@ const zh = {
   'rail.running': '第 {round} 轮 · 已完成 {done}/{budget} 次优化评测',
   'rail.settings': '运行设置',
   'rail.collapse': '收起',
-  'chart.candidate': '本轮结果',
-  'chart.bestLine': '截至本轮最佳',
+  'chart.candidate': '通过验证',
   'chart.rejectedDot': '未通过验证',
   'chart.best': '新最佳',
   'chart.final': '收尾选定',
   'chart.bestFinal': '最佳 · 收尾选定',
-  'audit.title': '完整审计记录',
+  'audit.title': '查看完整记录',
   'audit.hint': '评测环境、方案汇报历史、监督记录、逐次评测明细',
+  'workspace.title': '算子优化',
+  'workspace.subtitle': 'DeepSeek Harness',
+  'workspace.ready': '等待评测',
+  'workspace.complete': '已选定结果',
+  'workspace.paused': '等待继续',
+  'workspace.live': '优化进行中',
+  'chart.title': '优化轨迹',
+  'chart.subtitle': '每次尝试，都有记录',
+  'chart.axis': '评测序号',
+  'chart.select': '选择评测',
+  'chart.details': '查看详情',
+  'chart.latency': '耗时',
+  'chart.speedup': '加速比',
+  'chart.reference': '参考实现',
+  'chart.optimized': '当前结果',
+  'chart.help': '悬停或选择数据点，查看本次评测',
+  'chart.log': '对数坐标',
+  'chart.none': '等待首个耗时结果',
+  'chart.driftShort': '参考耗时存在波动，曲线已统一换算。',
+  'hero.ratio': '相对参考实现的加速比',
+  'hero.latency': '本次评测耗时',
+  'stats.evals': '优化评测',
+  'stats.profiles': '性能分析',
+  'stats.reviews': '监督复审',
+  'recent.title': '最近评测',
+  'recent.all': '全部记录',
+  'plan.details': '方案详情',
+  'workspace.focus': '专注展示',
+  'workspace.exitFocus': '退出展示',
+  'phase.done': '完成',
+  'phase.baseline': '基线',
+  'phase.optimize': '优化',
+  'phase.explore': '探索',
+  'phase.tune': '调优',
+  'phase.verify': '验证',
+  'phase.finalize': '收尾',
 } satisfies Record<string, string>
 /** Panel locale key union. */
 type LocaleKey = keyof typeof zh
@@ -312,8 +348,8 @@ const en = {
   'lang.zh': '中文',
   'lang.en': 'English',
   'lang.tip': 'Resolved from the interface language when the run starts, then kept fixed for that run.',
-  'axis.short': '↑ Higher is faster · candidates that failed verification never count toward best',
-  'axis.why': 'Why do the curve and the table report slightly different speedups?',
+  'axis.short': 'Higher is faster',
+  'axis.why': 'About these metrics',
   'row.best': 'best',
   'hero.running': 'Best so far',
   'hero.final': 'Submission candidate',
@@ -327,14 +363,49 @@ const en = {
   'rail.running': 'Round {round} · {done}/{budget} optimization evaluations done',
   'rail.settings': 'Run settings',
   'rail.collapse': 'Hide',
-  'chart.candidate': 'Candidate',
-  'chart.bestLine': 'Best so far',
+  'chart.candidate': 'Passed evaluations',
   'chart.rejectedDot': 'Failed verification',
   'chart.best': 'New best',
   'chart.final': 'Wrap-up pick',
   'chart.bestFinal': 'Best · wrap-up pick',
   'audit.title': 'Full audit record',
   'audit.hint': 'Environment, plan history, supervision log, per-evaluation detail',
+  'workspace.title': 'Kernel optimization',
+  'workspace.subtitle': 'DeepSeek Harness',
+  'workspace.ready': 'Awaiting evaluation',
+  'workspace.complete': 'Result selected',
+  'workspace.paused': 'Ready to continue',
+  'workspace.live': 'Optimizing',
+  'chart.title': 'Optimization progress',
+  'chart.subtitle': 'Every attempt, on the record',
+  'chart.axis': 'Evaluation',
+  'chart.select': 'Select evaluation',
+  'chart.details': 'View details',
+  'chart.latency': 'Latency',
+  'chart.speedup': 'Speedup',
+  'chart.reference': 'Reference',
+  'chart.optimized': 'Current result',
+  'chart.help': 'Hover or select a point to inspect its evaluation',
+  'chart.log': 'Log scale',
+  'chart.none': 'Waiting for the first measured latency',
+  'chart.driftShort': 'Reference latency varies; the chart uses a pooled reference.',
+  'hero.ratio': 'Speedup over the reference',
+  'hero.latency': 'Measured latency',
+  'stats.evals': 'Evaluations',
+  'stats.profiles': 'Profiles',
+  'stats.reviews': 'Reviews',
+  'recent.title': 'Recent evaluations',
+  'recent.all': 'All evaluations',
+  'plan.details': 'Plan details',
+  'workspace.focus': 'Focus view',
+  'workspace.exitFocus': 'Exit focus view',
+  'phase.done': 'Done',
+  'phase.baseline': 'Baseline',
+  'phase.optimize': 'Optimize',
+  'phase.explore': 'Explore',
+  'phase.tune': 'Tune',
+  'phase.verify': 'Verify',
+  'phase.finalize': 'Finalize',
 } satisfies Record<LocaleKey, string>
 
 /** Poll cadence — the panel is a dashboard, not a ticker. */
@@ -348,7 +419,7 @@ const POLL_MS = 1500
 const COLOR = {
   text: 'var(--dsw-alias-label-primary, #1f2329)',
   dim: 'var(--dsw-alias-label-primary-dimmed, #3d444d)',
-  caption: 'var(--dsw-alias-label-tertiary, #5a6270)',
+  caption: 'var(--dsw-alias-label-secondary, #5a6270)',
   border: 'var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
   borderL2: 'var(--dsw-alias-border-l2, rgba(0,0,0,.15))',
   inputBg: 'var(--dsw-alias-bg-layer-1, #fff)',
@@ -359,44 +430,14 @@ const COLOR = {
   tip: 'var(--dsw-specific-tip, rgba(77,107,254,.06))',
   /** Halo painted behind in-plot chart text so the curve cannot cut through it. */
   halo: 'var(--dsw-alias-bg-layer-1, #fff)',
-  curve: 'var(--dsw-specific-primary, #4d6bfe)',
-  ok: '#1f8f5f',
-  bad: '#d93a3f',
-  warn: '#d18a1f',
+  curve: 'light-dark(#425fdf, #9aadff)',
+  ok: 'var(--dsw-alias-state-success-primary, #1f8f5f)',
+  bad: 'var(--dsw-alias-state-error-primary, #d93a3f)',
+  warn: 'var(--dsw-alias-state-warn-primary, #d18a1f)',
 }
 
 /** Elevated-surface shadow (host menu dropdowns use shadow-lv3). */
 const MENU_SHADOW = 'var(--dsw-shadow-lv3, 0 8px 24px rgba(0,0,0,.14))'
-
-/**
- * The panel's one stylesheet, for the rules inline `style` objects cannot
- * express — keyframes, and the reduced-motion opt-out that has to switch them
- * off.
- *
- * Every animation here is a ONE-SHOT acknowledgement of an artifact that just
- * appeared in the log, or the single ambient pulse that says a run is still
- * going. Nothing loops to look busy: on a panel whose whole argument is that
- * the picture is a projection of the record, motion with no event behind it
- * is decoration that reads as data.
- */
-const PANEL_CSS = `
-@keyframes kernelOptPulse {
-  0%, 100% { opacity: 1 }
-  50% { opacity: .3 }
-}
-@keyframes kernelOptArrive {
-  from { opacity: 0; transform: scale(.75) }
-  to { opacity: 1; transform: scale(1) }
-}
-@keyframes kernelOptHalo {
-  from { opacity: .55; r: 4 }
-  to { opacity: 0; r: 22 }
-}
-@media (prefers-reduced-motion: reduce) {
-  [style*="kernelOptPulse"], .kernel-opt-arrive { animation: none !important }
-  .kernel-opt-halo { display: none }
-}
-`
 
 /** Attach {@link PANEL_CSS} once per document, whichever panel mounts first. */
 function installPanelStyles(): void {
@@ -605,378 +646,129 @@ const STATUS_COLOR: Record<ReturnType<typeof statusOf>, string> = {
   error: COLOR.bad,
 }
 
-/** Optimization curve: candidate series, best-so-far staircase, profile ▲, one named point. */
+/** Responsive, keyboard-accessible plot of the recorded evaluations. */
 function Chart(props: {
   series: WireSeries
-  bestLabel: string
-  /** Legend copy for the three things the plot draws. */
-  legend: { candidate: string, best: string, rejected: string }
-  statusLabel: (status: ReturnType<typeof statusOf>) => string
-  /** Copy for the one labelled point on the plot. */
-  markLabels: { best: string, final: string, bestFinal: string }
-  /** One-line axis rule, always shown under a × axis. */
-  axisShort: string
-  /** Link copy opening the pooled-denominator explanation. */
-  axisWhy: string
-  axisHint: (mode: 'speedup' | 'latency') => string
-  driftNote: (drift: { min: number, max: number, ratio: number, count: number }) => string
+  t: T
+  onInspect: (index: number) => void
 }): ReactNode {
-  const { series, bestLabel, legend, markLabels, statusLabel, axisShort, axisWhy, axisHint, driftNote } = props
-  const arrivals = useArrivals(series.sessionId, series.iterations)
+  const { series, t, onInspect } = props
+  const { iterations, bestIndex } = series
+  const frameRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(640)
+  const [selection, setSelection] = useState<{ session: string, index: number } | null>(null)
+  const arrivals = useArrivals(series.sessionId, iterations)
   const reduceMotion = useReducedMotion()
-  // A run that finalized has a pick; before that, the best point is what
-  // the headline quotes, so it is what the plot names.
-  const hasFinalPick = series.iterations.some(p => p.finalized === true && p.channel !== 'replay')
-  const bestSoFarLabel = legend.best
-  const { iterations, profileSeqs, bestIndex } = series
-  const model = useMemo(() => chartModel(iterations, iterations.length), [iterations])
+  useEffect(() => {
+    const node = frameRef.current
+    if (node === null) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry !== undefined && entry.contentRect.width > 0) setWidth(entry.contentRect.width)
+    })
+    observer.observe(node)
+    return () => { observer.disconnect() }
+  }, [])
+  const frame = useMemo(() => ({ ...CHART, w: width, h: 250, l: 80, r: 18, t: 22, b: 38 }), [width])
+  const model = useMemo(() => chartModel(iterations, iterations.length, frame), [iterations, frame])
   const drift = useMemo(() => referenceDrift(iterations), [iterations])
-  if (model === null) return null
-  // The clamp label rides the first occurrence of the slowest measurement.
-  const worstClampedIndex = iterations.findIndex(
-    p => p.latencyMs === model.worst && model.clamped(p.latencyMs),
-  )
-
-  const best = bestIndex !== null ? iterations[bestIndex] : undefined
-  // Axis position of the best line: sibling axis labels within AXIS_GAP of it
-  // are suppressed so the gutter never stacks two numbers on one row.
-  const bestY = best?.latencyMs !== undefined ? model.y(best.latencyMs) : Number.NEGATIVE_INFINITY
-  const linePoints = iterations
-    .map((p, i) => (p.latencyMs !== undefined ? `${model.x(i).toFixed(1)},${model.y(p.latencyMs).toFixed(1)}` : null))
-    .filter((s): s is string => s !== null)
-    .join(' ')
-
-  // Profile marks sit between the evaluations that surround them in the log.
-  const profileXs = profileSeqs.map((seq) => {
-    let before = -1
-    for (let i = 0; i < iterations.length; i += 1) {
-      const it = iterations[i]
-      if (it !== undefined && it.seq < seq) before = i
-    }
-    const after = Math.min(before + 1, iterations.length - 1)
-    const frac = before < 0 ? 0 : before === after ? 1 : 0.5
-    return model.x(Math.max(0, before)) + (model.x(after) - model.x(Math.max(0, before))) * frac
-  })
-
-  // The best-so-far staircase, as an explicit step path: horizontal until an
-  // eligible evaluation beats the standing best, then vertical at the point
-  // that beat it. Drawn as steps rather than a smoothed line because that is
-  // literally what the quantity does — the claim holds at one value until a
-  // measurement replaces it, and a diagonal would draw improvement during
-  // evaluations that produced none.
-  const bestLine = bestSoFar(iterations)
-  let bestPath = ''
-  let previousBest: number | undefined
-  for (let i = 0; i < iterations.length; i += 1) {
-    const value = bestLine[i]
-    if (value === undefined) continue
-    const px = model.x(i)
-    const py = model.y(value)
-    if (bestPath === '') bestPath = `M ${px.toFixed(1)} ${py.toFixed(1)}`
-    else if (value === previousBest) bestPath += ` L ${px.toFixed(1)} ${py.toFixed(1)}`
-    // A new best: hold the old level up to this x, then step up to it.
-    else bestPath += ` L ${px.toFixed(1)} ${model.y(previousBest ?? value).toFixed(1)} L ${px.toFixed(1)} ${py.toFixed(1)}`
-    previousBest = value
-  }
-
+  const headline = runHeadline(iterations, bestIndex)
+  const defaultIndex = headline.claim !== undefined ? iterations.indexOf(headline.claim) : iterations.length - 1
+  const selectedIndex = selection?.session === series.sessionId && iterations[selection.index] !== undefined
+    ? selection.index : defaultIndex
+  const selected = iterations[selectedIndex]
+  const select = (index: number): void => { setSelection({ session: series.sessionId, index }) }
+  // Keep original evaluation indices so skipped failures retain their horizontal space.
+  const linePoints = model === null ? '' : iterations.flatMap((point, index) =>
+    statusOf(point) === 'ok' && point.latencyMs !== undefined
+      && Number.isFinite(point.latencyMs) && point.latencyMs > 0
+      ? [`${model.x(index)},${model.y(point.latencyMs)}`] : [],
+  ).join(' ')
+  const bottom = frame.h - frame.b
+  const stride = Math.max(1, Math.ceil((iterations.length - 1) / Math.max(2, Math.floor(width / 65))))
+  const ticks = iterations.map((_, i) => i).filter(i => i === 0 || i === iterations.length - 1 || (i % stride === 0 && i < iterations.length - stride / 2))
+  const selectedStatus = selected !== undefined ? statusOf(selected) : undefined
   return (
-    <>
-    <svg
-      viewBox={`0 0 ${CHART.w} ${CHART.h}`}
-      style={{ width: '100%', height: 'auto', display: 'block' }}
-      role="img"
-    >
-      {/* frame + y domain bounds. Axis labels are suppressed when the best
-          line's own axis label would collide with them — see below. */}
-      <line x1={CHART.l} y1={CHART.t} x2={CHART.l} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
-      <line x1={CHART.l} y1={CHART.h - CHART.b} x2={CHART.w - CHART.r} y2={CHART.h - CHART.b} stroke={COLOR.border} strokeWidth={1} />
-      {Math.abs(CHART.t - bestY) >= AXIS_GAP
-        ? <text x={CHART.l - 8} y={CHART.t + 5} textAnchor="end" fontSize={13} fill={COLOR.dim}>{model.label(model.fast)}</text>
-        : null}
-      {Math.abs(CHART.h - CHART.b - bestY) >= AXIS_GAP
-        ? <text x={CHART.l - 8} y={CHART.h - CHART.b} textAnchor="end" fontSize={13} fill={COLOR.dim}>{model.label(model.slow)}</text>
-        : null}
-      {model.log
-        ? <text x={CHART.l - 8} y={(CHART.t + CHART.h - CHART.b) / 2 + 16} textAnchor="end" fontSize={12} fill={COLOR.caption}>log</text>
-        : null}
-
-      {/* horizontal gridlines (mid one labeled) */}
-      {[0.25, 0.5, 0.75].map((f) => {
-        const value = model.atFraction(f)
-        const gy = model.y(value)
-        return (
-          <g key={`g${String(f)}`}>
-            <line x1={CHART.l} x2={CHART.w - CHART.r} y1={gy} y2={gy} stroke={COLOR.border} strokeWidth={1} strokeDasharray="2 5" opacity={0.55} />
-            {f === 0.5 && Math.abs(gy - bestY) >= AXIS_GAP
-              ? <text x={CHART.l - 8} y={gy + 4} textAnchor="end" fontSize={12} fill={COLOR.caption}>{model.label(value)}</text>
-              : null}
-          </g>
-        )
-      })}
-
-      {/* The best-so-far staircase, and the run's best value labeled in the
-          AXIS GUTTER rather than inside the plot. In-plot labels have to
-          dodge whatever the data happens to do — and the best level is
-          exactly where points cluster, so every in-plot position collides for
-          some run shape. Outside the plot area the collision is structurally
-          impossible; only sibling AXIS labels can clash, and those yield
-          above (the best value is the one worth reading).
-
-          The staircase replaced a single flat dashed line at the final best.
-          The flat line stated the outcome and said nothing about the search:
-          drawn across the whole width from the first evaluation, it implied
-          the run had been that fast all along. The steps say when each
-          improvement actually arrived, which is the same data and the true
-          shape of it. */}
-      {bestPath !== ''
-        ? (
-            <g>
-              <title>{bestSoFarLabel}</title>
-              <path d={bestPath} fill="none" stroke={COLOR.ok} strokeWidth={2.5} opacity={0.9} />
-            </g>
-          )
-        : null}
-      {best?.latencyMs !== undefined
-        ? (
-            <text x={CHART.l - 8} y={bestY + 5} textAnchor="end" fontSize={14} fontWeight={600} fill={COLOR.ok}>
-              {model.label(best.latencyMs, best.speedup)}
-            </text>
-          )
-        : null}
-
-      {/* The chronological candidate series. Thinner and dimmer than the
-          staircase above it, which is the point of drawing both: this line
-          is what the agent TRIED, the staircase is what the run can claim,
-          and a dip here now reads as an experiment rather than a loss. */}
-      {linePoints.length > 0
-        ? <polyline points={linePoints} fill="none" stroke={COLOR.curve} strokeWidth={1.8} opacity={0.6} />
-        : null}
-
-      {/* points */}
-      {iterations.map((p, i) => {
-        const status = statusOf(p)
-        const color = STATUS_COLOR[status]
-        const cx = model.x(i)
-        // The pick is the finalize call's own choice; the replay row re-measures that
-        // same final version and carries its own 复测 badge in the table.
-        const finalPick = p.finalized === true && p.channel !== 'replay'
-        const marks = `${bestIndex === i ? ` · ${markLabels.best}` : ''}${finalPick ? ` · ${markLabels.final}` : ''}`
-        // The tooltip carries the RAW numbers of that evaluation: its own
-        // latency and, when the evaluator gave one, its own reported speedup
-        // — not the pooled value the axis is drawn from.
-        const reported = p.speedup !== undefined ? ` · ×${p.speedup.toPrecision(3)}` : ''
-        const tip = `#${String(i + 1)} · ${p.latencyMs !== undefined ? formatLatency(p.latencyMs) : '—'}${reported} · ${statusLabel(status)}${marks}`
-        if (p.latencyMs === undefined) {
-          // Unmeasured (pending / failed) points sit just below the axis —
-          // off the value scale, so they never read as a low latency.
-          const cy = CHART.h - CHART.b + 8
-          return (
-            <g key={`${String(p.seq)}-${String(i)}`}>
-              <title>{tip}</title>
-              <circle
-                cx={cx} cy={cy} r={4.5} fill="none" stroke={color} strokeWidth={2}
-                // SMIL, not CSS — so `prefers-reduced-motion` cannot reach it
-                // from the stylesheet, and the media query that switches
-                // everything else off would leave exactly this one running
-                // while the docs said otherwise. Read the preference here and
-                // simply do not emit the element.
-                style={status === 'pending' && reduceMotion ? { opacity: 0.55 } : undefined}
-              >
-                {status === 'pending' && !reduceMotion
-                  ? <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite" />
-                  : null}
-              </circle>
-            </g>
-          )
-        }
-        const cy = model.y(p.latencyMs)
-        const isBest = bestIndex === i
-        const clamped = model.clamped(p.latencyMs)
-        const fresh = arrivals.has(arrivalKey(p, i))
-        return (
-          // seq is NOT unique: one shell call printing two contract lines
-          // gives two iterations the same seq. Index disambiguates.
-          <g key={`${String(p.seq)}-${String(i)}`}>
-            <title>{tip}</title>
-            {/* One expanding ring when a measurement becomes the new best.
-                It fires on the state CHANGE, not on a timer, and never on
-                mount — so it marks the event a viewer would otherwise have to
-                catch by watching the axis label. */}
-            {fresh && isBest
-              ? (
-                  <circle
-                    className="kernel-opt-halo"
-                    cx={cx} cy={cy} r={6} fill="none" stroke={COLOR.ok} strokeWidth={2.5}
-                    style={{ animation: 'kernelOptHalo 900ms ease-out forwards' }}
-                  />
-                )
-              : null}
-            {status === 'ok'
-              ? (
-                  <circle
-                    className={fresh ? 'kernel-opt-arrive' : undefined}
-                    cx={cx} cy={cy} r={isBest || finalPick ? 6.5 : 4.5} fill={color}
-                    stroke={isBest || finalPick ? COLOR.halo : undefined}
-                    strokeWidth={isBest || finalPick ? 2 : undefined}
-                    style={fresh ? { animation: 'kernelOptArrive 200ms ease-out', transformOrigin: `${cx}px ${cy}px` } : undefined}
-                  />
-                )
-              : (
-                  <circle
-                    className={fresh ? 'kernel-opt-arrive' : undefined}
-                    cx={cx} cy={cy} r={4.5} fill="none" stroke={color} strokeWidth={2.2}
-                    style={fresh ? { animation: 'kernelOptArrive 200ms ease-out', transformOrigin: `${cx}px ${cy}px` } : undefined}
-                  />
-                )}
-            {/* ↓ marks a point below the focus domain, pinned to the bottom
-                edge — on a better-is-up axis the outliers are the slow ones. */}
-            {clamped
-              ? <text x={cx} y={CHART.h - CHART.b - 11} textAnchor="middle" fontSize={11} fill={COLOR.caption}>↓</text>
-              : null}
-            {/* How far below the domain the slowest point actually sits.
-                It rides in the gutter under its own point, not beside it
-                inside the plot: a clamped point is pinned ON the bottom
-                edge, so the segment leaving it runs through exactly the
-                band an in-plot label would occupy — a halo there only
-                chops the curve instead of separating the two. Clamped to
-                the plot's x range so an edge point keeps it in frame. */}
-            {clamped && i === worstClampedIndex
-              ? (
-                  <text
-                    x={Math.min(Math.max(cx, CHART.l + 18), CHART.w - CHART.r - 18)}
-                    y={CHART.h - CHART.b + 50}
-                    textAnchor="middle"
-                    fontSize={12}
-                    fill={COLOR.dim}
-                    stroke={COLOR.halo}
-                    strokeWidth={3}
-                    paintOrder="stroke"
-                  >
-                    {model.label(model.worst)}
-                  </text>
-                )
-              : null}
-            {/* Exactly ONE point on the plot carries a written label, and it
-                is the one the headline above quotes: the wrap-up pick when
-                the run made one, the best measurement while it is still
-                running. Both used to be marked, with ★ and ⚑ — two glyphs a
-                reader had to look up, on a chart where the staircase and the
-                gutter label already say where "best" is. A legend of symbols
-                is the cost of marking everything; naming one thing is
-                cheaper to read and it is the thing being claimed. */}
-            {(finalPick || (isBest && !hasFinalPick))
-              ? (
-                  <g>
-                    {/* A drop line to the gutter, and the words down there.
-                        In-plot text has to dodge whatever the data does, and
-                        this label names the point at the TOP of the domain —
-                        exactly where the two series and their dots converge,
-                        so every in-plot position ran across something for
-                        some run shape. Anchoring it to the point's own x in
-                        the empty band below the axis makes the collision
-                        structurally impossible, and the drop line keeps the
-                        association exact even when the x is clamped for
-                        frame. Same reasoning the clamp label already uses. */}
-                    <line
-                      x1={cx} x2={cx} y1={cy + 8} y2={CHART.h - CHART.b}
-                      stroke={finalPick ? COLOR.curve : COLOR.ok}
-                      strokeWidth={1} strokeDasharray="2 3" opacity={0.5}
-                    />
-                    <text
-                      x={Math.min(Math.max(cx, CHART.l + 60), CHART.w - CHART.r - 60)}
-                      y={CHART.h - CHART.b + 32}
-                      textAnchor="middle"
-                      fontSize={13}
-                      fontWeight={500}
-                      fill={finalPick ? COLOR.curve : COLOR.ok}
-                      stroke={COLOR.halo}
-                      strokeWidth={3.5}
-                      paintOrder="stroke"
-                    >
-                      {finalPick && isBest ? markLabels.bestFinal : finalPick ? markLabels.final : markLabels.best}
-                    </text>
-                  </g>
-                )
-              : null}
-          </g>
-        )
-      })}
-
-      {/* profiler marks */}
-      {profileXs.map((x, i) => (
-        <text key={`p${String(i)}`} x={x} y={CHART.h - CHART.b + 15} textAnchor="middle" fontSize={12} fill={COLOR.caption}>▲</text>
-      ))}
-    </svg>
-    {/* Legend. The plot now carries two lines rather than one, and two lines
-        with no key is a puzzle: a viewer who has to work out which is which
-        spends the attention the chart was supposed to save. Three entries
-        only — the marks inside the plot are labeled where they sit. */}
-    <div style={{
-      display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center',
-      padding: '6px 8px 0', fontSize: 12, lineHeight: '18px', color: COLOR.caption,
-    }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ width: 14, height: 0, borderTop: `2px solid ${COLOR.ok}` }} />
-        {legend.best}
-      </span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ width: 14, height: 0, borderTop: `1.5px solid ${COLOR.curve}`, opacity: 0.7 }} />
-        {legend.candidate}
-      </span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-        <span style={{
-          width: 8, height: 8, borderRadius: 999, border: `1.5px solid ${COLOR.bad}`,
-        }} />
-        {legend.rejected}
-      </span>
-    </div>
-    {/* What the axis is measuring.
-
-        In the normal (×) mode this is one line, and the paragraph explaining
-        why the curve's denominator differs from the table's is one click
-        behind it. Four lines of 11px grey under a chart is the size at which
-        a caption stops being read at all — and it is the caption that has to
-        survive a screen recording, where small grey text is the first thing
-        compression eats.
-
-        The latency mode keeps its full sentence and a warning's colour: it is
-        an ANOMALY, not a second normal mode. The protocol asks every
-        evaluation for a denominator, so reaching that branch means a run's
-        ratios went missing between the evaluator and here, and a dim caption
-        is exactly how that went unread for a whole run once already. */}
-    {model.referenceMs !== undefined
-      ? (
-          <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'baseline',
-            padding: '4px 8px 2px', fontSize: 12, lineHeight: '18px', color: COLOR.caption,
-          }}>
-            <span>{axisShort}</span>
-            <span
-              style={{ cursor: 'help', color: COLOR.curve }}
-              title={axisHint('speedup')}
-            >
-              {axisWhy}
-            </span>
-          </div>
-        )
-      : (
-          <div style={{ padding: '4px 8px 2px', fontSize: 12, lineHeight: '18px', color: COLOR.warn }}>
-            {axisHint('latency')}
-          </div>
+    <div className="ko-chart" ref={frameRef}>
+      {model === null
+        ? <div className="ko-empty">{t('chart.none')}</div>
+        : (
+          <svg viewBox={`0 0 ${frame.w} ${frame.h}`} role="group" aria-label={t('chart.title')}>
+            {[0, .25, .5, .75, 1].map(f => {
+              const value = model.atFraction(f)
+              const y = model.y(value)
+              return <g key={f}>
+                <line x1={frame.l} x2={frame.w - frame.r} y1={y} y2={y} stroke={COLOR.border} strokeDasharray={f === 0 ? undefined : '3 5'} opacity={.65} />
+                <text x={frame.l - 10} y={y + 4} textAnchor="end" fontSize={14} fill={COLOR.caption}>{model.label(value)}</text>
+              </g>
+            })}
+            {linePoints !== '' ? <polyline points={linePoints} fill="none" stroke={COLOR.curve}
+              strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" opacity={.8} /> : null}
+            {selected !== undefined ? <line x1={model.x(selectedIndex)} x2={model.x(selectedIndex)} y1={frame.t} y2={bottom} stroke={COLOR.curve} strokeDasharray="3 4" opacity={.25} /> : null}
+            {ticks.map(i => <text key={i} x={model.x(i)} y={bottom + 24} textAnchor="middle" fontSize={14} fill={COLOR.caption}>{String(i + 1).padStart(2, '0')}</text>)}
+            {series.profileSeqs.map((seq, i) => {
+              const next = iterations.findIndex(point => point.seq > seq)
+              const before = next < 0 ? iterations.length - 1 : Math.max(0, next - 1)
+              const after = next < 0 ? before : next
+              const x = (model.x(before) + model.x(after)) / 2
+              return <path key={`profile-${seq}-${i}`} d={`M ${x - 3} ${bottom - 4} l 3 -4 l 3 4 l -3 4 Z`} fill={COLOR.caption} opacity={.6}>
+                <title>{t('chips.profiles', { count: i + 1 })}</title>
+              </path>
+            })}
+            {iterations.map((point, i) => {
+              const status = statusOf(point)
+              const color = status === 'ok' ? COLOR.curve : STATUS_COLOR[status]
+              const x = model.x(i)
+              const y = point.latencyMs !== undefined ? model.y(point.latencyMs) : bottom + 5
+              const active = selectedIndex === i
+              const fresh = arrivals.has(arrivalKey(point, i))
+              const label = `${t('chart.select')} ${i + 1} · ${point.latencyMs !== undefined ? formatLatency(point.latencyMs) : '—'} · ${t(`status.${status}`)}`
+              return <g key={`${point.seq}-${i}`} role="button" tabIndex={0} aria-label={label} aria-pressed={active}
+                onMouseEnter={() => { select(i) }} onFocus={() => { select(i) }} onClick={() => { select(i) }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(i) }
+                  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                    event.preventDefault()
+                    const target = event.key === 'ArrowRight' ? event.currentTarget.nextElementSibling : event.currentTarget.previousElementSibling
+                    if (target?.getAttribute('role') === 'button') (target as SVGElement).focus()
+                  }
+                }}>
+                <title>{label}</title>
+                <circle className="ko-hit" cx={x} cy={y} r={12} fill="transparent" />
+                {active ? <circle cx={x} cy={y} r={9} fill={COLOR.curve} opacity={.13} /> : null}
+                {fresh && bestIndex === i ? <circle className="kernel-opt-halo" cx={x} cy={y} r={6} fill="none" stroke={COLOR.curve} style={{ animation: 'kernelOptHalo 900ms ease-out forwards' }} /> : null}
+                <circle className={fresh ? 'kernel-opt-arrive' : undefined} cx={x} cy={y} r={active || bestIndex === i ? 4.5 : 3.2}
+                  fill={status === 'ok' ? color : COLOR.inputBg} stroke={status === 'ok' ? COLOR.inputBg : color} strokeWidth={1.7}
+                  style={fresh ? { animation: 'kernelOptArrive 200ms ease-out', transformOrigin: `${x}px ${y}px` } : undefined}>
+                  {status === 'pending' && !reduceMotion ? <animate attributeName="opacity" values="1;.3;1" dur="1.2s" repeatCount="indefinite" /> : null}
+                </circle>
+                {point.latencyMs !== undefined && model.clamped(point.latencyMs) ? <text x={x} y={y - 12} textAnchor="middle" fontSize={14} fill={COLOR.caption}>↓</text> : null}
+              </g>
+            })}
+          </svg>
         )}
-    {/* The pooled axis keeps the CURVE readable when the evaluator re-timed its
-        reference, but it cannot make the per-row ratios agree with each other,
-        and the table prints those verbatim. Say so where the ratios are, so a
-        reader comparing two rows is not left to notice on their own that the
-        denominator moved under them. */}
-    {drift !== undefined
-      ? (
-          <div style={{ padding: '0 8px 2px', fontSize: 11, lineHeight: '16px', color: COLOR.warn }}>
-            {driftNote(drift)}
-          </div>
-        )
-      : null}
-    </>
+      <div className="ko-chart-legend">
+        <span><i className="ko-line-key" style={{ color: COLOR.curve }} />{t('chart.candidate')}</span>
+        <span><i className="ko-dot-key" />{t('chart.rejectedDot')}</span>
+        <span style={{ marginLeft: 'auto' }}>{t('chart.axis')}{model?.log === true ? ` · ${t('chart.log')}` : ''}</span>
+      </div>
+      {selected !== undefined && selectedStatus !== undefined ? (
+        <div className="ko-inspector">
+          <span className="ko-muted">#{String(selectedIndex + 1).padStart(2, '0')}</span>
+          <strong>{selected.latencyMs !== undefined ? formatLatency(selected.latencyMs) : '—'}</strong>
+          {selected.speedup !== undefined ? <span>{selected.speedup.toPrecision(3)}×</span> : null}
+          <span style={{ color: STATUS_COLOR[selectedStatus] }}>{t(`status.${selectedStatus}`)}</span>
+          {selectedIndex === bestIndex ? <span style={{ color: COLOR.curve }}>{t('row.best')}</span> : null}
+          {selected.finalized === true && selected.channel !== 'replay' ? <span style={{ color: COLOR.curve }}>{t('table.final')}</span> : null}
+          <button className="ko-text-button" type="button" onClick={() => { onInspect(selectedIndex) }}>{t('chart.details')} ↗</button>
+        </div>
+      ) : null}
+      <details className="ko-chart-explanation">
+        <summary><span>{t('chart.help')}</span><span>{t('axis.why')} ⓘ</span></summary>
+        <p>{t(model?.referenceMs !== undefined ? 'axis.hintSpeedup' : 'axis.hintLatency')}</p>
+        {drift !== undefined ? <p style={{ color: COLOR.warn }}>{t('axis.drift', { count: drift.count, min: formatLatency(drift.min), max: formatLatency(drift.max), pct: Math.round((drift.ratio - 1) * 100) })}</p> : null}
+      </details>
+      {drift !== undefined ? <div className="ko-chart-explanation" style={{ color: COLOR.warn, marginTop: 5 }}>{t('chart.driftShort')}</div> : null}
+    </div>
   )
 }
 
@@ -987,7 +779,7 @@ const chipStyle: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
   padding: '2px 10px', borderRadius: 999,
   border: `1px solid ${COLOR.border}`,
-  fontSize: 13, lineHeight: '22px', color: COLOR.dim,
+  fontSize: 'var(--ko-body, 13px)', lineHeight: 'var(--ko-line-body, 22px)', color: COLOR.dim,
   whiteSpace: 'nowrap',
 }
 
@@ -998,35 +790,12 @@ const cardStyle: CSSProperties = {
   padding: '14px 16px',
 }
 
-/**
- * The result surface: the one card that reads as raised rather than outlined.
- * Detail sections stay border-only, so the hierarchy survives the contrast
- * loss of video compression, where a 1px border and a 2px border are the
- * same border.
- */
-const heroCardStyle: CSSProperties = {
-  border: `1px solid ${COLOR.borderL2}`,
-  borderRadius: 16,
-  background: COLOR.inputBg,
-  boxShadow: 'var(--dsw-shadow-lv1, 0 1px 3px rgba(0,0,0,.06))',
-  padding: '18px 22px',
-}
-
 /** Last path segment — the artifact's identity, without the run's directory layout. */
 function baseName(path: string): string {
   return path.split('/').filter(s => s.length > 0).pop() ?? path
 }
 
-/**
- * The run's result, at the size a meeting room reads.
- *
- * Everything here was already on the panel; what changes is rank. The number
- * a viewer came for used to be a 13px chip between two other chips, which is
- * the size the panel gave "3 profiles" — so the screen led with its controls
- * and buried its conclusion. The verification column beside it is deliberate
- * company: a large speedup with nothing next to it is a claim, and the whole
- * argument of this plugin is that a number arrives with its checks attached.
- */
+/** The eligible result, with its own reference and verification status. */
 function Hero(props: {
   headline: RunHeadline
   referenceMs: number | undefined
@@ -1036,96 +805,56 @@ function Hero(props: {
   const { headline, referenceMs, pendingCount, t } = props
   const claim = headline.claim
   if (claim?.latencyMs === undefined) return null
-  // The point's OWN reported ratio wins over the pooled estimate, so the
-  // headline never disagrees with the row the reader can scroll to.
   const ratio = claim.speedup ?? (referenceMs !== undefined ? referenceMs / claim.latencyMs : undefined)
+  const reference = ratio !== undefined ? ratio * claim.latencyMs : undefined
+  const maxLatency = Math.max(reference ?? claim.latencyMs, claim.latencyMs)
   const faster = headline.fasterMeasured
-  const fasterRatio = faster?.latencyMs === undefined
-    ? undefined
+  const fasterRatio = faster?.latencyMs === undefined ? undefined
     : faster.speedup ?? (referenceMs !== undefined ? referenceMs / faster.latencyMs : undefined)
   return (
-    <div style={{ ...heroCardStyle, display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'flex-start' }}>
-      <div style={{ flex: '1 1 320px', minWidth: 260 }}>
-        <div style={{ fontSize: 13, color: COLOR.caption, marginBottom: 2 }}>
-          {t(headline.finalized ? 'hero.final' : 'hero.running')}
+    <div className="ko-hero">
+      <div>
+        <div className="ko-hero-label"><i />{t(headline.finalized ? 'hero.final' : 'hero.running')}</div>
+        <div className="ko-hero-number">
+          {ratio !== undefined ? <>{ratio.toPrecision(3)}<small>×</small></> : formatLatency(claim.latencyMs)}
         </div>
-        <div style={{
-          fontSize: 60, lineHeight: '70px', fontWeight: 600, letterSpacing: '-0.02em',
-          color: COLOR.ok, fontVariantNumeric: 'tabular-nums',
-        }}>
-          {ratio !== undefined ? `×${ratio.toPrecision(3)}` : formatLatency(claim.latencyMs)}
+        <div className="ko-hero-caption">{t(ratio !== undefined ? 'hero.ratio' : 'hero.latency')}</div>
+      </div>
+      {reference !== undefined ? <div className="ko-comparison">
+        <div>
+          <div className="ko-comparison-label"><span>{t('chart.reference')}</span><strong>{formatLatency(reference)}</strong></div>
+          <div className="ko-bar"><span style={{ width: `${reference / maxLatency * 100}%` }} /></div>
         </div>
-        {/* Where it started and where it landed. The ratio alone is abstract;
-            two latencies make it a physical fact about a machine. */}
-        {referenceMs !== undefined
-          ? (
-              <div style={{ fontSize: 15, color: COLOR.dim, fontVariantNumeric: 'tabular-nums' }}>
-                {t('hero.from', { reference: formatLatency(referenceMs), latency: formatLatency(claim.latencyMs) })}
-              </div>
-            )
-          : null}
-        {claim.artifactPath !== undefined
-          ? (
-              <div style={{ fontSize: 13, color: COLOR.caption, marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
-                {baseName(claim.artifactPath)}
-              </div>
-            )
-          : null}
+        <div>
+          <div className="ko-comparison-label"><span>{t('chart.optimized')}</span><strong>{formatLatency(claim.latencyMs)}</strong></div>
+          <div className="ko-bar" data-result><span style={{ width: `${claim.latencyMs / maxLatency * 100}%` }} /></div>
+        </div>
+      </div> : null}
+      <div className="ko-hero-footer">
+        {claim.artifactPath !== undefined ? <span className="ko-artifact" title={claim.artifactPath}>{baseName(claim.artifactPath)}</span> : null}
+        <div className="ko-checks">
+          {claim.correct === true ? <span>✓ {t('hero.passed')}</span> : null}
+          {claim.rewardHack !== true ? <span>✓ {t('hero.noHack')}</span> : null}
+        </div>
+        {headline.rejected > 0 ? <div style={{ marginTop: 7 }}>{t('hero.rejected', { count: headline.rejected })}</div> : null}
+        {pendingCount > 0 ? <div style={{ marginTop: 7 }}>{t('hero.pending')}</div> : null}
       </div>
-      <div style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 22 }}>
-        {/* Read off the claim rather than assumed from its presence. The
-            claim is eligible by construction, so these always show — which
-            is the point: if that invariant ever breaks, the panel goes quiet
-            here instead of printing "passed" over a failure. */}
-        {claim.correct === true
-          ? <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.passed')}</div>
-          : null}
-        {claim.rewardHack !== true
-          ? <div style={{ fontSize: 14, color: COLOR.ok }}>✓ {t('hero.noHack')}</div>
-          : null}
-        {headline.rejected > 0
-          ? (
-              <div style={{ fontSize: 14, color: COLOR.caption }}>
-                {t('hero.rejected', { count: headline.rejected })}
-              </div>
-            )
-          : null}
-        {pendingCount > 0
-          ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('hero.pending')}</div>
-          : null}
-      </div>
-      {/* A faster row the run did not ship. Printing only the shipped number
-          would be defensible and would still read, to anyone who scrolls to
-          the table, as though the panel had been caught hiding the better
-          one. Naming it costs a line and settles the question. */}
-      {faster !== undefined && fasterRatio !== undefined
-        ? (
-            <div style={{ flexBasis: '100%', fontSize: 13, lineHeight: '20px', color: COLOR.warn }}>
-              {t('hero.faster', {
-                label: `×${fasterRatio.toPrecision(3)}`,
-                artifact: faster.artifactPath !== undefined ? baseName(faster.artifactPath) : '—',
-              })}
-            </div>
-          )
-        : null}
-      {/* The run finalized on something it cannot claim. The number above is
-          then the running best — verified, and correctly labelled as the
-          best rather than as a submission — but the finalize itself is the
-          more interesting fact, and dropping it would leave the panel quietly
-          disagreeing with a session log that plainly says the run ended. */}
-      {headline.unclaimablePick !== undefined
-        ? (
-            <div style={{ flexBasis: '100%', fontSize: 13, lineHeight: '20px', color: COLOR.bad }}>
-              {t('hero.unclaimable', {
-                artifact: headline.unclaimablePick.artifactPath !== undefined
-                  ? baseName(headline.unclaimablePick.artifactPath)
-                  : '—',
-              })}
-            </div>
-          )
-        : null}
+      {faster !== undefined && fasterRatio !== undefined ? <div className="ko-hero-note">
+        {t('hero.faster', { label: `×${fasterRatio.toPrecision(3)}`, artifact: faster.artifactPath !== undefined ? baseName(faster.artifactPath) : '—' })}
+      </div> : null}
+      {headline.unclaimablePick !== undefined ? <div className="ko-hero-note" data-error>
+        {t('hero.unclaimable', { artifact: headline.unclaimablePick.artifactPath !== undefined ? baseName(headline.unclaimablePick.artifactPath) : '—' })}
+      </div> : null}
     </div>
   )
+}
+
+/** Kernel and rising curve, used as the panel's navigation mark. */
+function KernelMark(): ReactNode {
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="5" y="5" width="14" height="14" rx="3" />
+    <path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3M8 15l3-3 2 1 3-4" />
+  </svg>
 }
 
 /** Chip-shaped select for the supervisor model picker. */
@@ -1137,7 +866,7 @@ function Hero(props: {
 const capsuleStyle: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
   height: 28, padding: '0 12px', border: 'none', borderRadius: 14,
-  fontSize: 12, lineHeight: '18px', fontFamily: 'inherit', whiteSpace: 'nowrap',
+  fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 18px)', fontFamily: 'inherit', whiteSpace: 'nowrap',
   color: COLOR.text, background: 'transparent', cursor: 'pointer',
 }
 
@@ -1169,7 +898,7 @@ const disabledBtnStyle: CSSProperties = { opacity: 0.4, cursor: 'not-allowed' }
 const fieldStyle: CSSProperties = {
   height: 28, padding: '0 8px', borderRadius: 8,
   border: `1px solid ${COLOR.borderL2}`, background: COLOR.inputBg,
-  fontSize: 12, fontFamily: 'inherit', color: COLOR.text, outline: 'none',
+  fontSize: 'var(--ko-small, 12px)', fontFamily: 'inherit', color: COLOR.text, outline: 'none',
 }
 
 const selectStyle: CSSProperties = {
@@ -1185,7 +914,7 @@ const inputStyle: CSSProperties = {
 
 /** Inline control label (循环次数 / 外部监督 / 监督模型). */
 const rowLabelStyle: CSSProperties = {
-  flex: 'none', fontSize: 12, color: COLOR.dim,
+  flex: 'none', fontSize: 'var(--ko-small, 12px)', color: COLOR.dim,
 }
 
 /** Popover card, after the host MenuDropdown surface (r12, lv3 shadow). */
@@ -1195,7 +924,7 @@ const popoverStyle: CSSProperties = {
   overflowY: 'auto', overscrollBehavior: 'contain',
   border: `1px solid ${COLOR.menuBorder}`, borderRadius: 12,
   background: COLOR.menuBg, boxShadow: MENU_SHADOW,
-  fontFamily: 'system-ui', fontSize: 13, color: COLOR.text,
+  fontFamily: 'system-ui', fontSize: 'var(--ko-body, 13px)', color: COLOR.text,
 }
 
 /** One labeled row inside the popover. */
@@ -1208,8 +937,8 @@ function preStyle(accent?: string): CSSProperties {
   return {
     margin: 0,
     padding: '6px 8px',
-    fontSize: 12,
-    lineHeight: '18px',
+    fontSize: 'var(--ko-small, 12px)',
+    lineHeight: 'var(--ko-line-small, 18px)',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -1222,7 +951,7 @@ function preStyle(accent?: string): CSSProperties {
   }
 }
 
-const sectionLabel: CSSProperties = { fontSize: 12, fontWeight: 600, color: COLOR.dim, marginBottom: 2 }
+const sectionLabel: CSSProperties = { fontSize: 'var(--ko-small, 12px)', fontWeight: 600, color: COLOR.dim, marginBottom: 2 }
 
 /** Metric number formatting: integers verbatim, floats to 4 significant digits. */
 function formatMetric(value: number): string {
@@ -1283,7 +1012,7 @@ function ReviewDetail(props: {
   return (
     <div style={{
       padding: '6px 4px 10px 66px',
-      display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: COLOR.dim,
+      display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--ko-small, 12px)', color: COLOR.dim,
     }}>
       <div style={{ color: COLOR.caption }}>{t(scope[kind])}</div>
       <div>
@@ -1314,7 +1043,7 @@ function ReviewDetail(props: {
 function EnvCard(props: { env: WireEnv | undefined; t: PropsLocale<'kernel-opt'>['t'] }): ReactNode {
   const { env, t } = props
   const row = (label: string, value: string): ReactNode => (
-    <div style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: '21px' }}>
+    <div style={{ display: 'flex', gap: 10, fontSize: 'var(--ko-body, 13px)', lineHeight: 'var(--ko-line-body, 21px)' }}>
       <span style={{ flex: 'none', minWidth: 62, color: COLOR.caption }}>{label}</span>
       <span style={{ color: COLOR.text, wordBreak: 'break-word' }}>{value}</span>
     </div>
@@ -1322,13 +1051,13 @@ function EnvCard(props: { env: WireEnv | undefined; t: PropsLocale<'kernel-opt'>
   return (
     <div style={cardStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 600 }}>{t('env.title')}</span>
+        <span style={{ fontSize: 'var(--ko-body, 14px)', fontWeight: 600 }}>{t('env.title')}</span>
         {env !== undefined
-          ? <span style={{ fontSize: 12, color: COLOR.caption }}>{t('env.reported')}</span>
+          ? <span style={{ fontSize: 'var(--ko-small, 12px)', color: COLOR.caption }}>{t('env.reported')}</span>
           : null}
       </div>
       {env === undefined
-        ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('env.none')}</div>
+        ? <div style={{ fontSize: 'var(--ko-body, 14px)', color: COLOR.caption }}>{t('env.none')}</div>
         : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               {row(t('env.device'), env.device)}
@@ -1340,7 +1069,7 @@ function EnvCard(props: { env: WireEnv | undefined; t: PropsLocale<'kernel-opt'>
               {env.notes !== undefined ? row(t('env.notes'), env.notes) : null}
               {env.probe !== undefined
                 ? (
-                    <div style={{ display: 'flex', gap: 10, fontSize: 12, lineHeight: '20px', marginTop: 2 }}>
+                    <div style={{ display: 'flex', gap: 10, fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 20px)', marginTop: 2 }}>
                       <span style={{ flex: 'none', minWidth: 62, color: COLOR.caption }}>{t('env.probe')}</span>
                       <code style={{ color: COLOR.caption, wordBreak: 'break-all' }}>{env.probe}</code>
                     </div>
@@ -1357,7 +1086,7 @@ function ChangeBlock(props: { change: WireChange; t: PropsLocale<'kernel-opt'>['
   const { change, t } = props
   return (
     <div style={{ marginBottom: 6 }}>
-      <div style={{ fontSize: 12, color: COLOR.caption, margin: '2px 0' }}>
+      <div style={{ fontSize: 'var(--ko-small, 12px)', color: COLOR.caption, margin: '2px 0' }}>
         {t(change.kind === 'write' ? 'row.write' : 'row.edit')} · {change.tool}
         {change.replaceAll === true ? ' · replace_all' : ''}
         {change.truncated === true ? ` ${t('row.truncated')}` : ''}
@@ -1392,16 +1121,16 @@ function IterationDetail(props: {
   return (
     <div style={{
       padding: '8px 14px 12px 40px', borderBottom: `1px solid ${COLOR.border}`,
-      display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13,
+      display: 'flex', flexDirection: 'column', gap: 8, fontSize: 'var(--ko-body, 13px)',
     }}>
-      <div style={{ color: COLOR.caption, fontSize: 12 }}>
+      <div style={{ color: COLOR.caption, fontSize: 'var(--ko-small, 12px)' }}>
         {point.tool} · seq {point.seq}
         {point.channel !== undefined ? ` · ${t(point.channel === 'replay' ? 'row.channelReplay' : 'row.channelShell')}` : ''}
         {point.artifactPath !== undefined ? ` · ${point.artifactPath}` : ''}
         {point.workloadSubset !== undefined ? ` · ${t('row.subset')} [${point.workloadSubset.join(', ')}]` : ''}
       </div>
       {unverifiedFinal === true
-        ? <div style={{ color: COLOR.warn, fontSize: 12 }}>⚠ {t('row.unverifiedFinal')}</div>
+        ? <div style={{ color: COLOR.warn, fontSize: 'var(--ko-small, 12px)' }}>⚠ {t('row.unverifiedFinal')}</div>
         : null}
       {point.command !== undefined
         ? (
@@ -1427,7 +1156,7 @@ function IterationDetail(props: {
             <div>
               <div style={sectionLabel}>{t('row.blocking')}</div>
               {point.blocking.map((line, index) => (
-                <div key={index} style={{ fontSize: 12, color: COLOR.bad }}>· {line}</div>
+                <div key={index} style={{ fontSize: 'var(--ko-small, 12px)', color: COLOR.bad }}>· {line}</div>
               ))}
             </div>
           )
@@ -1437,13 +1166,13 @@ function IterationDetail(props: {
             <div>
               <div style={sectionLabel}>{t('row.advisory')}</div>
               {point.advisory.map((line, index) => (
-                <div key={index} style={{ fontSize: 12, color: COLOR.dim }}>· {line}</div>
+                <div key={index} style={{ fontSize: 'var(--ko-small, 12px)', color: COLOR.dim }}>· {line}</div>
               ))}
             </div>
           )
         : null}
       {point.notMeasured !== undefined
-        ? <div style={{ fontSize: 12, color: COLOR.caption }}>{t('row.notMeasured')}: {point.notMeasured.join(', ')}</div>
+        ? <div style={{ fontSize: 'var(--ko-small, 12px)', color: COLOR.caption }}>{t('row.notMeasured')}: {point.notMeasured.join(', ')}</div>
         : null}
       {point.metrics !== undefined
         ? (
@@ -1451,7 +1180,7 @@ function IterationDetail(props: {
               <div style={sectionLabel}>{t('row.metrics')}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {Object.entries(point.metrics).map(([key, value]) => (
-                  <span key={key} style={{ ...chipStyle, fontSize: 12, lineHeight: '18px', padding: '1px 8px' }}>
+                  <span key={key} style={{ ...chipStyle, fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 18px)', padding: '1px 8px' }}>
                     {key} = {formatMetric(value)}
                   </span>
                 ))}
@@ -1653,6 +1382,20 @@ export function KernelOptTab(
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** The audit sections (environment, plans, supervision, table), folded. */
   const [auditOpen, setAuditOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [focused, setFocused] = useState(false)
+  useEffect(() => {
+    const sync = (): void => { setFocused(document.fullscreenElement === panelRef.current) }
+    document.addEventListener('fullscreenchange', sync)
+    return () => { document.removeEventListener('fullscreenchange', sync) }
+  }, [])
+  const toggleFocus = async (): Promise<void> => {
+    try {
+      if (document.fullscreenElement === panelRef.current) await document.exitFullscreen()
+      else await panelRef.current?.requestFullscreen()
+    } catch { /* An embedding host may decline fullscreen; the panel stays usable. */ }
+  }
+  useEffect(() => { setExpandedIdx(null); setAuditOpen(false); setPlanHistory(false) }, [sessionId])
 
   /** Drive the control route, then re-pull so the panel reflects it now. */
   const post = async (action: string, extra?: Record<string, unknown>): Promise<void> => {
@@ -1677,7 +1420,6 @@ export function KernelOptTab(
   const latestPlan = plans.length > 0 ? plans[plans.length - 1] : undefined
   const envs = series?.envs ?? []
   const env = envs.length > 0 ? envs[envs.length - 1] : undefined
-  const best = series !== null && series.bestIndex !== null ? iterations[series.bestIndex] : undefined
   const hackCount = iterations.filter(p => p.rewardHack === true).length
   const pendingCount = iterations.filter(p => p.pending === true).length
   // The supervision card scopes to the CURRENT loop run: each re-arm resets
@@ -1706,27 +1448,43 @@ export function KernelOptTab(
       : reason
 
   const empty = iterations.length === 0 && plans.length === 0
-  // The headline and the axis share one reference estimate, so the big number
-  // and the gutter labels can never quote different denominators.
+  // The chart uses the pooled reference; the headline uses it only when the
+  // selected evaluation did not report its own speedup.
   const pooledReference = useMemo(() => referenceLatency(iterations), [iterations])
   const headline = useMemo(
     () => runHeadline(iterations, series?.bestIndex ?? null),
     [iterations, series?.bestIndex],
   )
 
+  const auditRef = useRef<HTMLDivElement>(null)
+  const inspectIteration = (index: number): void => {
+    setExpandedIdx(index)
+    setAuditOpen(true)
+  }
+  useEffect(() => {
+    if (auditOpen && expandedIdx !== null) auditRef.current?.querySelector(`[data-iteration="${expandedIdx}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [auditOpen, expandedIdx])
+  const phaseLabel = (phase: string): string => {
+    const normalized = phase.toLowerCase()
+    return normalized === 'explore' || normalized === 'tune' || normalized === 'verify' || normalized === 'finalize'
+      || normalized === 'done' || normalized === 'baseline' || normalized === 'optimize'
+      ? t(`phase.${normalized}`) : phase
+  }
+
   return (
-    // `width: 100%` is load-bearing, not belt-and-braces. The host wraps a
-    // view in a `display: contents` div, so this element is a direct flex
-    // item of the view area with `flex: 0 1 auto` — it sizes to its CONTENT.
-    // Without the width it settled wherever the longest caption happened to
-    // fall, which meant the chart's size was decided by a sentence, and the
-    // max-width below was never reached at all.
-    <div style={{
-      padding: '20px 20px 28px', width: '100%', maxWidth: 1200, margin: '0 auto',
-      boxSizing: 'border-box',
-      display: 'flex', flexDirection: 'column', gap: 16,
-      fontFamily: 'system-ui', color: COLOR.text,
-    }}>
+    <div className="ko-panel" ref={panelRef}>
+      <header className="ko-header">
+        <div className="ko-brand"><KernelMark /></div>
+        <div><h1>{t('workspace.title')}</h1><div className="ko-header-sub">{t('workspace.subtitle')}</div></div>
+        <span className="ko-state" data-live={control?.loop.armed === true}>
+          <i style={control?.loop.armed === true ? { animation: 'kernelOptPulse 1.6s ease-in-out infinite' } : undefined} />
+          {t(control?.loop.armed === true ? 'workspace.live' : headline.finalized ? 'workspace.complete' : empty ? 'workspace.ready' : 'workspace.paused')}
+        </span>
+        {typeof document !== 'undefined' && document.fullscreenEnabled ? <button type="button" className="ko-focus-button" onClick={() => { void toggleFocus() }} aria-pressed={focused}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /></svg>
+          {t(focused ? 'workspace.exitFocus' : 'workspace.focus')}
+        </button> : null}
+      </header>
       {/* The run rail: ONE line, because on a screen someone is watching this
           block competes with the result for first read and must lose. It used
           to be a titled card carrying five controls and two caption
@@ -1735,7 +1493,7 @@ export function KernelOptTab(
           thing that produced something. Everything removed from here is one
           click away below, and nothing is removed while it is actionable:
           budget and start stay in the rail when idle, stop stays when armed. */}
-      <div style={{ ...cardStyle, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="ko-rail">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', minHeight: 28 }}>
           {control?.loop.armed === true
             ? (
@@ -1744,7 +1502,7 @@ export function KernelOptTab(
                     flex: 'none', width: 8, height: 8, borderRadius: 999,
                     background: COLOR.curve, animation: 'kernelOptPulse 1.6s ease-in-out infinite',
                   }} />
-                  <span style={{ fontSize: 14, color: COLOR.curve, fontWeight: 500 }}>
+                  <span style={{ fontSize: 'var(--ko-body, 14px)', color: COLOR.curve, fontWeight: 500 }}>
                     {t('rail.running', {
                       round: control.loop.round,
                       done: Math.min(control.loop.evalsDone, control.loop.budget),
@@ -1752,7 +1510,7 @@ export function KernelOptTab(
                     })}
                   </span>
                   {control.loop.evalsOverBudget > 0
-                    ? <span style={{ fontSize: 13, color: COLOR.warn }}>{t('loop.overBudget', { count: control.loop.evalsOverBudget })}</span>
+                    ? <span style={{ fontSize: 'var(--ko-body, 13px)', color: COLOR.warn }}>{t('loop.overBudget', { count: control.loop.evalsOverBudget })}</span>
                     : null}
                   <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void post('loop-stop') }}>
                     ■ {t('ctl.stop')}
@@ -1788,7 +1546,7 @@ export function KernelOptTab(
                   </button>
                   {control.loop.stopReason !== undefined
                     ? (
-                        <span style={{ fontSize: 13, color: COLOR.caption }}>
+                        <span style={{ fontSize: 'var(--ko-body, 13px)', color: COLOR.caption }}>
                           {t('loop.stopped', { reason: reasonLabel(control.loop.stopReason) })}
                         </span>
                       )
@@ -1799,15 +1557,15 @@ export function KernelOptTab(
           <span style={{ flex: 1 }} />
           {control !== undefined
             ? (
-                <span
-                  style={{ fontSize: 13, color: COLOR.curve, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                  onClick={() => { setSettingsOpen(value => !value) }}
-                >
+                <button type="button" className="ko-text-button" aria-expanded={settingsOpen}
+                  onClick={() => { setSettingsOpen(value => !value) }}>
                   {settingsOpen ? `${t('rail.collapse')} ▴` : `${t('rail.settings')} ▾`}
-                </span>
+                </button>
               )
             : null}
         </div>
+        {control?.loop.armed === true && control.loop.budget > 0
+          ? <progress className="ko-progress" max={control.loop.budget} value={Math.min(control.loop.evalsDone, control.loop.budget)} aria-label={t('stats.evals')} /> : null}
         {/* An armed run that lost its state (host restart) leaves the log's
             last word as a continuation and no finalize. That is a fact about
             the DATA on screen, not a setting, so it stays in the rail while
@@ -1815,7 +1573,7 @@ export function KernelOptTab(
         {control?.loop.armed === false && control.loop.stopReason === undefined
           && unfinishedRun(rounds, iterations)
           ? (
-              <div style={{ fontSize: 13, lineHeight: '19px', color: COLOR.warn }}>
+              <div style={{ fontSize: 'var(--ko-body, 13px)', lineHeight: 'var(--ko-line-small, 19px)', color: COLOR.warn }}>
                 {t('loop.interrupted')}
               </div>
             )
@@ -1873,7 +1631,7 @@ export function KernelOptTab(
                 {/* Supervision is a setting OF the loop, not a peer feature: it
                     only ever runs at the loop's checkpoints. The caption states
                     which half of that relationship currently applies. */}
-                <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                <div style={{ fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 18px)', color: COLOR.caption }}>
                   {!control.supervisor.enabled
                     ? t('ctl.supOff')
                     : control.loop.armed ? t('ctl.supOn') : t('ctl.supDep')}
@@ -1884,7 +1642,7 @@ export function KernelOptTab(
                     different runs sharing a curve. */}
                 {control.loop.armed
                   ? (
-                      <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                      <div style={{ fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 18px)', color: COLOR.caption }}>
                         {t('ctl.locked')}
                       </div>
                     )
@@ -1894,199 +1652,95 @@ export function KernelOptTab(
           : null}
       </div>
 
-      {/* The result, before anything that explains it. */}
-      {empty
-        ? null
-        : (
-            <Hero
-              headline={headline}
-              referenceMs={pooledReference}
-              pendingCount={pendingCount}
-              t={t}
-            />
-          )}
-
       {/* Evaluations that ran in a background job: their contract line reached
           the log but not this panel, so an empty curve here would otherwise
           read as "the agent measured nothing". Say which it is. */}
       {series !== null && series.uncollectedSeqs.length > 0
         ? (
             <div style={{ ...cardStyle, padding: '14px 16px', color: COLOR.warn }}>
-              <div style={{ fontSize: 14, lineHeight: '22px' }}>
+              <div style={{ fontSize: 'var(--ko-body, 14px)', lineHeight: 'var(--ko-line-body, 22px)' }}>
                 {t('uncollected.note', { count: series.uncollectedSeqs.length })}
               </div>
             </div>
           )
         : null}
 
-      {/* empty-state guidance: the controls above stay usable before the
-          first evaluation; only the data area explains itself. */}
-      {empty
-        ? (
-            <div style={{ ...cardStyle, padding: '18px 16px', color: COLOR.dim }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: COLOR.text, marginBottom: 8 }}>{t('empty.title')}</div>
-              <div style={{ fontSize: 14, lineHeight: '23px' }}>{t('empty.body')}</div>
-            </div>
-          )
-        : null}
+      {empty ? <div className="ko-empty">
+        <KernelMark /><h2>{t('empty.title')}</h2><p>{t('empty.body')}</p>
+      </div> : null}
 
-      {/* The curve, over a quiet metadata line. These counts used to be
-          pills, the same shape and weight the panel gave its best result —
-          which is how "3 profiles" came to look as important as "×60.7".
-          They are context for the chart, so they read as context: one line,
-          caption weight, separators instead of borders. The result they used
-          to sit beside is the hero above. */}
-      {iterations.length > 0
-        ? (
-            <div style={{ ...cardStyle, padding: '14px 10px 8px' }}>
-              <div style={{
-                display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center',
-                padding: '0 8px', marginBottom: 10,
-                fontSize: 13, lineHeight: '20px', color: COLOR.caption,
-              }}>
-                <span title={t('tip.iters')}>{t('chips.iterations', { count: optimizationEvals })}</span>
-                {overBudgetEvals > 0
-                  ? <span style={{ color: COLOR.warn }} title={t('tip.overBudget')}>· {t('chips.overBudget', { count: overBudgetEvals })}</span>
-                  : null}
-                {wrapUpChecks > 0
-                  ? <span title={t('tip.wrapup')}>· {t('chips.wrapup', { count: wrapUpChecks })}</span>
-                  : null}
-                {series !== null && series.profileSeqs.length > 0
-                  ? <span>· {t('chips.profiles', { count: series.profileSeqs.length })}</span>
-                  : null}
-                {hackCount > 0
-                  ? <span style={{ color: COLOR.warn, fontWeight: 500 }}>· {t('chips.hacks', { count: hackCount })}</span>
-                  : null}
-              </div>
-              <Chart
-                series={series as WireSeries}
-                bestLabel={t('axis.best')}
-                legend={{
-                  candidate: t('chart.candidate'),
-                  best: t('chart.bestLine'),
-                  rejected: t('chart.rejectedDot'),
-                }}
-                statusLabel={status => t(`status.${status}`)}
-                markLabels={{
-                  best: t('chart.best'),
-                  final: t('chart.final'),
-                  bestFinal: t('chart.bestFinal'),
-                }}
-                axisShort={t('axis.short')}
-                axisWhy={t('axis.why')}
-                axisHint={mode => t(mode === 'speedup' ? 'axis.hintSpeedup' : 'axis.hintLatency')}
-                driftNote={d => t('axis.drift', {
-                  count: d.count,
-                  min: formatLatency(d.min),
-                  max: formatLatency(d.max),
-                  pct: Math.round((d.ratio - 1) * 100),
-                })}
-              />
+      {iterations.length > 0 ? <>
+        <div className="ko-overview" style={headline.claim === undefined ? { gridTemplateColumns: '1fr' } : undefined}>
+          <Hero headline={headline} referenceMs={pooledReference} pendingCount={pendingCount} t={t} />
+          <div className="ko-chart-card">
+            <div className="ko-section-head"><h2>{t('chart.title')}</h2><small>{t('axis.short')}</small></div>
+            <div className="ko-chart-meta">
+              <span>{t('chips.iterations', { count: optimizationEvals })}</span>
+              {overBudgetEvals > 0 ? <span style={{ color: COLOR.warn }}>{t('chips.overBudget', { count: overBudgetEvals })}</span> : null}
+              {wrapUpChecks > 0 ? <span>{t('chips.wrapup', { count: wrapUpChecks })}</span> : null}
+              {hackCount > 0 ? <span style={{ color: COLOR.bad }}>{t('chips.hacks', { count: hackCount })}</span> : null}
             </div>
-          )
-        : null}
-
-      {/* latest plan (hidden while empty — the guidance block covers it) */}
-      {empty
-        ? null
-        : (
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{t('plan.title')}</span>
-          {latestPlan !== undefined
-            ? (
-                <span style={{ fontSize: 12, color: COLOR.caption }}>
-                  {t('plan.count', { n: plans.length })}
-                </span>
-              )
-            : null}
-          {/* Earlier reports stay one click away: the approach history is how
-              a reader reconstructs WHY the run went where it went. */}
-          {plans.length > 1
-            ? (
-                <span
-                  style={{ fontSize: 12, color: COLOR.curve, cursor: 'pointer' }}
-                  onClick={() => { setPlanHistory(value => !value) }}
-                >
-                  {planHistory ? t('plan.hide') : t('plan.history', { n: plans.length - 1 })}
-                </span>
-              )
-            : null}
+            <Chart series={series as WireSeries} t={t} onInspect={inspectIteration} />
+          </div>
         </div>
-        {latestPlan === undefined
-          ? <div style={{ fontSize: 14, color: COLOR.caption }}>{t('plan.none')}</div>
-          : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{
-                    ...chipStyle,
-                    color: COLOR.curve, borderColor: COLOR.curve,
-                    fontSize: 12, padding: '0 8px',
-                  }}>{latestPlan.phase}</span>
-                  <span style={{ fontSize: 14, fontWeight: 500 }}>{latestPlan.approach}</span>
-                </div>
-                {latestPlan.hypothesis !== undefined
-                  ? <div style={{ fontSize: 13, color: COLOR.dim }}>{latestPlan.hypothesis}</div>
-                  : null}
-                {latestPlan.next !== undefined
-                  ? <div style={{ fontSize: 13, color: COLOR.dim }}>{t('plan.next')} → {latestPlan.next}</div>
-                  : null}
-              </div>
-            )}
-        {planHistory && plans.length > 1
-          ? (
-              <div style={{
-                marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLOR.border}`,
-                display: 'flex', flexDirection: 'column', gap: 8,
-              }}>
-                {plans.slice(0, -1).reverse().map((plan, i) => (
-                  <div key={plan.seq} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, color: COLOR.caption, minWidth: 62 }}>
-                        {t('plan.count', { n: plans.length - 1 - i })}
-                      </span>
-                      <span style={{
-                        ...chipStyle, color: COLOR.caption,
-                        fontSize: 11, padding: '0 7px', lineHeight: '18px',
-                      }}>{plan.phase}</span>
-                      <span style={{ fontSize: 13, color: COLOR.dim }}>{plan.approach}</span>
-                    </div>
-                    {plan.hypothesis !== undefined
-                      ? <div style={{ fontSize: 12, color: COLOR.caption, paddingLeft: 70 }}>{plan.hypothesis}</div>
-                      : null}
-                  </div>
-                ))}
-              </div>
-            )
-          : null}
-      </div>
-          )}
+        <div className="ko-stats">
+          <div className="ko-stat" title={t('tip.iters')}><strong>{optimizationEvals}</strong><span>{t('stats.evals')}</span></div>
+          <div className="ko-stat"><strong>{series?.profileSeqs.length ?? 0}</strong><span>{t('stats.profiles')}</span></div>
+          <div className="ko-stat"><strong>{reviewedRounds.length}</strong><span>{t('stats.reviews')}</span></div>
+          {env !== undefined ? <span className="ko-device" title={`${t('env.reported')} · ${env.device}`}>{env.device.split(/[（(]/)[0]?.trim()}</span> : null}
+        </div>
+      </> : null}
 
-      {/* Everything below is the evidence behind the picture above, and it is
-          folded — not because it matters less, but because all of it at once
-          is why a reader stops at the chart. The current plan stays out here
-          with the curve: it is what the agent is trying RIGHT NOW, which is
-          the live half of the story, while the environment, the supervision
-          log and the per-evaluation record are what a reader consults after
-          the number has landed. The label says "audit record" rather than
-          "details" — the density is this plugin's argument, and one click is
-          the right price for it. */}
-      {empty
-        ? null
-        : (
-            <div
-              style={{
-                display: 'flex', alignItems: 'baseline', gap: 8,
-                padding: '2px 4px', cursor: 'pointer',
-              }}
-              onClick={() => { setAuditOpen(value => !value) }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 600, color: COLOR.curve }}>
-                {auditOpen ? '▾' : '▸'} {t('audit.title')}
-              </span>
-              <span style={{ fontSize: 12, color: COLOR.caption }}>{t('audit.hint')}</span>
-            </div>
-          )}
+      {!empty ? <div className="ko-lower">
+        <section className="ko-plan">
+          <div className="ko-section-head">
+            <h2>{t('plan.title')}</h2>
+            {latestPlan !== undefined ? <small>{t('plan.count', { n: plans.length })}</small> : null}
+          </div>
+          {latestPlan === undefined ? <p className="ko-plan-copy">{t('plan.none')}</p> : <>
+            <span className="ko-phase">{phaseLabel(latestPlan.phase)}</span>
+            <h3>{latestPlan.approach}</h3>
+            <details><summary>{t('plan.details')}</summary>
+              <p>{latestPlan.approach}</p>
+              {latestPlan.hypothesis !== undefined ? <p>{latestPlan.hypothesis}</p> : null}
+              {latestPlan.next !== undefined ? <p>{t('plan.next')} · {latestPlan.next}</p> : null}
+            </details>
+            {plans.length > 1 ? <>
+              <button type="button" className="ko-text-button" aria-expanded={planHistory} onClick={() => { setPlanHistory(value => !value) }}>
+                {planHistory ? t('plan.hide') : t('plan.history', { n: plans.length - 1 })}
+              </button>
+              {planHistory ? <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+                {plans.slice(0, -1).reverse().map(plan => <div key={plan.seq} className="ko-plan-copy">
+                  <span className="ko-phase">{phaseLabel(plan.phase)}</span> {plan.approach}
+                  {plan.hypothesis !== undefined ? <p>{plan.hypothesis}</p> : null}
+                </div>)}
+              </div> : null}
+            </> : null}
+          </>}
+        </section>
+        <section className="ko-recent">
+          <div className="ko-section-head"><h2>{t('recent.title')}</h2>
+            <button type="button" className="ko-text-button" style={{ marginLeft: 'auto' }} onClick={() => { inspectIteration(iterations.length - 1) }}>{t('recent.all')} ↗</button>
+          </div>
+          <div className="ko-recent-list">
+            {iterations.slice(-5).reverse().map((point, i) => {
+              const index = iterations.length - 1 - i
+              const status = statusOf(point)
+              return <button className="ko-recent-row" type="button" key={`${point.seq}-${index}`} onClick={() => { inspectIteration(index) }}>
+                <span className="ko-muted">{String(index + 1).padStart(2, '0')}</span>
+                <span className="ko-recent-file" title={point.artifactPath}>{point.artifactPath !== undefined ? baseName(point.artifactPath) : point.evaluationId ?? '—'}</span>
+                <span>{point.latencyMs !== undefined ? formatLatency(point.latencyMs) : '—'}</span>
+                <strong style={{ color: status === 'ok' ? COLOR.curve : COLOR.caption, fontWeight: 500 }}>{point.speedup !== undefined ? `${point.speedup.toPrecision(3)}×` : '—'}</strong>
+                <span className="ko-recent-status" style={{ color: STATUS_COLOR[status] }}>{t(`status.${status}`)}</span>
+              </button>
+            })}
+          </div>
+        </section>
+      </div> : null}
+
+      {!empty ? <button type="button" className="ko-audit-toggle" aria-expanded={auditOpen} onClick={() => { setAuditOpen(value => !value) }}>
+        <strong>{auditOpen ? '−' : '+'} {t('audit.title')}</strong><small>{t('audit.hint')}</small>
+      </button> : null}
 
       {/* the machine behind the numbers */}
       {empty || !auditOpen ? null : <EnvCard env={env} t={t} />}
@@ -2096,9 +1750,9 @@ export function KernelOptTab(
       {auditOpen && (reviewedRounds.length > 0 || earlierReviews > 0 || control?.supervisor.enabled === true)
         ? (
             <div style={cardStyle}>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('advice.title')}</div>
+              <div style={{ fontSize: 'var(--ko-body, 14px)', fontWeight: 600, marginBottom: 8 }}>{t('advice.title')}</div>
               {reviewedRounds.length === 0
-                ? <div style={{ fontSize: 13, color: COLOR.caption }}>{t('advice.waiting')}</div>
+                ? <div style={{ fontSize: 'var(--ko-body, 13px)', color: COLOR.caption }}>{t('advice.waiting')}</div>
                 : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 260, overflowY: 'auto' }}>
                       {[...reviewedRounds].reverse().map((round, revIndex) => {
@@ -2111,7 +1765,7 @@ export function KernelOptTab(
                         return (
                           <div key={round.seq}>
                             <div
-                              style={{ display: 'flex', gap: 8, fontSize: 13, lineHeight: '24px', cursor: 'pointer' }}
+                              style={{ display: 'flex', gap: 8, fontSize: 'var(--ko-body, 13px)', lineHeight: 'var(--ko-line-body, 24px)', cursor: 'pointer' }}
                               title={t('advice.expandHint')}
                               onClick={() => { setExpandedReview(open ? null : round.seq) }}
                             >
@@ -2158,7 +1812,7 @@ export function KernelOptTab(
                   )}
               {earlierReviews > 0
                 ? (
-                    <div style={{ fontSize: 12, color: COLOR.caption, marginTop: 6 }}>
+                    <div style={{ fontSize: 'var(--ko-small, 12px)', color: COLOR.caption, marginTop: 6 }}>
                       {t('advice.earlier', { n: earlierReviews })}
                     </div>
                   )
@@ -2170,11 +1824,11 @@ export function KernelOptTab(
       {/* iteration table */}
       {auditOpen && iterations.length > 0
         ? (
-            <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '11px 16px', fontSize: 14, fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
+            <div ref={auditRef} style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '11px 16px', fontSize: 'var(--ko-body, 14px)', fontWeight: 600, borderBottom: `1px solid ${COLOR.border}` }}>
                 {t('table.title')}
               </div>
-              <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 420, overflow: 'auto' }}>
                 {[...iterations].reverse().map((p) => {
                   const status = statusOf(p)
                   const idx = iterations.indexOf(p)
@@ -2186,11 +1840,11 @@ export function KernelOptTab(
                     && !iterations.some(q => q.channel === 'replay' && q.artifactPath !== undefined
                       && p.artifactPath !== undefined && samePath(q.artifactPath, p.artifactPath))
                   return (
-                    <div key={idx}>
+                    <div key={idx} data-iteration={idx}>
                       <div
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
-                          padding: '6px 16px', fontSize: 13, lineHeight: '22px',
+                          padding: '6px 16px', fontSize: 'var(--ko-body, 13px)', lineHeight: 'var(--ko-line-body, 22px)', minWidth: 600,
                           borderBottom: `1px solid ${COLOR.border}`,
                           cursor: 'pointer',
                         }}
@@ -2222,7 +1876,7 @@ export function KernelOptTab(
                               <span
                                 title={t('tip.wrapup')}
                                 style={{
-                                  flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
+                                  flex: 'none', fontSize: 'var(--ko-small, 11px)', lineHeight: 'var(--ko-line-small, 16px)', padding: '0 6px',
                                   borderRadius: 4, border: `1px solid ${COLOR.border}`, color: COLOR.caption,
                                 }}
                               >
@@ -2235,7 +1889,7 @@ export function KernelOptTab(
                               <span
                                 title={t('tip.overBudget')}
                                 style={{
-                                  flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
+                                  flex: 'none', fontSize: 'var(--ko-small, 11px)', lineHeight: 'var(--ko-line-small, 16px)', padding: '0 6px',
                                   borderRadius: 4, border: `1px solid ${COLOR.warn}`, color: COLOR.warn,
                                 }}
                               >
@@ -2251,7 +1905,7 @@ export function KernelOptTab(
                               <span
                                 title={t(p.channel === 'replay' ? 'tip.replay' : 'tip.tool')}
                                 style={{
-                                  flex: 'none', fontSize: 11, lineHeight: '16px', padding: '0 6px',
+                                  flex: 'none', fontSize: 'var(--ko-small, 11px)', lineHeight: 'var(--ko-line-small, 16px)', padding: '0 6px',
                                   borderRadius: 4, border: `1px solid ${COLOR.border}`,
                                   color: p.channel === 'replay' ? COLOR.ok : COLOR.caption,
                                 }}
@@ -2414,7 +2068,7 @@ export function ChatLoopButton(
                 {/* Both states get a note: supervision is what gives the loop
                     authority over an early finalize, so its absence is a
                     meaningful choice the user should see stated. */}
-                <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                <div style={{ fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 18px)', color: COLOR.caption }}>
                   {control.supervisor.enabled ? t('pop.supNote') : t('ctl.supOff')}
                 </div>
                 <div style={popoverRowStyle}>
@@ -2446,7 +2100,7 @@ export function ChatLoopButton(
                 >
                   ⟳ {t('ctl.start')}
                 </button>
-                <div style={{ fontSize: 12, lineHeight: '18px', color: COLOR.caption }}>
+                <div style={{ fontSize: 'var(--ko-small, 12px)', lineHeight: 'var(--ko-line-small, 18px)', color: COLOR.caption }}>
                   {t('pop.footer')}
                 </div>
               </div>
@@ -2485,16 +2139,16 @@ export function ChatLoopStrip(
   return (
     // Width rides the composer card's own tokens (the QueueDock recipe), so
     // the strip lines up with the input card instead of spanning the page.
-    <div style={{
+    <div className="ko-strip" style={{
       boxSizing: 'border-box',
       width: 'calc(100% - var(--dsh-composer-side-clearance, 12px) * 2)',
       maxWidth: 'var(--dsh-composer-card-max-width, 800px)',
       margin: '0 auto',
     }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '5px 12px', fontSize: 13, fontFamily: 'system-ui',
-        border: `1px solid ${COLOR.curve}`, borderRadius: 12,
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10,
+        padding: '10px 14px', fontSize: 'var(--ko-body, 13px)', fontFamily: 'system-ui',
+        border: `1px solid ${COLOR.border}`, borderRadius: 12,
         background: COLOR.tip, color: COLOR.text,
       }}>
         <span style={{
@@ -2532,6 +2186,7 @@ export function ChatLoopStrip(
         <button type="button" style={buttonStyle(COLOR.bad)} onClick={() => { void stop() }}>
           ■ {t('ctl.stop')}
         </button>
+        {control.loop.budget > 0 ? <progress className="ko-progress" max={control.loop.budget} value={Math.min(control.loop.evalsDone, control.loop.budget)} aria-label={t('stats.evals')} /> : null}
       </div>
     </div>
   )

@@ -303,7 +303,7 @@ export function samePath(a: string, b: string): boolean {
  * a failed evaluation, and a point that was never timed. Stated here because
  * three places now decide it — the projection picking `bestIndex`, the same
  * projection resolving which measurement of a finalized artifact is the
- * wrap-up pick, and the chart drawing a best-so-far line. A private copy
+ * wrap-up pick, and the headline choosing its result. A private copy
  * would eventually let the panel draw a best no evaluation ever reached.
  *
  * Narrows `latencyMs`, so a caller that passes the guard can compare

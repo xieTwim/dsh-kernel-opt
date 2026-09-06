@@ -15,7 +15,7 @@
  */
 
 import type { WireIteration } from './wire.ts'
-import { eligibleBest, impliedReferences } from './wire.ts'
+import { impliedReferences } from './wire.ts'
 
 /** Human latency: µs under 1 ms, ms under 1 s, s above. */
 export function formatLatency(ms: number): string {
@@ -24,22 +24,7 @@ export function formatLatency(ms: number): string {
   return `${(ms / 1000).toPrecision(3)}s`
 }
 
-/**
- * Chart geometry constants (viewBox units).
- *
- * `b` is deeper than the axis needs because the gutter under the plot is a
- * working row, not margin: unmeasured points, the profiler ▲, the label of
- * the point the headline quotes, and the slowest-point label all live there,
- * on three rows. `h - b` is what every drawn y is anchored to, so growing the
- * two together adds gutter without moving the plot by a pixel.
- *
- * `w` tracks the panel's own content width for one reason: the SVG is drawn
- * at `width: 100%`, so the viewBox scales to fit and takes every font size
- * with it. At 640 units in a 1140px column, an 11-unit label rendered near
- * 20px — the chart's small print came out larger than the panel's body text,
- * which is how a considered type scale turns into an accident. Keeping the
- * units near the rendered pixels makes the numbers here mean what they say.
- */
+/** Default chart frame. The browser supplies its measured width to keep labels in pixels. */
 export const CHART = { w: 1140, h: 372, l: 78, r: 26, t: 24, b: 68 }
 /** Minimum vertical clearance between two axis-gutter labels (viewBox units). */
 export const AXIS_GAP = 18
@@ -68,28 +53,6 @@ export interface ChartModel {
   label: (latencyMs: number, reported?: number) => string
   /** The run's pooled reference latency, when it has one. */
   referenceMs?: number
-}
-
-/**
- * The running best latency after each evaluation, `undefined` until the first
- * eligible one lands.
- *
- * This is what turns the curve from one line into two. Read alone, the
- * chronological series says a run that explores lost ground whenever a
- * candidate comes back slower; beside a monotone best-so-far it says the
- * opposite and truer thing — the agent spends evaluations on candidates that
- * may fail, and the number it will stand behind only ever moves forward.
- * @param measured - the evaluations in log order.
- * @returns one entry per input evaluation, in the same order.
- */
-export function bestSoFar(measured: readonly WireIteration[]): readonly (number | undefined)[] {
-  const out: (number | undefined)[] = []
-  let best: number | undefined
-  for (const point of measured) {
-    if (eligibleBest(point) && (best === undefined || point.latencyMs < best)) best = point.latencyMs
-    out.push(best)
-  }
-  return out
 }
 
 /** Nearest-rank quantile of an ascending-sorted array. */
@@ -127,7 +90,7 @@ export function referenceLatency(measured: readonly WireIteration[]): number | u
  * improvement into a flat line, log axis or not. Points below the band stay
  * visible, pinned to the bottom edge with a ↓ mark and the worst labeled.
  */
-export function chartModel(measured: readonly WireIteration[], count: number): ChartModel | null {
+export function chartModel(measured: readonly WireIteration[], count: number, frame = CHART): ChartModel | null {
   const sorted: number[] = []
   for (const point of measured) {
     if (point.latencyMs !== undefined) sorted.push(point.latencyMs)
@@ -152,18 +115,18 @@ export function chartModel(measured: readonly WireIteration[], count: number): C
   const toAxis = (latencyMs: number): number => (log ? -Math.log10(latencyMs) : 1 / latencyMs)
   const axLo = toAxis(slow)
   const span = toAxis(fast) - axLo || 1
-  const innerW = CHART.w - CHART.l - CHART.r
-  const innerH = CHART.h - CHART.t - CHART.b
+  const innerW = frame.w - frame.l - frame.r
+  const innerH = frame.h - frame.t - frame.b
   const denom = Math.max(1, count - 1)
   // Horizontal inset keeps the first and last points, and the drop line that
   // may hang off one of them, clear of the frame edges.
   const xPad = 14
   const referenceMs = referenceLatency(measured)
   return {
-    x: index => CHART.l + xPad + ((innerW - 2 * xPad) * index) / denom,
+    x: index => frame.l + xPad + ((innerW - 2 * xPad) * index) / denom,
     y: (latencyMs) => {
       const v = Math.max(toAxis(latencyMs), axLo)
-      return CHART.t + innerH * (1 - (v - axLo) / span)
+      return frame.t + innerH * (1 - (v - axLo) / span)
     },
     clamped: latencyMs => latencyMs > slow,
     log,

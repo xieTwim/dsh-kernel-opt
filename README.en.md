@@ -12,9 +12,9 @@
 <p align="center"><b>If you find this useful, please consider giving us a star 🌟</b></p>
 
 <p align="center">
-  <img src="assets/panel.png" width="820" alt="The plugin's evaluation tab after a finished run on one NVIDIA B200: run controls with supervision switched on, above a speedup curve rising from x1.00 to x22.1 over 12 optimization evaluations, three failed evaluations drawn below the axis, the best point starred and finalized, and a note that the loop stopped because the reviewer confirmed no headroom was left." />
+  <img src="assets/panel-focus.png" width="1100" alt="Focus view of a recorded NVIDIA H20 session: 18 optimization evaluations and one wrap-up check, a selected candidate reporting 5.58x speedup, an interactive optimization curve, the current approach, and recent evaluations." />
   <br/>
-  <i>RoPE <code>(4, 32, 4096, 128)</code> fp16 on one NVIDIA B200. 12 evaluations, ×1.00 to ×22.1, every one dividing by the same reference latency frozen at 1.0400 ms.</i>
+  <i>A session on one NVIDIA H20: 18 optimization evaluations and one wrap-up check; the selected candidate measures 292µs and reports a 5.58× speedup.</i>
 </p>
 
 ## News
@@ -37,7 +37,9 @@
 
 **dsh-kernel-opt is a plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) that turns a long kernel-optimization run into something a human can watch and steer.**
 
-The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session leads with **the result the run currently stands behind**, over two lines: **candidate**, what the model measured each round, and **best so far**, a staircase that only steps up when a result passes verification. Candidates that failed sit below the axis and never count toward best. Under the chart is the model's current approach; the environment, the supervisor's notes and the per-evaluation record fold into a **full audit record**.
+The model iterates — read, edit, benchmark, repeat — and an **evaluation tab** in the same session shows the eligible result beside its optimization curve. The result summary compares reference and measured latency. A solid line connects successful measurements in order, keeping the original evaluation positions across failed attempts. Failed candidates use red outlined points and never count toward the best result; evaluations without a measured latency sit below the axis.
+
+Hover, click, or use the keyboard to select a point, then open its source, plan and code changes. The current approach and five most recent evaluations sit below the chart, with environment and supervision details in the full record. **Focus view** fills the screen with the panel for a recording or presentation; press Esc to return to the session.
 
 **Each point carries where it came from and how far it can be trusted** — see the contract below.
 

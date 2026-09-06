@@ -69,6 +69,6 @@ semver 对预发布版本的规则是「只有当某个比较符与它 major/min
 
 ## CI
 
-`.github/workflows/ci.yml` 跑的就是本地那条 `pnpm run check`（两遍 typecheck + 106 个测试 + 双半构建），外加一步 **`lib/` 是否跟得上 `src/`**。
+`.github/workflows/ci.yml` 跑的就是本地那条 `pnpm run check`（两遍 typecheck + 104 个测试 + 双半构建），外加一步 **`lib/` 是否跟得上 `src/`**。
 
 `lib/` 是提交进仓库的（安装免构建），所以源码改了没重新构建时，每个宿主加载的都还是旧的那一半。**这件事在本仓库真实发生过，连续三个版本只活在 `src/` 里。**
