@@ -51,6 +51,15 @@ Everything on the panel is **projected from the session log**; the plugin keeps 
 
 ## Install
 
+### AKO ecosystem integration
+
+DSH can use the AKO Runtime MCP interface for evaluation, recording and submission,
+like any other MCP-capable coding agent. This plugin adds the DSH optimization panel
+and loop; it is optional for platform access. Lingji is the primary agent in the AKO
+trade-fair demo, with DSH available as another agent showing the same integration.
+
+### Installing the plugin
+
 **You need** DeepSeek Harness, and **pnpm on `PATH`** — `dsh plugin` forwards its arguments to pnpm. The panel is part of the DSH **web** UI, so the plugin installs into a web profile.
 
 The plugin itself has nothing to build: `lib/` is committed, so it installs without a build step.

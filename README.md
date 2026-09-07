@@ -50,6 +50,14 @@
 
 ## 安装
 
+### 与 AKO 生态平台的关系
+
+DSH 与其他支持 MCP 的 coding agent 一样，可以通过 AKO Runtime MCP 接口使用平台的评测、记录和提交功能。
+dsh-kernel-opt 提供 DSH 内的优化面板与循环，安装本插件不是平台接入的前提。
+AKO 服贸会主演示 agent 为 lingji（灵玑OS），DSH 可作为另一个 agent 展示同一套接入方式。
+
+### 安装插件
+
 安装需要 DeepSeek Harness，以及 **`PATH` 中有 pnpm**——`dsh plugin` 会把参数转发给 pnpm。面板属于 DSH 的 **web** 界面，所以插件要装进 web profile。
 
 插件本身不需要构建，`lib/` 已经提交进仓库。
